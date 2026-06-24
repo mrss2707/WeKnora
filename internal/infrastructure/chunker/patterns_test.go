@@ -1,6 +1,10 @@
 package chunker
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/Tencent/WeKnora/internal/infrastructure/langdata"
+)
 
 func TestMarkdownHeadingPattern_BasicLevels(t *testing.T) {
 	cases := []struct {
@@ -194,5 +198,57 @@ func TestChapterPatternsForLangs(t *testing.T) {
 	}
 	if got := ChapterPatternsForLangs([]string{"xx"}); len(got) != 5 {
 		t.Errorf("unknown lang should fall back to all 5 (mixed), got %d", len(got))
+	}
+}
+
+func TestVietnameseChapterPattern(t *testing.T) {
+	// Test via langdata registry
+	patterns := ChapterPatternsForLangs([]string{LangVietnamese})
+	if len(patterns) != 2 {
+		t.Fatalf("expected 2 Vietnamese patterns, got %d", len(patterns))
+	}
+	cases := []struct {
+		in    string
+		match bool
+	}{
+		{"Chương 1: Giới thiệu", true},
+		{"Phần 2 Kết quả", true},
+		{"Mục 3. Phương pháp", true},
+		{"Phụ lục A: Dữ liệu", true},
+		{"Chương 10", true},
+		{"chapter 1", false},
+		{"plain text", false},
+	}
+	for _, c := range cases {
+		anyMatch := false
+		for _, p := range patterns {
+			if p.MatchString(c.in) {
+				anyMatch = true
+				break
+			}
+		}
+		if anyMatch != c.match {
+			t.Errorf("VietnameseChapterPattern(%q): got %v want %v", c.in, anyMatch, c.match)
+		}
+	}
+}
+
+func TestVietnamesePageFooter(t *testing.T) {
+	cases := []struct {
+		in    string
+		match bool
+	}{
+		{"Trang 5", true},
+		{"Trang 5/10", true},
+		{"Trang 3 trên 12", true},
+		{"Page 5", false},
+		{"Some text", false},
+	}
+	viData := langdata.Get("vi")
+	for _, c := range cases {
+		got := viData.PageFooterPattern.MatchString(c.in)
+		if got != c.match {
+			t.Errorf("VietnamesePageFooter(%q): got %v want %v", c.in, got, c.match)
+		}
 	}
 }

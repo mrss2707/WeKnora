@@ -76,3 +76,39 @@ func TestCharsForTokenLimit_ZeroTokens(t *testing.T) {
 		t.Errorf("zero tokens should give zero chars, got %d", got)
 	}
 }
+
+func TestDetectLanguage_Vietnamese(t *testing.T) {
+	// Vietnamese text with diacritics should be detected as Latin (not Mixed).
+	got := DetectLanguage("Xin chào Việt Nam, đây là bài kiểm tra")
+	if got == LangMixed {
+		t.Errorf("Vietnamese text should not be LangMixed, got %s", got)
+	}
+	// It will be detected as English (Latin without German markers) — that's acceptable.
+	if got != LangEnglish && got != LangVietnamese {
+		t.Errorf("expected English or Vietnamese, got %s", got)
+	}
+}
+
+func TestDetectLanguage_VietnameseNotMixed(t *testing.T) {
+	// Pure Vietnamese with heavy diacritics must NOT be classified as Mixed.
+	got := DetectLanguage("Người Việt Nam sử dụng tiếng Việt có dấu thanh")
+	if got == LangMixed {
+		t.Errorf("pure Vietnamese should not be LangMixed, got %s", got)
+	}
+}
+
+func TestApproxTokenCount_Vietnamese(t *testing.T) {
+	got := ApproxTokenCount("Xin chào Việt Nam", "vi")
+	// 17 chars / 3.5 ≈ 5 tokens
+	if got < 3 || got > 7 {
+		t.Errorf("Vietnamese token estimate out of range: got %d, want 3..7", got)
+	}
+}
+
+func TestCharsForTokenLimit_Vietnamese(t *testing.T) {
+	got := CharsForTokenLimit(1000, "vi")
+	// 1000 * 3.5 * 0.9 = 3150
+	if got < 3000 || got > 3300 {
+		t.Errorf("char budget for 1000 VI tokens out of range: got %d", got)
+	}
+}
