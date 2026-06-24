@@ -180,7 +180,11 @@ func ProfileDocument(text string) *DocProfile {
 		sample = sample[:4096]
 	}
 	lang := DetectLanguage(sample)
-	p.DetectedLangs = []string{lang}
+	if lang == LangEnglish && hasVietnameseDiacritics(sample) {
+		p.DetectedLangs = []string{lang, "vi"}
+	} else {
+		p.DetectedLangs = []string{lang}
+	}
 	if lang == LangMixed {
 		// Provide all three for downstream pattern selection.
 		p.DetectedLangs = []string{LangEnglish, LangGerman, LangChinese}
@@ -202,6 +206,37 @@ func matchHeading(line string, counts *map[int]int) bool {
 	}
 	(*counts)[level]++
 	return true
+}
+
+// hasVietnameseDiacritics checks whether the text contains Vietnamese-specific
+// diacritical marks (e.g. ă, â, đ, ê, ô, ơ, ư with tone marks). This is a
+// cheap heuristic to distinguish Vietnamese from plain English when the base
+// script is Latin.
+func hasVietnameseDiacritics(s string) bool {
+	const sample = 512
+	if len(s) > sample {
+		s = s[:sample]
+	}
+	for _, r := range s {
+		switch r {
+		case 'ă', 'â', 'đ', 'ê', 'ô', 'ơ', 'ư',
+			'ắ', 'ằ', 'ẳ', 'ẵ', 'ặ',
+			'ấ', 'ầ', 'ẩ', 'ẫ', 'ậ',
+			'ế', 'ề', 'ể', 'ễ', 'ệ',
+			'ố', 'ồ', 'ổ', 'ỗ', 'ộ',
+			'ớ', 'ờ', 'ở', 'ỡ', 'ợ',
+			'ứ', 'ừ', 'ử', 'ữ', 'ự',
+			'À', 'Á', 'Ả', 'Ã', 'Ạ',
+			'È', 'É', 'Ẻ', 'Ẽ', 'Ẹ',
+			'Ì', 'Í', 'Ỉ', 'Ĩ', 'Ị',
+			'Ò', 'Ó', 'Ỏ', 'Õ', 'Ọ',
+			'Ù', 'Ú', 'Ủ', 'Ũ', 'Ụ',
+			'Ỳ', 'Ý', 'Ỷ', 'Ỹ', 'Ỵ',
+			'Đ':
+			return true
+		}
+	}
+	return false
 }
 
 // StrategyTier identifies which chunking implementation should run.
