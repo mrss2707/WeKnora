@@ -25,6 +25,7 @@ var charsPerToken = map[string]float64{
 	LangEnglish: 4.0,
 	LangGerman:  4.5,
 	LangChinese: 1.7,
+	"vi":        3.5,
 	LangMixed:   3.0,
 }
 
@@ -73,7 +74,7 @@ func DetectLanguage(s string) string {
 		case isGermanUmlaut(r):
 			umlaut++
 			latin++
-		case (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z'):
+		case unicode.Is(unicode.Latin, r):
 			latin++
 		}
 	}
