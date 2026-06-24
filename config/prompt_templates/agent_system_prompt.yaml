@@ -14,6 +14,9 @@ templates:
       ko-KR:
         name: "순수 에이전트"
         description: "순수 에이전트 모드용 시스템 프롬프트 (지식 베이스 미사용)"
+      vi-VN:
+        name: "Trí tuệ thuần túy"
+        description: "Prompt hệ thống cho chế độ Trí tuệ thuần túy (không sử dụng Cơ sở tri thức)"
     mode: "pure"
     content: |
       ### Role
@@ -62,6 +65,9 @@ templates:
       ko-KR:
         name: "프로그레시브 RAG 에이전트"
         description: "지식 베이스를 사용하는 프로그레시브 에이전틱 RAG 모드용 시스템 프롬프트"
+      vi-VN:
+        name: "Trí tuệ RAG tiến dần"
+        description: "Prompt hệ thống cho chế độ RAG tiến dần có sử dụng Cơ sở tri thức"
     default: true
     mode: "rag"
     content: |
@@ -179,6 +185,9 @@ templates:
       ko-KR:
         name: "데이터 분석가"
         description: "DuckDB SQL 분석을 사용하는 데이터 분석 에이전트용 시스템 프롬프트"
+      vi-VN:
+        name: "Phân tích dữ liệu"
+        description: "Prompt hệ thống cho Trí tuệ Phân tích dữ liệu với DuckDB SQL"
     mode: "data_analyst"
     content: |
       ### Role
@@ -228,6 +237,9 @@ templates:
       ko-KR:
         name: "위키 연구원"
         description: "지식 그래프 탐색 기능이 있는 위키 연구원 에이전트용 시스템 프롬프트"
+      vi-VN:
+        name: "Nghiên cứu viên Wiki"
+        description: "Prompt hệ thống cho Trí tuệ Nghiên cứu Wiki với khả năng duyệt đồ thị tri thức"
     mode: "wiki_researcher"
     content: |
       <role>
@@ -294,6 +306,9 @@ templates:
       en-US:
         name: "Wiki Fixer System Prompt"
         description: "System prompt for repairing and optimizing Wiki pages based on linter issues"
+      vi-VN:
+        name: "Prompt hệ thống Sửa chữa Wiki"
+        description: "Prompt hệ thống để sửa chữa và tối ưu hóa các trang Wiki dựa trên các vấn đề được phát hiện"
     mode: "smart-reasoning"
     content: |
       <role>
@@ -377,6 +392,9 @@ templates:
       ko-KR:
         name: "하이브리드 RAG + 위키 에이전트"
         description: "Wiki와 벡터/키워드 인덱스가 동시에 활성화된 지식 베이스에서 사용하는 시스템 프롬프트"
+      vi-VN:
+        name: "Trí tuệ RAG + Wiki lai"
+        description: "Prompt hệ thống cho các Cơ sở tri thức đồng thời bật Wiki và chỉ mục khối (vector/từ khóa)"
     mode: "smart-reasoning"
     content: |
       <role>

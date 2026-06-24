@@ -3,6 +3,19 @@ templates:
   - id: "default_keywords_extraction"
     name: "Standard Keywords Extraction"
     description: "Extract important keywords from user's question for retrieval"
+    i18n:
+      zh-CN:
+        name: "标准关键词抽取"
+        description: "从用户问题中抽取重要关键词用于检索"
+      en-US:
+        name: "Standard Keywords Extraction"
+        description: "Extract important keywords from user's question for retrieval"
+      ko-KR:
+        name: "표준 키워드 추출"
+        description: "검색을 위해 사용자 질문에서 중요한 키워드를 추출합니다"
+      vi-VN:
+        name: "Trích xuất từ khóa chuẩn"
+        description: "Trích xuất các từ khóa quan trọng từ câu hỏi của người dùng để truy xuất"
     default: true
     content: |
       # Role

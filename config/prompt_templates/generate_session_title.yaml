@@ -3,6 +3,19 @@ templates:
   - id: "default_session_title"
     name: "Standard Title"
     description: "Generate a concise session title from user's question"
+    i18n:
+      zh-CN:
+        name: "标准标题"
+        description: "根据用户问题生成简洁的会话标题"
+      en-US:
+        name: "Standard Title"
+        description: "Generate a concise session title from user's question"
+      ko-KR:
+        name: "표준 제목"
+        description: "사용자 질문에서 간결한 세션 제목을 생성합니다"
+      vi-VN:
+        name: "Tiêu đề chuẩn"
+        description: "Tạo tiêu đề phiên ngắn gọn từ câu hỏi của người dùng"
     default: true
     content: |
       Generate a short session title based on the user's question.

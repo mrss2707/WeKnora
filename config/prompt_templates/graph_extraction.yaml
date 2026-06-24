@@ -4,6 +4,19 @@ templates:
   - id: "default_extract_entities"
     name: "Entity Extraction"
     description: "Extract entities from text for knowledge graph construction"
+    i18n:
+      zh-CN:
+        name: "实体抽取"
+        description: "从文本中抽取实体用于知识图谱构建"
+      en-US:
+        name: "Entity Extraction"
+        description: "Extract entities from text for knowledge graph construction"
+      ko-KR:
+        name: "개체 추출"
+        description: "지식 그래프 구성을 위해 텍스트에서 개체를 추출합니다"
+      vi-VN:
+        name: "Trích xuất thực thể"
+        description: "Trích xuất thực thể từ văn bản để xây dựng đồ thị tri thức"
     default: true
     content: |
       ## Task
@@ -94,6 +107,19 @@ templates:
   - id: "default_extract_relationships"
     name: "Relationship Extraction"
     description: "Extract relationships between entities for knowledge graph construction"
+    i18n:
+      zh-CN:
+        name: "关系抽取"
+        description: "抽取实体间的关系用于知识图谱构建"
+      en-US:
+        name: "Relationship Extraction"
+        description: "Extract relationships between entities for knowledge graph construction"
+      ko-KR:
+        name: "관계 추출"
+        description: "지식 그래프 구성을 위해 개체 간 관계를 추출합니다"
+      vi-VN:
+        name: "Trích xuất mối quan hệ"
+        description: "Trích xuất mối quan hệ giữa các thực thể để xây dựng đồ thị tri thức"
     default: true
     content: |
       ## Task

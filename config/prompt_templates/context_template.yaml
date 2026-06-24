@@ -13,6 +13,9 @@ templates:
       ko-KR:
         name: "표준 템플릿"
         description: "참조 및 질문을 명확하게 표시하는 기본 상황별 템플릿"
+      vi-VN:
+        name: "Mẫu chuẩn"
+        description: "Mẫu ngữ cảnh cơ bản với tài liệu tham khảo và câu hỏi rõ ràng"
     default: true
     has_knowledge_base: true
     content: |
@@ -37,6 +40,9 @@ templates:
       ko-KR:
         name: "상세 템플릿"
         description: "자세한 지침과 답변 요구 사항이 포함된 완전한 템플릿"
+      vi-VN:
+        name: "Mẫu chi tiết"
+        description: "Mẫu đầy đủ với hướng dẫn và yêu cầu trả lời chi tiết"
     has_knowledge_base: true
     content: |
       ## Task Description
@@ -72,6 +78,9 @@ templates:
       ko-KR:
         name: "간단한 템플릿"
         description: "간단한 Q&A 시나리오에 적합한 간소화된 템플릿 형식"
+      vi-VN:
+        name: "Mẫu đơn giản"
+        description: "Định dạng mẫu tối giản cho các kịch bản Hỏi-Đáp đơn giản"
     has_knowledge_base: true
     content: |
       Reference materials:
@@ -94,6 +103,9 @@ templates:
       ko-KR:
         name: "Q&A 템플릿"
         description: "Q&A 시나리오에 최적화된 템플릿"
+      vi-VN:
+        name: "Mẫu Hỏi-Đáp"
+        description: "Mẫu được tối ưu hóa cho các kịch bản Hỏi-Đáp"
     has_knowledge_base: true
     content: |
       You need to answer a question. Below are potentially relevant materials:
