@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"unicode"
 	"unicode/utf8"
 
 	"github.com/Tencent/WeKnora/internal/logger"
@@ -967,15 +968,40 @@ func fromQdrantVectorEmbedding(id string,
 	}
 }
 
+// containsCJK checks whether a string contains any CJK (Chinese/Korean) characters.
+func containsCJK(text string) bool {
+	for _, r := range text {
+		if unicode.Is(unicode.Han, r) || unicode.Is(unicode.Hangul, r) {
+			return true
+		}
+	}
+	return false
+}
+
 // tokenizeQuery splits a query string into tokens for OR-based full-text search.
-// It uses jieba for professional Chinese word segmentation.
+// For CJK queries it uses jieba word segmentation; otherwise whitespace splitting.
 func tokenizeQuery(query string) []string {
 	query = strings.TrimSpace(query)
 	if query == "" {
 		return nil
 	}
 
-	// Use jieba for segmentation (search mode for better recall)
+	// Non-CJK queries: simple whitespace split (e.g. Vietnamese, English)
+	if !containsCJK(query) {
+		seen := make(map[string]bool)
+		result := make([]string, 0)
+		for _, token := range strings.Fields(query) {
+			token = strings.TrimSpace(strings.ToLower(token))
+			if token == "" || seen[token] {
+				continue
+			}
+			seen[token] = true
+			result = append(result, token)
+		}
+		return result
+	}
+
+	// Use jieba for CJK segmentation (search mode for better recall)
 	words := types.Jieba.CutForSearch(query, true)
 
 	// Filter and deduplicate
