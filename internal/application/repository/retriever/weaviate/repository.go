@@ -100,7 +100,14 @@ func (w *weaviateRepository) ensureCollection(ctx context.Context, dimension int
 				{
 					Name:         fieldContent,
 					DataType:     []string{"text"},
-					Tokenization: "gse",
+					// NOTE: "gse" is a CJK-oriented tokenizer. For non-CJK languages
+				// (Vietnamese, English, etc.) BM25 keyword search may be suboptimal
+				// because gse segmentation doesn't respect word boundaries in those
+				// languages. Vector (semantic) search is unaffected. Changing this
+				// requires dropping and recreating the collection — no migration path
+				// exists. The query tokenizer (tokenizeQuery) already dispatches
+				// non-CJK queries via whitespace split to mitigate search-side impact.
+				Tokenization: "gse",
 				},
 				{
 					Name:     fieldSourceID,
