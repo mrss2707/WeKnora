@@ -72,7 +72,11 @@ templates:
       ko-KR:
         name: "간단한 폴백"
         description: "대답할 수 없는 짧은 프롬프트"
-    content: "Sorry, I'm unable to answer this question at the moment. Please try rephrasing your question, or contact customer support."
+    content: |
+      Sorry, I'm unable to answer this question at the moment. Please try rephrasing your question, or contact customer support.
+
+      ## CRITICAL: Language Rule
+      - ALWAYS respond in {{language}}
 
   # --- Model fallback prompt templates (for fallback_strategy = "model") ---
   - id: "model_fallback"

@@ -21,6 +21,9 @@ templates:
 
       {{query}}
 
+      ## CRITICAL: Language Rule
+      - ALWAYS respond in {{language}}
+
   - id: "detailed_context"
     name: "Detailed Template"
     description: "Context template with detailed instructions"
