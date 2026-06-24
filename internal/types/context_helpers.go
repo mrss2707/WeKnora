@@ -131,6 +131,25 @@ func LanguageNameFromContext(ctx context.Context) string {
 	return LanguageLocaleName(lang)
 }
 
+// AcceptLanguageHeader returns a well-formed Accept-Language header value
+// derived from the request context's language locale.
+// Falls back to "zh-CN,zh;q=0.9,en;q=0.8" when no locale is set.
+func AcceptLanguageHeader(ctx context.Context) string {
+	lang, ok := LanguageFromContext(ctx)
+	if !ok {
+		lang = DefaultLanguage()
+	}
+	// Extract base language (e.g. "vi" from "vi-VN")
+	base := lang
+	if idx := strings.Index(lang, "-"); idx > 0 {
+		base = lang[:idx]
+	}
+	if base == lang || base == "en" {
+		return lang + ",en;q=0.9"
+	}
+	return lang + "," + base + ";q=0.9,en;q=0.8"
+}
+
 // LanguageLocaleName maps a locale code to a human-readable language name for LLM prompts.
 func LanguageLocaleName(locale string) string {
 	switch locale {
