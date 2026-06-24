@@ -3839,6 +3839,7 @@ export default {
     enUS: 'English',
     ruRU: 'Русский',
     koKR: '한국어',
+    viVN: 'Tiếng Việt',
     selectLanguage: 'Select Language',
     language: 'Language',
     languageDescription: 'Select interface display language',
