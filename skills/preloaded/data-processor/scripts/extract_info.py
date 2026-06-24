@@ -99,6 +99,7 @@ def extract_phones(text: str) -> list:
         r'1[3-9]\d{9}',                           # 手机号
         r'\d{3,4}[-\s]?\d{7,8}',                  # 固话
         r'\+\d{1,3}[-\s]?\d{10,12}',             # 国际号码
+        r'0[35789]\d{8}',                         # 越南手机号 (03x/05x/07x/08x/09x, 10位)
     ]
     
     phones = []
@@ -110,24 +111,37 @@ def extract_phones(text: str) -> list:
 
 
 def extract_keywords(text: str, min_len: int = 2) -> list:
-    """提取关键词（中文和英文）"""
+    """提取关键词（中文、英文、越南文）"""
     # 中文关键词
     chinese_pattern = r'[\u4e00-\u9fa5]{2,}'
     chinese_words = re.findall(chinese_pattern, text)
-    
+
     # 英文关键词
     english_pattern = r'[a-zA-Z]{3,}'
     english_words = re.findall(english_pattern, text)
-    
+
+    # 越南文关键词 (Latin with diacritics, min 2 chars)
+    vietnamese_pattern = r'[\u00C0-\u024F\u1E00-\u1EFF]{2,}'
+    vietnamese_words = re.findall(vietnamese_pattern, text)
+
     # 统计词频
     from collections import Counter
-    words = chinese_words + [w.lower() for w in english_words]
-    
+    words = chinese_words + [w.lower() for w in english_words] + [w.lower() for w in vietnamese_words]
+
     # 过滤停用词
-    stopwords = {'的', '是', '在', '了', '和', '与', '或', '为', '有', '这', '那', '等',
-                 'the', 'is', 'are', 'was', 'were', 'and', 'or', 'for', 'with', 'this'}
+    stopwords = {
+        # Chinese
+        '的', '是', '在', '了', '和', '与', '或', '为', '有', '这', '那', '等',
+        # English
+        'the', 'is', 'are', 'was', 'were', 'and', 'or', 'for', 'with', 'this',
+        # Vietnamese
+        'và', 'của', 'là', 'có', 'được', 'cho', 'với', 'từ', 'này', 'đó',
+        'các', 'những', 'một', 'đã', 'đang', 'sẽ', 'không', 'hay', 'hoặc',
+        'nhưng', 'vì', 'nếu', 'khi', 'trong', 'cũng', 'như', 'thì', 'rất',
+        'còn', 'đã', 'nữa', 'lại', 'đều', 'đến', 'tại', 'về', 'sau', 'trước',
+    }
     words = [w for w in words if w not in stopwords and len(w) >= min_len]
-    
+
     word_freq = Counter(words)
     return [{"word": w, "count": c} for w, c in word_freq.most_common(20)]
 
