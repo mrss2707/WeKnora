@@ -13,10 +13,11 @@ import (
 
 // Language identifiers used by the token estimator and the heuristic splitter.
 const (
-	LangEnglish = "en"
-	LangGerman  = "de"
-	LangChinese = "zh"
-	LangMixed   = "mixed"
+	LangEnglish  = "en"
+	LangGerman   = "de"
+	LangChinese  = "zh"
+	LangVietnamese = "vi"
+	LangMixed    = "mixed"
 )
 
 // charsPerToken holds approximate chars/token ratios per language.

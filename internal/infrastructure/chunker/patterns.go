@@ -6,7 +6,11 @@
 // candidate chunk boundaries.
 package chunker
 
-import "regexp"
+import (
+	"regexp"
+
+	"github.com/Tencent/WeKnora/internal/infrastructure/langdata"
+)
 
 // BoundaryPriority levels for heuristic chunk boundaries. Higher = stronger.
 const (
@@ -65,7 +69,7 @@ func SentenceSeparators(lang string) []string {
 	switch lang {
 	case LangChinese:
 		return []string{"。", "！", "？", "；", "\n"}
-	case LangGerman, LangEnglish:
+	case LangGerman, LangEnglish, LangVietnamese:
 		return []string{". ", "! ", "? ", "; ", "\n"}
 	default:
 		return []string{"。", "！", "？", "；", ". ", "! ", "? ", "; ", "\n"}
@@ -75,23 +79,19 @@ func SentenceSeparators(lang string) []string {
 // ChapterPatternsForLangs returns the chapter-marker regexes that apply for
 // the given language hints. An empty / unknown list returns all of them so
 // that auto-detected documents still match.
+// Patterns are loaded from the langdata registry; adding a new language only
+// requires creating a lang_XX.go file in the langdata package.
 func ChapterPatternsForLangs(langs []string) []*regexp.Regexp {
 	if len(langs) == 0 {
-		return []*regexp.Regexp{GermanChapterPattern, EnglishChapterPattern, ChineseChapterPattern}
+		// Return all patterns from the mixed-language fallback.
+		return langdata.Get("mixed").ChapterPatterns
 	}
 	var out []*regexp.Regexp
 	for _, l := range langs {
-		switch l {
-		case LangGerman:
-			out = append(out, GermanChapterPattern)
-		case LangEnglish:
-			out = append(out, EnglishChapterPattern)
-		case LangChinese:
-			out = append(out, ChineseChapterPattern)
-		}
+		out = append(out, langdata.Get(l).ChapterPatterns...)
 	}
 	if len(out) == 0 {
-		out = []*regexp.Regexp{GermanChapterPattern, EnglishChapterPattern, ChineseChapterPattern}
+		return langdata.Get("mixed").ChapterPatterns
 	}
 	return out
 }

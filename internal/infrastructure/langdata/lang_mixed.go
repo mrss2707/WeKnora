@@ -47,6 +47,9 @@ func init() {
 			regexp.MustCompile(`(?m)^[ \t]*(?:Kapitel|Abschnitt|Teil)\s+(?:[0-9]+|[IVX]{1,5})[\.: ].{0,200}$`),
 			// Chinese
 			regexp.MustCompile(`(?m)^[ \t]*第[ \t]*[一二三四五六七八九十百千零〇0-9]+[ \t]*(?:章|节|節|部分|篇)[ \t]?.{0,200}$`),
+			// Vietnamese
+			regexp.MustCompile(`(?m)^[ \t]*(?:Chương|Phần|Mục|Phụ lục)\s+(?:[0-9]+|[IVX]{1,5}|[A-Z])[\.: ].{0,200}$`),
+			regexp.MustCompile(`(?m)^[ \t]*Chương\s+[0-9]{1,3}[ \t]*$`),
 		},
 		PageFooterPattern: regexp.MustCompile(
 			`(?mi)^[ \t]*(?:Page|Seite|Trang|第?\s*页?\s*)\s*\d+(?:\s*(?:of|von|trên|\/|共)\s*\d+)?[ \t]*$`,
