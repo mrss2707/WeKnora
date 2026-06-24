@@ -7,6 +7,7 @@ import (
 	"sync"
 	"unicode"
 
+	"github.com/Tencent/WeKnora/internal/infrastructure/langdata"
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
@@ -127,8 +128,11 @@ func (p *PluginSearch) expandQueries(ctx context.Context, chatManage *types.Chat
 		expansions = append(expansions, s)
 	}
 
+	// Detect query language for langdata lookups
+	lang := detectQueryLang(query)
+
 	// 1. Remove common stopwords and create keyword-only variant
-	keywords := extractKeywords(query)
+	keywords := extractKeywords(query, lang)
 	if len(keywords) >= 2 {
 		addIfNew(strings.Join(keywords, " "))
 	}
@@ -148,7 +152,7 @@ func (p *PluginSearch) expandQueries(ctx context.Context, chatManage *types.Chat
 	}
 
 	// 4. Remove question words (什么/如何/怎么/为什么/哪个 etc.)
-	cleaned := removeQuestionWords(query)
+	cleaned := removeQuestionWords(query, lang)
 	if cleaned != query {
 		addIfNew(cleaned)
 	}
@@ -164,23 +168,57 @@ func (p *PluginSearch) expandQueries(ctx context.Context, chatManage *types.Chat
 	return expansions
 }
 
-// Common Chinese and English stopwords
-var stopwords = map[string]struct{}{
-	"的": {}, "是": {}, "在": {}, "了": {}, "和": {}, "与": {}, "或": {},
-	"a": {}, "an": {}, "the": {}, "is": {}, "are": {}, "was": {}, "were": {},
-	"be": {}, "been": {}, "being": {}, "have": {}, "has": {}, "had": {},
-	"do": {}, "does": {}, "did": {}, "will": {}, "would": {}, "could": {},
-	"should": {}, "may": {}, "might": {}, "must": {}, "can": {},
-	"to": {}, "of": {}, "in": {}, "for": {}, "on": {}, "with": {}, "at": {},
-	"by": {}, "from": {}, "as": {}, "into": {}, "through": {}, "about": {},
-	"what": {}, "how": {}, "why": {}, "when": {}, "where": {}, "which": {},
-	"who": {}, "whom": {}, "whose": {},
+// detectQueryLang returns a language code based on a simple heuristic:
+// CJK characters -> "zh", Vietnamese diacritics -> "vi", otherwise -> "en".
+func detectQueryLang(text string) string {
+	var hasCJK, hasVietnamese bool
+	for _, r := range text {
+		if unicode.Is(unicode.Han, r) {
+			hasCJK = true
+		}
+		if r >= 0x00C0 && r <= 0x024F && r != 0x00D7 && r != 0x00F7 {
+			// Common Latin Extended characters used in Vietnamese diacritics
+			hasVietnamese = true
+		}
+		if hasCJK && hasVietnamese {
+			return "mixed"
+		}
+	}
+	if hasCJK {
+		return "zh"
+	}
+	if hasVietnamese {
+		return "vi"
+	}
+	return "en"
 }
 
-// Question words in Chinese
-var questionWords = regexp.MustCompile(`^(什么是|什么|如何|怎么|怎样|为什么|为何|哪个|哪些|谁|何时|何地|请问|请告诉我|帮我|我想知道|我想了解)`)
+// buildQuestionWordsRegex builds a compiled regex from the question words list.
+// Words are sorted longest-first so the alternation is greedy.
+func buildQuestionWordsRegex(words []string) *regexp.Regexp {
+	if len(words) == 0 {
+		return regexp.MustCompile(`^$`)
+	}
+	// Sort by length descending so longest match comes first
+	sorted := make([]string, len(words))
+	copy(sorted, words)
+	for i := 0; i < len(sorted)-1; i++ {
+		for j := i + 1; j < len(sorted); j++ {
+			if len(sorted[j]) > len(sorted[i]) {
+				sorted[i], sorted[j] = sorted[j], sorted[i]
+			}
+		}
+	}
+	escaped := make([]string, len(sorted))
+	for i, w := range sorted {
+		escaped[i] = regexp.QuoteMeta(w)
+	}
+	pattern := `^(?:` + strings.Join(escaped, "|") + `)`
+	return regexp.MustCompile(pattern)
+}
 
-func extractKeywords(text string) []string {
+func extractKeywords(text string, lang string) []string {
+	stopwords := langdata.Get(lang).Stopwords
 	words := tokenize(text)
 	keywords := make([]string, 0, len(words))
 	for _, w := range words {
@@ -219,8 +257,9 @@ func splitByDelimiters(text string) []string {
 	return result
 }
 
-func removeQuestionWords(text string) string {
-	return strings.TrimSpace(questionWords.ReplaceAllString(text, ""))
+func removeQuestionWords(text string, lang string) string {
+	qwRegex := buildQuestionWordsRegex(langdata.Get(lang).QuestionWords)
+	return strings.TrimSpace(qwRegex.ReplaceAllString(text, ""))
 }
 
 func tokenize(text string) []string {
