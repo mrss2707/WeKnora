@@ -71,8 +71,8 @@ func splitSentences(text string) []string {
 }
 
 func splitIntoWords(sentences []string) []string {
-	// 正则匹配中英文段落（中文块、英文块、其他字符）
-	re := regexp.MustCompile(`([\p{Han}]+)|([a-zA-Z0-9_.,!?]+)|(\p{P})`)
+	// 正则匹配中英文段落（中文块、Unicode字母数字块、标点符号）
+	re := regexp.MustCompile(`([\p{Han}]+)|([\p{L}\p{N}]+)|(\p{P})`)
 
 	var tokens []string
 	for _, text := range sentences {
