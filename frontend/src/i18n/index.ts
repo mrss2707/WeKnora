@@ -3,12 +3,14 @@ import zhCN from './locales/zh-CN.ts'
 import ruRU from './locales/ru-RU.ts'
 import enUS from './locales/en-US.ts'
 import koKR from './locales/ko-KR.ts'
+import viVN from './locales/vi-VN.ts'
 
 const messages = {
   'zh-CN': zhCN,
   'en-US': enUS,
   'ru-RU': ruRU,
-  'ko-KR': koKR
+  'ko-KR': koKR,
+  'vi-VN': viVN
 }
 
 // Получаем сохраненный язык из localStorage или используем китайский по умолчанию

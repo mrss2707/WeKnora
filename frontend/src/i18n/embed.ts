@@ -1024,7 +1024,71 @@ const ruEmbedPublish = {
   },
 } as const
 
-const SUPPORTED_LOCALES = ['zh-CN', 'en-US', 'ko-KR', 'ru-RU'] as const
+const viEmbedPublish = {
+  embedPublish: {
+    title: 'Nhúng vào trang web',
+    description: 'Nhúng agent vào trang web của bạn để khách truy cập có thể trò chuyện qua cửa sổ chat hoặc nút nổi.',
+    create: 'Tạo kênh nhúng mới',
+    empty: 'Chưa có kênh nhúng nào',
+    unnamed: 'Chưa đặt tên',
+    loading: 'Đang tải...',
+    awaitingToken: 'Đang chờ token từ trang chủ...',
+    defaultChatTitle: 'Trợ lý AI',
+    newChat: 'Cuộc trò chuyện mới',
+    preview: 'Xem trước',
+    previewIframeHint: 'Mô phỏng cách iframe nhúng hiển thị trên trang bên ngoài.',
+    previewWidgetHint: 'Hiển thị widget nổi trên trang giả lập.',
+    previewMockPage: 'Trang giả lập',
+    previewLoading: 'Đang tải xem trước...',
+    channelDisabled: 'Kích hoạt kênh nhúng đã bị tắt. Bật lại trong trình chỉnh sửa agent → Nhúng trang web',
+    invalidChannel: 'Kênh nhúng không hợp lệ',
+    sessionFailed: 'Không thể tạo phiên trò chuyện, vui lòng thử lại sau',
+    missingChannel: 'Thiếu kênh nhúng hoặc token',
+    loadError: 'Tải thất bại',
+  },
+  common: {
+    loading: 'Đang tải...',
+    confirm: 'Xác nhận',
+    cancel: 'Hủy',
+    copy: 'Sao chép',
+    copied: 'Đã sao chép',
+  },
+  error: {
+    tokenNotFound: 'Không tìm thấy token đăng nhập, vui lòng đăng nhập lại',
+    invalidImageLink: 'Liên kết hình ảnh không hợp lệ',
+    streamFailed: 'Kết nối luồng thất bại',
+  },
+  chat: {
+    suggestedQuestions: 'Bạn có thể hỏi như thế này',
+    imageTooMany: 'Chỉ có thể tải lên tối đa 5 hình ảnh',
+    imageTypeSizeError: 'Chỉ hỗ trợ JPG/PNG/GIF/WEBP, mỗi tệp tối đa 10MB',
+    imageReadFailed: 'Không thể đọc hình ảnh',
+  },
+  input: {
+    placeholder: 'Đặt câu hỏi cho mô hình',
+    stopGeneration: 'Dừng tạo',
+    send: 'Gửi',
+    webSearch: {
+      label: 'Tìm kiếm web',
+      toggleOn: 'Bật tìm kiếm web',
+      toggleOff: 'Tắt tìm kiếm web',
+      agentDisabled: 'Tìm kiếm web chưa được bật cho agent này',
+    },
+    imageUpload: {
+      label: 'Tải lên hình ảnh',
+      tooltip: 'Tải lên hình ảnh',
+      agentDisabled: 'Tải lên hình ảnh chưa được bật cho agent này',
+    },
+    messages: {
+      webSearchEnabled: 'Đã bật tìm kiếm web',
+      webSearchDisabled: 'Đã tắt tìm kiếm web',
+      stopSuccess: 'Đã dừng tạo',
+      stopFailed: 'Dừng thất bại. Vui lòng thử lại.',
+    },
+  },
+} as const
+
+const SUPPORTED_LOCALES = ['zh-CN', 'en-US', 'ko-KR', 'ru-RU', 'vi-VN'] as const
 export type EmbedLocale = (typeof SUPPORTED_LOCALES)[number]
 
 /** Isolated from the main app `locale` key so embed preview never hijacks admin UI language. */
@@ -1036,6 +1100,7 @@ export function normalizeEmbedLocale(raw: string): EmbedLocale {
   if (s.startsWith('en')) return 'en-US'
   if (s.startsWith('ko')) return 'ko-KR'
   if (s.startsWith('ru')) return 'ru-RU'
+  if (s.startsWith('vi')) return 'vi-VN'
   if (s.startsWith('zh')) return 'zh-CN'
   const exact = SUPPORTED_LOCALES.find((l) => l.toLowerCase() === s)
   return exact || 'zh-CN'
@@ -1080,6 +1145,7 @@ const i18n = createI18n({
     'en-US': messages['en-US'],
     'ko-KR': deepMerge(messages['en-US'], koEmbedPublish),
     'ru-RU': deepMerge(messages['en-US'], ruEmbedPublish),
+    'vi-VN': deepMerge(messages['en-US'], viEmbedPublish),
   },
 })
 

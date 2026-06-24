@@ -582,6 +582,7 @@ const defaultLocaleOptions = computed(() => ([
   { label: 'English', value: 'en-US' },
   { label: '한국어', value: 'ko-KR' },
   { label: 'Русский', value: 'ru-RU' },
+  { label: 'Tiếng Việt', value: 'vi-VN' },
 ]))
 
 const channelMenuOptions = computed(() => ([
