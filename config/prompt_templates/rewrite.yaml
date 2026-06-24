@@ -79,38 +79,74 @@ templates:
       Input: "你好"
       Output: {"rewrite_query":"你好","intent":"greeting","image_description":""}
 
+      Input: "Xin chào"
+      Output: {"rewrite_query":"Xin chào","intent":"greeting","image_description":""}
+
       Input: "什么是RAG架构" (no history)
       Output: {"rewrite_query":"什么是RAG架构","intent":"kb_search","image_description":""}
 
+      Input: "RAG kiến trúc là gì" (no history)
+      Output: {"rewrite_query":"RAG kiến trúc là gì","intent":"kb_search","image_description":""}
+
       Input: "它和传统搜索有什么区别" (history mentions RAG)
       Output: {"rewrite_query":"RAG架构和传统搜索有什么区别","intent":"kb_search","image_description":""}
+
+      Input: "Nó khác gì so với tìm kiếm truyền thống" (history mentions RAG)
+      Output: {"rewrite_query":"RAG kiến trúc khác gì so với tìm kiếm truyền thống","intent":"kb_search","image_description":""}
 
       Input: "再帮我查查他的信息" (history discusses 张三)
       Output: {"rewrite_query":"张三的详细信息是什么","intent":"kb_search","image_description":""}
       WRONG output: {"rewrite_query":"请重新在知识库中查找关于张三的更多信息","intent":"kb_search","image_description":""}
       (WRONG: contains meta-instruction "在知识库中查找" instead of actual search keywords)
 
+      Input: "Cho tôi xem thêm thông tin về anh ấy" (history discusses Nguyễn Văn A)
+      Output: {"rewrite_query":"Thông tin chi tiết về Nguyễn Văn A là gì","intent":"kb_search","image_description":""}
+      WRONG output: {"rewrite_query":"Vui lòng tìm kiếm trong cơ sở tri thức thông tin thêm về Nguyễn Văn A","intent":"kb_search","image_description":""}
+      (WRONG: contains meta-instruction "tìm kiếm trong cơ sở tri thức" instead of actual search keywords)
+
       Input: "上面第二点再展开讲讲" (history has detailed answer with numbered points)
       Output: {"rewrite_query":"请展开讲讲上面回答中的第二点","intent":"follow_up","image_description":""}
+
+      Input: "Hãy trình bày chi tiết hơn về điểm thứ hai ở trên" (history has detailed answer with numbered points)
+      Output: {"rewrite_query":"Hãy trình bày chi tiết hơn về điểm thứ hai trong câu trả lời ở trên","intent":"follow_up","image_description":""}
 
       Input: [image attached] "知识库有没有类似的文件" (image shows a project architecture diagram about microservices)
       Output: {"rewrite_query":"有没有关于微服务项目架构的文件","intent":"kb_search","image_description":"(image description here)"}
 
+      Input: [image attached] "Cơ sở tri thức có tài liệu tương tự không" (image shows a project architecture diagram about microservices)
+      Output: {"rewrite_query":"Có tài liệu nào về kiến trúc dự án vi dịch vụ không","intent":"kb_search","image_description":"(image description here)"}
+
       Input: [image attached] "这张图是什么意思"
       Output: {"rewrite_query":"这张图是什么意思","intent":"image_only","image_description":"(image description here)"}
+
+      Input: [image attached] "Hình này có ý nghĩa gì"
+      Output: {"rewrite_query":"Hình này có ý nghĩa gì","intent":"image_only","image_description":"(image description here)"}
 
       Input: [no image] "这幅春联的内容是什么"
       Output: {"rewrite_query":"这幅春联的内容是什么","intent":"kb_search","image_description":""}
       (NOTE: No image attached, so intent is kb_search, NOT image_only)
 
+      Input: [no image] "Nội dung của bức câu đối này là gì"
+      Output: {"rewrite_query":"Nội dung của bức câu đối này là gì","intent":"kb_search","image_description":""}
+      (NOTE: No image attached, so intent is kb_search, NOT image_only)
+
       Input: [document attached] "帮我总结一下这份文件"
       Output: {"rewrite_query":"总结一下这份文件","intent":"doc_only","image_description":""}
+
+      Input: [document attached] "Tóm tắt tài liệu này giúp tôi"
+      Output: {"rewrite_query":"Tóm tắt tài liệu này","intent":"doc_only","image_description":""}
 
       Input: "请整理知识库中的数据，用表格形式输出体检指标" (no history)
       Output: {"rewrite_query":"体检指标数据整理","intent":"kb_search","image_description":""}
 
+      Input: "Vui lòng tổng hợp dữ liệu trong cơ sở tri thức, xuất chỉ số khám sức khỏe dưới dạng bảng" (no history)
+      Output: {"rewrite_query":"Tổng hợp dữ liệu chỉ số khám sức khỏe","intent":"kb_search","image_description":""}
+
       Input: "请读取知识库中体检报告标签的报告，输出体检指标" (no history)
       Output: {"rewrite_query":"体检报告标签 体检指标","intent":"kb_search","image_description":""}
+
+      Input: "Đọc báo cáo có nhãn báo cáo khám sức khỏe trong cơ sở tri thức, xuất chỉ số khám sức khỏe" (no history)
+      Output: {"rewrite_query":"Báo cáo khám sức khỏe chỉ số khám sức khỏe","intent":"kb_search","image_description":""}
 
       ## Conversation History
       {{conversation}}
