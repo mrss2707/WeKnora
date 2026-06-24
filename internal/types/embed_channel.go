@@ -134,6 +134,7 @@ var supportedEmbedLocales = map[string]struct{}{
 	"en-US": {},
 	"ko-KR": {},
 	"ru-RU": {},
+	"vi-VN": {},
 }
 
 // NormalizeEmbedDefaultLocale returns a supported locale tag or empty string
