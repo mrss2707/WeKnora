@@ -1103,7 +1103,7 @@ export function normalizeEmbedLocale(raw: string): EmbedLocale {
   if (s.startsWith('vi')) return 'vi-VN'
   if (s.startsWith('zh')) return 'zh-CN'
   const exact = SUPPORTED_LOCALES.find((l) => l.toLowerCase() === s)
-  return exact || 'zh-CN'
+  return exact || 'vi-VN'
 }
 
 export function readEmbedLocaleFromUrl(): string {
@@ -1113,7 +1113,7 @@ export function readEmbedLocaleFromUrl(): string {
 
 function resolveBrowserEmbedLocale(): EmbedLocale {
   const nav = typeof navigator !== 'undefined' ? navigator.language : ''
-  return nav ? normalizeEmbedLocale(nav) : 'zh-CN'
+  return nav ? normalizeEmbedLocale(nav) : 'vi-VN'
 }
 
 function resolveInitialEmbedLocale(): EmbedLocale {

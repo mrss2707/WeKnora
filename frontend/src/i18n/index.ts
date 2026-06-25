@@ -13,13 +13,13 @@ const messages = {
   'vi-VN': viVN
 }
 
-// Получаем сохраненный язык из localStorage или используем китайский по умолчанию
-const savedLocale = localStorage.getItem('locale') || 'zh-CN'
+// Lấy ngôn ngữ đã lưu từ localStorage hoặc sử dụng tiếng Việt làm mặc định
+const savedLocale = localStorage.getItem('locale') || 'vi-VN'
 
 const i18n = createI18n({
   legacy: false,
   locale: savedLocale,
-  fallbackLocale: 'zh-CN',
+  fallbackLocale: 'vi-VN',
   globalInjection: true,
   // Some translations intentionally embed `<strong>` markup (e.g. agent step summaries).
   // We render them via v-html with our own sanitization, so silence vue-i18n's HTML warning

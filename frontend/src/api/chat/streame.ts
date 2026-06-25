@@ -142,7 +142,7 @@ export function useStream() {
         headers: {
           "Content-Type": "application/json",
           "Authorization": embedToken ? `Embed ${embedToken}` : `Bearer ${token}`,
-          "Accept-Language": i18n.global.locale?.value || localStorage.getItem('locale') || 'zh-CN',
+          "Accept-Language": i18n.global.locale?.value || localStorage.getItem('locale') || 'vi-VN',
           "X-Request-ID": requestID,
           ...(!embedToken && tenantIdHeader ? { "X-Tenant-ID": tenantIdHeader } : {}),
           ...(params.embed_session_sig ? { "X-Embed-Session": params.embed_session_sig } : {}),

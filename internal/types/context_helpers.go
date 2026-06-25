@@ -12,12 +12,12 @@ func EnvLanguage() string {
 }
 
 // DefaultLanguage returns the configured default language locale.
-// It reads the WEKNORA_LANGUAGE environment variable; if unset, falls back to "zh-CN".
+// It reads the WEKNORA_LANGUAGE environment variable; if unset, falls back to "vi-VN".
 func DefaultLanguage() string {
 	if lang := EnvLanguage(); lang != "" {
 		return lang
 	}
-	return "zh-CN"
+	return "vi-VN"
 }
 
 // TenantIDFromContext extracts the tenant ID from ctx.
@@ -133,7 +133,7 @@ func LanguageNameFromContext(ctx context.Context) string {
 
 // AcceptLanguageHeader returns a well-formed Accept-Language header value
 // derived from the request context's language locale.
-// Falls back to "zh-CN,zh;q=0.9,en;q=0.8" when no locale is set.
+// Falls back to "vi-VN,vi;q=0.9,en;q=0.8" when no locale is set.
 func AcceptLanguageHeader(ctx context.Context) string {
 	lang, ok := LanguageFromContext(ctx)
 	if !ok {

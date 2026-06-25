@@ -20,9 +20,9 @@ const instance = axios.create({
   },
 });
 
-// 获取当前用户语言（用于 Accept-Language header）
+// Lấy ngôn ngữ hiện tại của người dùng (dùng cho Accept-Language header)
 function getCurrentLanguage(): string {
-  return i18n.global.locale?.value || localStorage.getItem('locale') || 'zh-CN'
+  return i18n.global.locale?.value || localStorage.getItem('locale') || 'vi-VN'
 }
 
 

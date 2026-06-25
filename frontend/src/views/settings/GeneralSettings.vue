@@ -198,8 +198,8 @@ const {
   setFontSize,
 } = useFont()
 
-// 本地状态
-const localLanguage = ref('zh-CN')
+// Trạng thái cục bộ
+const localLanguage = ref('vi-VN')
 const localTheme = ref<ThemeMode>(currentTheme.value)
 const localSansFont = ref<FontKey>(currentSans.value)
 const localMonoFont = ref<MonoFontKey>(currentMono.value)
