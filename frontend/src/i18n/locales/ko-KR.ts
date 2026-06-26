@@ -4275,6 +4275,8 @@ export default {
       builtinCannotCopy: "기본 제공 모델은 복사할 수 없습니다",
       copied: "모델이 복사되었습니다",
       copyFailed: "모델 복사에 실패했습니다",
+      reorderSuccess: "우선순위가 업데이트되었습니다",
+      reorderFailed: "우선순위 업데이트에 실패했습니다",
     },
     copySuffix: " 사본",
     builtinModels: {

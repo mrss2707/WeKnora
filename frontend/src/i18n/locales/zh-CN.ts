@@ -4279,6 +4279,8 @@ export default {
       builtinCannotCopy: "内置模型不能复制",
       copied: "模型已复制",
       copyFailed: "复制模型失败",
+      reorderSuccess: "偏好顺序已更新",
+      reorderFailed: "更新偏好顺序失败",
     },
     copySuffix: " 副本",
     builtinModels: {

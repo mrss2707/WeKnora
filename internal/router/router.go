@@ -61,6 +61,7 @@ type RouterParams struct {
 	MessageHandler               *handler.MessageHandler
 	ModelHandler                 *handler.ModelHandler
 	ModelCredentialsHandler      *handler.ModelCredentialsHandler
+	ModelPreferenceHandler       *handler.ModelPreferenceHandler
 	EvaluationHandler            *handler.EvaluationHandler
 	AuthHandler                  *handler.AuthHandler
 	InitializationHandler        *handler.InitializationHandler
@@ -212,7 +213,7 @@ func NewRouter(params RouterParams) *gin.Engine {
 		RegisterSessionRoutes(v1, params.SessionHandler, rbacGuards)
 		RegisterChatRoutes(v1, params.SessionHandler, rbacGuards)
 		RegisterMessageRoutes(v1, params.MessageHandler, rbacGuards)
-		RegisterModelRoutes(v1, params.ModelHandler, params.ModelCredentialsHandler, rbacGuards)
+		RegisterModelRoutes(v1, params.ModelHandler, params.ModelCredentialsHandler, params.ModelPreferenceHandler, rbacGuards)
 		RegisterEvaluationRoutes(v1, params.EvaluationHandler, rbacGuards)
 		RegisterInitializationRoutes(v1, params.InitializationHandler, rbacGuards)
 		RegisterSystemRoutes(v1, params.SystemHandler, rbacGuards)
@@ -624,6 +625,7 @@ func RegisterModelRoutes(
 	r *gin.RouterGroup,
 	handler *handler.ModelHandler,
 	credHandler *handler.ModelCredentialsHandler,
+	prefHandler *handler.ModelPreferenceHandler,
 	g *rbacGuards,
 ) {
 	// 模型路由组
@@ -644,6 +646,10 @@ func RegisterModelRoutes(
 		// Per-field credential subresource (see internal/handler/model_credentials.go) — Admin+
 		models.PUT("/:id/credentials", g.Admin(), credHandler.Put)
 		models.DELETE("/:id/credentials/:field", g.Admin(), credHandler.DeleteField)
+			// Model preference routes (default model + fallback order)
+			models.GET("/preferences", g.Viewer(), prefHandler.ListPreferences)
+			models.PUT("/preferences/default", g.Admin(), prefHandler.SetDefault)
+			models.PUT("/preferences/reorder", g.Admin(), prefHandler.Reorder)
 	}
 }
 

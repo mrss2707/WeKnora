@@ -4279,6 +4279,8 @@ export default {
       builtinCannotCopy: 'Built-in models cannot be copied',
       copied: 'Model copied',
       copyFailed: 'Failed to copy model',
+      reorderSuccess: 'Preference order updated',
+      reorderFailed: 'Failed to update preference order',
     },
     copySuffix: ' Copy',
     builtinModels: {

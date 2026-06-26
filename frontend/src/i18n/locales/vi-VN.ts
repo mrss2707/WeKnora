@@ -4269,6 +4269,8 @@ export default {
       builtinCannotCopy: 'Built-in models cannot be copied',
       copied: 'Model copied',
       copyFailed: 'Sao chép thất bại model',
+      reorderSuccess: 'Đã cập nhật thứ tự ưu tiên',
+      reorderFailed: 'Cập nhật thứ tự ưu tiên thất bại',
     },
     copySuffix: ' Copy',
     builtinModels: {

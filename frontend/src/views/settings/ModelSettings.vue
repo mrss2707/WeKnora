@@ -30,7 +30,7 @@
         <t-empty :description="emptyHint" />
       </div>
       <div v-else-if="!loading" class="model-grid">
-        <div v-for="model in filteredModels" :key="`${model._modelType}-${model.id}`" class="model-card" :class="[
+        <div v-for="(model, idx) in filteredModels" :key="`${model._modelType}-${model.id}`" class="model-card" :class="[
           `model-card--${model._modelType}`,
           {
             'model-card--builtin': model.isBuiltin,
@@ -38,8 +38,14 @@
           },
         ]" :role="isModelCardClickable(model) ? 'button' : undefined"
           :tabindex="isModelCardClickable(model) ? 0 : undefined"
+          :draggable="canManageModel(model)"
           @click="onModelCardClick($event, model._modelType, model)"
-          @keydown.enter="onModelCardClick($event, model._modelType, model)">
+          @keydown.enter="onModelCardClick($event, model._modelType, model)"
+          @dragstart="onDragStart(idx, $event)"
+          @dragover="onDragOver($event)"
+          @dragenter="onDragEnter($event)"
+          @dragleave="onDragLeave($event)"
+          @drop="onDrop(idx, $event)">
           <div class="model-card__badge" :aria-label="typeLabel(model._modelType)">
             <t-icon :name="typeIcon(model._modelType)" size="18px" />
           </div>
@@ -49,6 +55,10 @@
               <span v-if="model.isBuiltin" class="model-card__lock" :title="$t('modelSettings.builtinTag')"
                 :aria-label="$t('modelSettings.builtinTag')">
                 <t-icon name="lock-on" />
+              </span>
+              <span v-if="model.isDefault" class="model-card__default-star" :title="$t('model.defaultTag')"
+                :aria-label="$t('model.defaultTag')">
+                <t-icon name="star-filled" />
               </span>
               <div v-if="canManageModel(model)" class="model-card__actions" @click.stop>
                 <t-dropdown :options="getModelOptions(model._modelType, model)" placement="bottom-right" attach="body"
@@ -124,7 +134,7 @@ import { MessagePlugin } from 'tdesign-vue-next'
 import { AddIcon } from 'tdesign-icons-vue-next'
 import { useI18n } from 'vue-i18n'
 import ModelEditorDialog from '@/components/ModelEditorDialog.vue'
-import { listModels, createModel, updateModel as updateModelAPI, deleteModel as deleteModelAPI, type ModelConfig } from '@/api/model'
+import { listModels, createModel, updateModel as updateModelAPI, deleteModel as deleteModelAPI, setDefaultModel, reorderModels, type ModelConfig } from '@/api/model'
 import { useAuthStore } from '@/stores/auth'
 
 const { t, te } = useI18n()
@@ -168,6 +178,8 @@ function convertToLegacyFormat(model: ModelConfig) {
     dimension: model.parameters.embedding_parameters?.dimension,
     supportsDimensionOverride: model.parameters.embedding_parameters?.supports_dimension_override || false,
     isBuiltin: model.is_builtin || false,
+    isDefault: model.is_default || false,
+    sortOrder: model.sort_order ?? 0,
     supportsVision: model.parameters.supports_vision || false,
     customHeaders: model.parameters.custom_headers
       ? Object.entries(model.parameters.custom_headers).map(([key, value]) => ({ key, value: String(value) }))
@@ -185,8 +197,10 @@ function convertToLegacyFormat(model: ModelConfig) {
 // 平铺 + 过滤
 const allLegacyModels = computed(() => allModels.value.map(convertToLegacyFormat))
 const filteredModels = computed(() => {
-  if (activeTypeFilter.value === 'all') return allLegacyModels.value
-  return allLegacyModels.value.filter(m => m._modelType === activeTypeFilter.value)
+  let list = activeTypeFilter.value === 'all' ? allLegacyModels.value : allLegacyModels.value.filter(m => m._modelType === activeTypeFilter.value)
+  // Sort by sort_order ASC to respect user-defined preference order
+  list = [...list].sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0))
+  return list
 })
 
 const countByType = (type: ModelType) => allLegacyModels.value.filter(m => m._modelType === type).length
@@ -488,6 +502,11 @@ const getModelOptions = (type: ModelType, model: any) => {
     value: `copy-${type}-${model.id}`
   })
 
+  options.push({
+    content: t('modelSettings.actions.setDefault'),
+    value: `set-default-${type}-${model.id}`
+  })
+
   return options
 }
 
@@ -499,6 +518,8 @@ const handleMenuAction = (data: { value: string }, type: ModelType, model: any) 
     editModel(type, model)
   } else if (value.indexOf('copy-') === 0) {
     copyModel(type, model.id)
+  } else if (value.indexOf('set-default-') === 0) {
+    handleSetDefault(type, model)
   }
 }
 
@@ -555,6 +576,74 @@ function getModelType(type: ModelType): 'KnowledgeQA' | 'Embedding' | 'Rerank' |
     asr: 'ASR' as const
   }
   return typeMap[type]
+}
+
+// Drag-reorder state
+const dragIndex = ref<number | null>(null)
+
+function onDragStart(index: number, event: DragEvent) {
+  if (!authStore.hasRole('admin')) return
+  dragIndex.value = index
+  if (event.dataTransfer) {
+    event.dataTransfer.effectAllowed = 'move'
+  }
+}
+
+function onDragOver(event: DragEvent) {
+  event.preventDefault()
+  if (event.dataTransfer) {
+    event.dataTransfer.dropEffect = 'move'
+  }
+}
+
+function onDragEnter(event: DragEvent) {
+  const el = event.currentTarget as HTMLElement | null
+  if (el) el.classList.add('model-card--drag-over')
+}
+
+function onDragLeave(event: DragEvent) {
+  const el = event.currentTarget as HTMLElement | null
+  if (el) el.classList.remove('model-card--drag-over')
+}
+
+async function onDrop(index: number, event: DragEvent) {
+  event.preventDefault()
+  const el = event.currentTarget as HTMLElement | null
+  if (el) el.classList.remove('model-card--drag-over')
+
+  if (dragIndex.value === null || dragIndex.value === index) {
+    dragIndex.value = null
+    return
+  }
+
+  const type = activeTypeFilter.value === 'all' ? 'chat' : activeTypeFilter.value
+  const models = filteredModels.value
+  const reordered = [...models]
+  const [moved] = reordered.splice(dragIndex.value, 1)
+  reordered.splice(index, 0, moved)
+
+  const orderedIds = reordered.map(m => m.id)
+  try {
+    await reorderModels(getModelType(type as ModelType), orderedIds)
+    MessagePlugin.success(t('modelSettings.toasts.reorderSuccess'))
+    await loadModels()
+  } catch (error: any) {
+    console.error('Reorder failed:', error)
+    MessagePlugin.error(error.message || t('modelSettings.toasts.reorderFailed'))
+  }
+  dragIndex.value = null
+}
+
+// Set as default handler
+async function handleSetDefault(type: ModelType, model: any) {
+  try {
+    await setDefaultModel(model.id, getModelType(type))
+    MessagePlugin.success(t('modelSettings.toasts.setDefault'))
+    await loadModels()
+  } catch (error: any) {
+    console.error('Set default failed:', error)
+    MessagePlugin.error(error.message || t('modelSettings.toasts.setDefaultFailed'))
+  }
 }
 
 onMounted(() => {
@@ -839,6 +928,26 @@ onMounted(() => {
 .model-card:hover .model-card__lock {
   opacity: 1;
   color: var(--td-text-color-secondary);
+}
+
+.model-card__default-star {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  color: #f5a623;
+
+  .t-icon {
+    font-size: 13px;
+  }
+}
+
+.model-card--drag-over {
+  border-color: var(--td-brand-color) !important;
+  background: color-mix(in srgb, var(--td-brand-color) 6%, transparent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--td-brand-color) 20%, transparent);
 }
 
 .model-card__subtitle {

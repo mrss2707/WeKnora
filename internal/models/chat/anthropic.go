@@ -251,7 +251,7 @@ func isAnthropicVersionedBaseURL(baseURL string) bool {
 func (c *AnthropicChat) buildRequest(messages []Message, opts *ChatOptions) anthropicRequest {
 	req := anthropicRequest{
 		Model:     c.modelName,
-		MaxTokens: 1024,
+		MaxTokens: 32768,
 		Messages:  make([]anthropicMessage, 0, len(messages)),
 	}
 	if opts != nil {

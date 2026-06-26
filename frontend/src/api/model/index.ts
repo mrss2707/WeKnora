@@ -3,6 +3,20 @@ import i18n from '@/i18n'
 
 const t = (key: string) => i18n.global.t(key)
 
+// Model preference helpers
+export async function getModelPreferences(type: ModelConfig['type']): Promise<ModelConfig[]> {
+  const response: any = await get(`/api/v1/models/preferences?type=${type}`)
+  return (response.data ?? response) as ModelConfig[]
+}
+
+export async function setDefaultModel(modelId: string, type: ModelConfig['type']): Promise<void> {
+  await put('/api/v1/models/preferences/default', { model_id: modelId, type })
+}
+
+export async function reorderModels(type: ModelConfig['type'], orderedIds: string[]): Promise<void> {
+  await put('/api/v1/models/preferences/reorder', { type, ordered_ids: orderedIds })
+}
+
 // 模型类型定义
 export interface ModelConfig {
   id?: string;
@@ -36,6 +50,7 @@ export interface ModelConfig {
     app_secret?: string;
   };
   is_default?: boolean;
+  sort_order?: number;
   is_builtin?: boolean;
   status?: string;
   // Per-field configured? metadata from the main response. Absent for

@@ -1813,6 +1813,7 @@ func (s *wikiIngestService) generateWithTemplate(ctx context.Context, chatModel 
 			{Role: "user", Content: prompt},
 		}, &chat.ChatOptions{
 			Temperature: 0.3,
+			MaxTokens:   32768,
 			Thinking:    &thinking,
 		})
 		if err == nil {

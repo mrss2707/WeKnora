@@ -3929,7 +3929,9 @@ export default {
       builtinCannotDelete: 'Встроенные модели нельзя удалить',
       builtinCannotCopy: 'Встроенные модели нельзя копировать',
       copied: 'Модель скопирована',
-      copyFailed: 'Не удалось скопировать модель'
+      copyFailed: 'Не удалось скопировать модель',
+      reorderSuccess: 'Порядок приоритетов обновлен',
+      reorderFailed: 'Не удалось обновить порядок приоритетов'
     },
     copySuffix: ' копия',
     builtinModels: {

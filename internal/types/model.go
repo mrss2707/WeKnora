@@ -124,6 +124,8 @@ type Model struct {
 	Parameters ModelParameters `yaml:"parameters"  json:"parameters"  gorm:"type:json"`
 	// Whether the model is the default model
 	IsDefault bool `yaml:"is_default"  json:"is_default"`
+	// Sort order for preference-based fallback (lower = higher priority)
+	SortOrder int `yaml:"sort_order"  json:"sort_order"  gorm:"default:0"`
 	// Whether the model is a builtin model (visible to all tenants)
 	IsBuiltin bool `yaml:"is_builtin"  json:"is_builtin"  gorm:"default:false"`
 	// ManagedBy identifies which subsystem owns this row's lifecycle.
