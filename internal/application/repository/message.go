@@ -111,7 +111,7 @@ func (r *messageRepository) GetMessagesBySessionBeforeTime(
 func (r *messageRepository) UpdateMessage(ctx context.Context, message *types.Message) error {
 	return r.db.WithContext(ctx).Model(&types.Message{}).Where(
 		"id = ? AND session_id = ?", message.ID, message.SessionID,
-	).Updates(message).Error
+	).Select("*").Updates(message).Error
 }
 
 // DeleteMessage deletes a message

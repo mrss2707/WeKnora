@@ -816,7 +816,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { MessagePlugin, Icon as TIcon } from 'tdesign-vue-next'
 import { deleteAgent, copyAgent, type CustomAgent } from '@/api/agent'
@@ -1286,7 +1286,11 @@ const handleEdit = (agent: AgentWithUI) => {
   openMoreAgentId.value = null
   editingAgent.value = agent
   editorMode.value = 'edit'
-  editorVisible.value = true
+  // Toggle to false first to ensure watch re-triggers even if editorVisible was stuck at true
+  editorVisible.value = false
+  nextTick(() => {
+    editorVisible.value = true
+  })
 }
 
 // canManageAgent mirrors the server-side OwnedAgentOrAdmin guard

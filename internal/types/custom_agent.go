@@ -328,7 +328,7 @@ func (a *CustomAgent) EnsureDefaults() {
 		a.Config.FallbackStrategy = "model"
 	}
 	if a.Config.MaxCompletionTokens == 0 {
-		a.Config.MaxCompletionTokens = 2048
+		a.Config.MaxCompletionTokens = 32768
 	}
 	// Agent mode should always enable multi-turn conversation
 	if a.Config.AgentMode == AgentModeSmartReasoning {

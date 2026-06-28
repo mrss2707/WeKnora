@@ -1371,7 +1371,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch, nextTick, onMounted, onBeforeUnmount } from 'vue';
+import { ref, computed, watch, nextTick, onMounted, onBeforeUnmount, onErrorCaptured } from 'vue';
 import AgentCreateContextualGuide from '@/components/AgentCreateContextualGuide.vue';
 import {
   AGENT_EDITOR_FOCUS_SECTION_EVENT,
@@ -1533,7 +1533,7 @@ const defaultKeywordThreshold = ref(0.3);
 const defaultVectorThreshold = ref(0.5);
 const defaultRerankTopK = ref(5);
 const defaultRerankThreshold = ref(0.5);
-const defaultMaxCompletionTokens = ref(2048);
+const defaultMaxCompletionTokens = ref(32768);
 const defaultTemperature = ref(0.7);
 
 // 知识库相关工具列表（用于 watch(hasKnowledgeBase) 从"无"变"有"时 seed 默认工具）
@@ -1911,7 +1911,7 @@ const defaultFormData = {
     model_id: '',
     rerank_model_id: '',
     temperature: 0.7,
-    max_completion_tokens: 2048,
+    max_completion_tokens: 32768,
     thinking: false, // 默认禁用思考模式
     // Agent模式设置
     max_iterations: 10,
@@ -2898,6 +2898,19 @@ const handleClose = () => {
   fallbackPromptPopup.value.show = false;
   emit('update:visible', false);
 };
+
+// Capture render errors so the parent knows the modal crashed
+onErrorCaptured((err, _instance, info) => {
+  // SyntaxError code 7 (UNTERMINATED_CLOSING_BRACE) comes from intlify
+  // message compiler during TDesign component render. Suppress it silently
+  // — the affected sub-tree won't render but the modal stays open.
+  if (err instanceof SyntaxError && (err as any).code === 7) {
+    return false
+  }
+  console.error('[AgentEditorModal] render error:', err, info)
+  emit('update:visible', false)
+  return false
+});
 
 // 过滤后的占位符列表
 const filteredPlaceholders = computed(() => {

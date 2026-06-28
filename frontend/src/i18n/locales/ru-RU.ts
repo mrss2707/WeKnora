@@ -826,12 +826,12 @@ export default {
       systemPromptRequired: 'System prompt is required',
       modelRequired: 'Please select a model',
       rerankModelRequired: 'ReRank model is required when using knowledge bases',
-      contextsMissing: "Context template must contain {'{{'}contexts{'}}'} placeholder when knowledge base is enabled",
-      queryMissingInContext: "Context template must contain {'{{'}query{'}}'} placeholder",
-      knowledgeBasesMissing: "It is recommended to include {'{{'}knowledge_bases{'}}'} placeholder in system prompt so the model knows available knowledge bases",
-      queryMissingInRewrite: "Rewrite user prompt must contain {'{{'}query{'}}'} placeholder",
-      conversationMissing: "Rewrite user prompt must contain {'{{'}conversation{'}}'} placeholder",
-      queryMissingInFallback: "Fallback prompt must contain {'{{'}query{'}}'} placeholder",
+      contextsMissing: "Context template must contain {'{'}contexts{'}'} placeholder when knowledge base is enabled",
+      queryMissingInContext: "Context template must contain {'{'}query{'}'} placeholder",
+      knowledgeBasesMissing: "It is recommended to include {'{'}knowledge_bases{'}'} placeholder in system prompt so the model knows available knowledge bases",
+      queryMissingInRewrite: "Rewrite user prompt must contain {'{'}query{'}'} placeholder",
+      conversationMissing: "Rewrite user prompt must contain {'{'}conversation{'}'} placeholder",
+      queryMissingInFallback: "Fallback prompt must contain {'{'}query{'}'} placeholder",
       avatar: 'Avatar',
       avatarPlaceholder: 'Enter Emoji or select',
       description: 'Description',
@@ -842,12 +842,12 @@ export default {
       model: 'Model',
       modelPlaceholder: 'Select Model',
       systemPrompt: 'System Prompt',
-      systemPromptPlaceholder: "Custom system prompt to define agent behavior and role (use {'{{'}web_search_status{'}}'} placeholder for dynamic web search behavior)",
+      systemPromptPlaceholder: "Custom system prompt to define agent behavior and role (use {'{'}web_search_status{'}'} placeholder for dynamic web search behavior)",
       defaultPromptHint: 'Leave empty to use the following default system prompt:',
       defaultContextTemplateHint: 'Leave empty to use the following default context template:',
       contextTemplateRequired: 'Context template is required',
       availablePlaceholders: 'Available Placeholders',
-      placeholderHint: "Type {'{{'} to trigger autocomplete",
+      placeholderHint: "Type {'{'} to trigger autocomplete",
       temperature: 'Temperature',
       thinking: 'Thinking Mode',
       welcomeMessage: 'Welcome Message',
@@ -3653,7 +3653,7 @@ export default {
       custom: 'Пользовательский промпт',
       disabledHint: 'Сейчас используется промпт по умолчанию. Включите пользовательский, чтобы применить содержимое ниже.',
       placeholder: 'Введите системный промпт или оставьте пустым для значения по умолчанию...',
-      tabHintDetail: "Единый системный промпт (оставьте пустым для значения по умолчанию, используйте {'{{'}web_search_status{'}}'} для динамического управления веб-поиском)",
+      tabHintDetail: "Единый системный промпт (оставьте пустым для значения по умолчанию, используйте {'{'}web_search_status{'}'} для динамического управления веб-поиском)",
       tabHint: 'Настройте разные промпты для режимов с включённым и отключённым веб-поиском.'
     },
     reset: {
@@ -4051,7 +4051,7 @@ export default {
       toggle: 'Импорт из кода',
       hint: 'Вставьте стандартную JSON-конфигурацию mcpServers для автозаполнения формы',
       placeholder:
-        '{\n  "mcpServers": {\n    "my-server": {\n      "url": "https://example.com/sse"\n    }\n  }\n}',
+        '{\'{\'}\n  "mcpServers": {\'{\'}\n    "my-server": {\'{\'}\n      "url": "https://example.com/sse"\n    {\'}\'}\n  {\'}\'}\n{\'}\'}',
       parse: 'Разобрать и заполнить',
       editOverwriteHint: 'Импорт перезапишет текущую форму (сохранённые учётные данные не затрагиваются; нажмите «Сохранить», чтобы применить)',
       errors: {
@@ -4578,7 +4578,7 @@ export default {
     placeholders: {
       available: 'Доступные переменные: ',
       clickToInsert: '(нажмите для вставки)',
-      hint: "(нажмите для вставки или введите {'{{'} для списка)"
+      hint: "(нажмите для вставки или введите {'{'} для списка)"
     },
     intentPrompts: {
       title: 'Промпты намерений',

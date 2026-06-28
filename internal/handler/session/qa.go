@@ -938,7 +938,10 @@ func appendQuickAnswerReasoning(msg *types.Message, content string) {
 func (h *Handler) completeAssistantMessage(ctx context.Context, assistantMessage *types.Message, userQuery string) {
 	assistantMessage.UpdatedAt = time.Now()
 	assistantMessage.IsCompleted = true
-	_ = h.messageService.UpdateMessage(ctx, assistantMessage)
+	// Use WithoutCancel so the DB write survives client disconnect (SSE stream
+	// may end before the LLM finishes generating). Otherwise a cancelled context
+	// can cause GORM to skip the UPDATE silently.
+	_ = h.messageService.UpdateMessage(context.WithoutCancel(ctx), assistantMessage)
 
 	// Asynchronously index the Q&A pair into the chat history knowledge base for vector search.
 	// Use WithoutCancel so the goroutine survives after the HTTP request context is done.
