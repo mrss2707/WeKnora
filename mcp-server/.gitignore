@@ -1,2 +1,6 @@
 /.codebuddy
 /__pycache__
+*.egg-info/
+*.pyc
+/dist/
+/build/
