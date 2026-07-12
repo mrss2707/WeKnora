@@ -2,6 +2,7 @@ import { defineStore } from 'pinia'
 import {
   listMemories,
   getMemoryGraph,
+  getMemoryStats,
   getHealthReport,
   triggerDream,
   updateMemory,
@@ -12,6 +13,7 @@ import type {
   MemoryListParams,
   MemoryVerdict,
   GraphData,
+  MemoryStats,
   HealthReport,
   DreamResult,
 } from '@/api/memory/index'
@@ -62,6 +64,9 @@ export const useMemoryStore = defineStore('memory', {
     /** Health report (cached when loaded). */
     healthReport: null as HealthReport | null,
 
+    /** Memory statistics (cached when loaded). */
+    stats: null as MemoryStats | null,
+
     /** Dream result from the last run. */
     lastDreamResult: null as DreamResult | null,
 
@@ -73,6 +78,9 @@ export const useMemoryStore = defineStore('memory', {
 
     /** Health loading indicator. */
     healthLoading: false,
+
+    /** Stats loading indicator. */
+    statsLoading: false,
 
     /** Dreamer loading indicator. */
     dreamerLoading: false,
@@ -162,6 +170,16 @@ export const useMemoryStore = defineStore('memory', {
         this.healthReport = resp.data?.data ?? null
       } finally {
         this.healthLoading = false
+      }
+    },
+
+    async loadStats(kbId: string) {
+      this.statsLoading = true
+      try {
+        const resp = await getMemoryStats(kbId)
+        this.stats = resp.data?.data ?? null
+      } finally {
+        this.statsLoading = false
       }
     },
 
