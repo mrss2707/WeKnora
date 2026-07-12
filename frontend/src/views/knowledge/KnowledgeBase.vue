@@ -47,6 +47,13 @@ import KbUploadSourceDropdown from './components/KbUploadSourceDropdown.vue';
 import type { KnowledgeProcessOverrides } from '@/types/knowledgeProcess';
 import { useUploadConfirmStore, type UploadConfirmResult } from '@/stores/uploadConfirm';
 import WikiBrowser from './wiki/WikiBrowser.vue';
+import { useMemoryStore } from '@/stores/memory'
+import MemoryBrowse from '@/views/memory/MemoryBrowse.vue'
+import MemoryGraph from '@/views/memory/MemoryGraph.vue'
+import MemoryHealth from '@/views/memory/MemoryHealth.vue'
+import MemoryHistory from '@/views/memory/MemoryHistory.vue'
+import MemoryDrawer from '@/views/memory/MemoryDrawer.vue'
+import type { AgentMemory } from '@/api/memory/index'
 import { getWikiStats } from '@/api/wiki';
 import {
   isKnowledgeParseInFlight,
@@ -61,6 +68,24 @@ import { useMarqueeSelect } from '@/hooks/useMarqueeSelect';
 import type { ParserEngineInfo } from '@/api/system';
 const route = useRoute();
 const { t } = useI18n();
+const memoryStore = useMemoryStore()
+const hasCriticalIssues = ref(false)
+const subTabs = computed(() => [
+  { key: 'browse', icon: 'list', label: 'Browse' },
+  { key: 'graph', icon: 'chart-bubble', label: 'Graph' },
+  { key: 'health', icon: 'health', label: 'Health', badge: hasCriticalIssues.value ? 1 : undefined },
+  { key: 'history', icon: 'time', label: 'History' },
+] as const)
+const memoryDrawerVisible = ref(false)
+const selectedMemory = ref<AgentMemory | null>(null)
+function openMemoryDrawer(memory: AgentMemory) {
+  selectedMemory.value = memory
+  memoryDrawerVisible.value = true
+}
+function closeMemoryDrawer() {
+  memoryDrawerVisible.value = false
+  selectedMemory.value = null
+}
 const kbId = computed(() => (route.params as any).kbId as string || '');
 const kbInfo = ref<any>(null);
 const uploadSourceRef = ref<InstanceType<typeof KbUploadSourceDropdown> | null>(null);
@@ -69,7 +94,7 @@ const kbLoading = ref(false);
 const docListLoading = ref(true);
 const isFAQ = computed(() => (kbInfo.value?.type || '') === 'faq');
 const isWiki = computed(() => !!kbInfo.value?.indexing_strategy?.wiki_enabled);
-const validTabs = ['documents', 'wiki', 'graph'] as const
+const validTabs = ['documents', 'wiki', 'graph', 'memory'] as const
 type KbTab = typeof validTabs[number]
 const initTab = validTabs.includes(route.query.tab as any) ? (route.query.tab as KbTab) : 'documents'
 const activeKbTab = ref<KbTab>(initTab);
@@ -2042,8 +2067,21 @@ async function createNewSession(value: string): Promise<void> {
                     </t-tooltip>
                   </span>
                 </t-tooltip>
+                <span class="breadcrumb-tab-sep">/</span>
+                <span :class="['breadcrumb-tab', { active: activeKbTab === 'memory' }]"
+                  @click="activeKbTab = 'memory'">
+                  {{ $t('knowledgeEditor.wikiBrowser.tabMemory', 'Memory') }}
+                </span>
               </template>
-              <span v-else class="breadcrumb-current">{{ $t('knowledgeEditor.document.title') }}</span>
+              <template v-else>
+                <span :class="['breadcrumb-current', { active: activeKbTab === 'documents' }]"
+                  @click="activeKbTab = 'documents'" style="cursor:pointer">{{ $t('knowledgeEditor.document.title') }}</span>
+                <span class="breadcrumb-tab-sep">/</span>
+                <span :class="['breadcrumb-tab', { active: activeKbTab === 'memory' }]"
+                  @click="activeKbTab = 'memory'">
+                  {{ $t('knowledgeEditor.wikiBrowser.tabMemory', 'Memory') }}
+                </span>
+              </template>
             </h2>
             <!-- 标题行右侧的动作锚点：聚拢"信息"和"设置"两个圆形按钮。 -->
             <div class="kb-title-actions">
@@ -2079,6 +2117,28 @@ async function createNewSession(value: string): Promise<void> {
           :can-edit="canEdit" @open-source-doc="openSourceDoc" @status-change="onWikiStatusChange"
           @view-graph="onViewWikiInGraph" />
       </div>
+
+      <!-- Memory tab -->
+      <template v-if="activeKbTab === 'memory'">
+        <div class="memory-main-area">
+          <div class="memory-subtabs">
+            <span v-for="sub in subTabs" :key="sub.key"
+                  :class="{ active: memoryStore.activeSubTab === sub.key }"
+                  @click="memoryStore.setSubTab(sub.key)">
+              <t-icon :name="sub.icon" />
+              {{ sub.label }}
+              <t-badge v-if="sub.badge" :count="sub.badge" size="small" />
+            </span>
+          </div>
+          <KeepAlive>
+            <MemoryBrowse  v-if="memoryStore.activeSubTab === 'browse'"  :kb-id="kbId" @open-detail="openMemoryDrawer" />
+            <MemoryGraph   v-if="memoryStore.activeSubTab === 'graph'"   :kb-id="kbId" />
+            <MemoryHealth  v-if="memoryStore.activeSubTab === 'health'"  :kb-id="kbId" @critical-issues-changed="hasCriticalIssues = $event" />
+            <MemoryHistory v-if="memoryStore.activeSubTab === 'history'" :kb-id="kbId" />
+          </KeepAlive>
+          <MemoryDrawer v-model:visible="memoryDrawerVisible" :memory="selectedMemory" @close="closeMemoryDrawer" />
+        </div>
+      </template>
 
       <template v-if="activeKbTab === 'documents' || !isWiki">
         <div class="knowledge-main">
@@ -2694,6 +2754,54 @@ async function createNewSession(value: string): Promise<void> {
   flex: 1;
   min-height: 0;
   overflow: hidden;
+}
+
+// Memory sub-tabs and main area (matching wiki main area patterns)
+.memory-main-area {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.memory-subtabs {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 0 8px;
+  flex-shrink: 0;
+  border-bottom: 1px solid var(--td-component-stroke);
+
+  span {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 14px;
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--td-text-color-secondary);
+    cursor: pointer;
+    border-radius: 6px;
+    transition: all 0.15s ease;
+    user-select: none;
+
+    .t-icon {
+      font-size: 16px;
+    }
+
+    &:hover {
+      color: var(--td-text-color-primary);
+      background: var(--td-bg-color-secondarycontainer);
+    }
+
+    &.active {
+      color: var(--td-brand-color);
+      background: var(--td-brand-color-light);
+      font-weight: 600;
+    }
+  }
 }
 
 // 与列表页一致：浅灰底圆角区，左侧筛选为白底卡片
