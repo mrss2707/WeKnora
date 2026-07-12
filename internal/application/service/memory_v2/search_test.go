@@ -1239,13 +1239,109 @@ func TestTokenBudget_SummarizeChatError(t *testing.T) {
 // RetrieveMemory (bridge)
 // ---------------------------------------------------------------------------
 
-func TestRetrieveMemory_EmptyQuery(t *testing.T) {
-	svc := newTestService()
-	ctx := context.Background()
+func TestMemoryContextBridge(t *testing.T) {
+	t.Run("empty query", func(t *testing.T) {
+		svc := newTestService()
+		ctx := context.Background()
 
-	memCtx, err := svc.RetrieveMemory(ctx, "user-1", "")
-	require.NoError(t, err)
-	assert.Empty(t, memCtx.RelatedEpisodes, "empty query should return empty context")
+		memCtx, err := svc.RetrieveMemory(ctx, "user-1", "")
+		require.NoError(t, err)
+		assert.Empty(t, memCtx.RelatedEpisodes, "empty query should return empty context")
+	})
+
+	t.Run("with results", func(t *testing.T) {
+		now := time.Now()
+		mem := makeMemory("mem-bridge-1", "user mentioned they prefer clean architecture with dependency injection", 4, types.VerdictDecision, "session-1", now)
+
+		svc := &MemoryServiceV2Impl{
+			repo: &mockSearchRepo{
+				searchFunc: func(ctx context.Context, filter *types.MemoryFilter) ([]*types.MemorySearchResult, int64, error) {
+					return []*types.MemorySearchResult{makeSearchResult(mem, 0.0)}, 1, nil
+				},
+				cosineSearchFunc: func(ctx context.Context, filter *types.MemoryFilter, embedding []float32, limit int) ([]*types.MemorySearchResult, error) {
+					return []*types.MemorySearchResult{makeSearchResult(mem, 0.85)}, nil
+				},
+			},
+			embedder: &mockEmbedder{
+				embedFunc: func(ctx context.Context, text string) ([]float32, error) {
+					return []float32{0.1, 0.2, 0.3}, nil
+				},
+			},
+			config:      types.DefaultMemoryV2Config(),
+			tokenBudget: NewTokenBudgetManager(),
+		}
+		svc.config.MinScoreThreshold = 0.1 // low enough to keep merged scores
+
+		ctx := context.Background()
+		memCtx, err := svc.RetrieveMemory(ctx, "user-42", "clean architecture preferences")
+		require.NoError(t, err)
+
+		// Bridge format: MemoryContext with exactly one RelatedEpisode
+		require.Len(t, memCtx.RelatedEpisodes, 1, "should have exactly one related episode")
+		assert.Empty(t, memCtx.RelatedEntities, "related entities should be empty")
+		assert.Empty(t, memCtx.RelatedRelations, "related relations should be empty")
+
+		ep := memCtx.RelatedEpisodes[0]
+		assert.Equal(t, "user-42", ep.UserID, "episode UserID should match the userID passed to RetrieveMemory")
+		assert.Empty(t, ep.SessionID, "episode SessionID should be empty (not set by bridge)")
+
+		// Summary should contain valid XML from packContext
+		summary := ep.Summary
+		assert.True(t, strings.HasPrefix(summary, "<memory_context>"), "summary should start with memory_context tag")
+		assert.True(t, strings.HasSuffix(summary, "</memory_context>"), "summary should end with memory_context tag")
+		assert.Contains(t, summary, `<memory id="mem-bridge-1"`)
+		assert.Contains(t, summary, `<content>user mentioned they prefer clean architecture with dependency injection</content>`)
+		assert.Contains(t, summary, `<type>semantic</type>`)
+		assert.Contains(t, summary, `<verdict>decision</verdict>`)
+		assert.Contains(t, summary, `<session_id>session-1</session_id>`)
+	})
+
+	t.Run("empty results", func(t *testing.T) {
+		svc := &MemoryServiceV2Impl{
+			repo: &mockSearchRepo{
+				searchFunc: func(ctx context.Context, filter *types.MemoryFilter) ([]*types.MemorySearchResult, int64, error) {
+					return nil, 0, nil
+				},
+			},
+			embedder: &mockEmbedder{},
+			config:   types.DefaultMemoryV2Config(),
+		}
+
+		ctx := context.Background()
+		memCtx, err := svc.RetrieveMemory(ctx, "user-1", "something not in memory")
+		require.NoError(t, err, "empty results should not cause an error")
+		assert.Empty(t, memCtx.RelatedEpisodes, "empty results should return empty MemoryContext")
+		assert.Empty(t, memCtx.RelatedEntities, "empty results should have no entities")
+		assert.Empty(t, memCtx.RelatedRelations, "empty results should have no relations")
+	})
+
+	t.Run("search error", func(t *testing.T) {
+		// SearchMemories swallows BM25 and cosine errors internally (logs them and
+		// falls back to empty/nil results), so the error path in RetrieveMemory is
+		// unreachable via repo-level errors. Instead, SearchMemories returns empty
+		// results, and RetrieveMemory returns an empty MemoryContext with no error.
+		svc := &MemoryServiceV2Impl{
+			repo: &mockSearchRepo{
+				searchFunc: func(ctx context.Context, filter *types.MemoryFilter) ([]*types.MemorySearchResult, int64, error) {
+					return nil, 0, assert.AnError
+				},
+			},
+			embedder: &mockEmbedder{
+				embedFunc: func(ctx context.Context, text string) ([]float32, error) {
+					return nil, assert.AnError
+				},
+			},
+			config:      types.DefaultMemoryV2Config(),
+			tokenBudget: NewTokenBudgetManager(),
+		}
+
+		ctx := context.Background()
+		memCtx, err := svc.RetrieveMemory(ctx, "user-1", "something that errors")
+		require.NoError(t, err, "search error should be swallowed by SearchMemories")
+		assert.Empty(t, memCtx.RelatedEpisodes, "error case should return empty MemoryContext")
+		assert.Empty(t, memCtx.RelatedEntities, "error case should have no entities")
+		assert.Empty(t, memCtx.RelatedRelations, "error case should have no relations")
+	})
 }
 
 // ---------------------------------------------------------------------------
