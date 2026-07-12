@@ -41,8 +41,8 @@ type AgentMemory struct {
 	MemoryType  string            `gorm:"column:memory_type;type:varchar(32);default:''" json:"memory_type"`
 	Importance  int               `gorm:"column:importance;type:int;default:0" json:"importance"`
 	Tier        int               `gorm:"column:tier;type:int;default:2" json:"tier"`
-	Verdict     MemoryVerdict     `gorm:"column:verdict;type:varchar(16);default:'none'" json:"verdict"`
-	HubScore    float64           `gorm:"column:hub_score;type:real;default:0" json:"hub_score"`
+	Verdict     MemoryVerdict     `gorm:"column:verdict;type:varchar(16);default:none" json:"verdict"`
+	HubScore    float64           `gorm:"column:hub_score;default:0" json:"hub_score"`
 	Embedding   pgvector.Vector   `gorm:"column:embedding;type:vector(1536)" json:"embedding"`
 	AccessCount int               `gorm:"column:access_count;type:int;default:0" json:"access_count"`
 	SessionID   string            `gorm:"column:session_id;type:varchar(36);default:'';index:idx_agent_memories_session" json:"session_id"`
