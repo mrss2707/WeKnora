@@ -126,6 +126,7 @@ export interface GraphNode {
   importance: number
   verdict: MemoryVerdict
   hub_score: number
+  is_stale?: boolean
 }
 
 export interface GraphEdge {
