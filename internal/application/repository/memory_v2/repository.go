@@ -13,9 +13,6 @@ import (
 	"gorm.io/gorm/clause"
 )
 
-// compile-time interface check
-var _ interfaces.MemoryRepositoryV2 = (*MemoryRepository)(nil)
-
 // MemoryRepository implements MemoryRepositoryV2 using GORM + PostgreSQL/pgvector.
 type MemoryRepository struct {
 	db *gorm.DB
@@ -373,3 +370,6 @@ func (r *MemoryRepository) InvalidateResultCache(_ context.Context, _ string) {}
 // ---------------------------------------------------------------------------
 
 func timePtr(t time.Time) *time.Time { return &t }
+
+// Ensure MemoryRepository satisfies MemoryRepositoryV2 at compile time.
+var _ interfaces.MemoryRepositoryV2 = (*MemoryRepository)(nil)
