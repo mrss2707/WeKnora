@@ -284,6 +284,30 @@ export interface LintOnWriteConfig {
 }
 
 // -------------------------------------------------------------------------
+// Timeline / History Event Types
+// -------------------------------------------------------------------------
+
+export type TimelineEventType =
+  | 'created'
+  | 'updated'
+  | 'deleted'
+  | 'verdict_changed'
+  | 'dreamer_action'
+  | 'consolidation'
+  | 'pruner'
+  | 'health_check'
+
+export interface TimelineEvent {
+  id: string
+  type: TimelineEventType
+  timestamp: string
+  description: string
+  memory_id?: string
+  memory_content_preview?: string
+  metadata?: Record<string, unknown>
+}
+
+// -------------------------------------------------------------------------
 // Paginated Response
 // -------------------------------------------------------------------------
 

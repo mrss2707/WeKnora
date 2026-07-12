@@ -16,6 +16,8 @@ import type {
   MemoryStats,
   HealthReport,
   DreamResult,
+  TimelineEvent,
+  TimelineEventType,
 } from '@/api/memory/index'
 
 export interface MemoryFilterState {
@@ -84,6 +86,22 @@ export const useMemoryStore = defineStore('memory', {
 
     /** Dreamer loading indicator. */
     dreamerLoading: false,
+
+    /** History/activity timeline events. */
+    historyEvents: [] as TimelineEvent[],
+
+    /** History loading indicator. */
+    historyLoading: false,
+
+    /** History event type filter (empty = all). */
+    historyFilterType: '' as '' | TimelineEventType,
+
+    /** History pagination state (client-side). */
+    historyPagination: {
+      page: 1,
+      pageSize: 20,
+      total: 0,
+    },
   }),
 
   getters: {
@@ -190,6 +208,123 @@ export const useMemoryStore = defineStore('memory', {
         this.lastDreamResult = resp.data?.data ?? null
       } finally {
         this.dreamerLoading = false
+      }
+    },
+
+    // -----------------------------------------------------------------------
+    // History / Timeline
+    // -----------------------------------------------------------------------
+
+    /** Generate timeline events from memories, health report, and dreamer results. */
+    async loadHistory(kbId: string) {
+      this.historyLoading = true
+      try {
+        // Ensure source data is loaded
+        if (this.memories.length === 0) {
+          await this.loadMemories(kbId)
+        }
+        if (!this.healthReport) {
+          await this.loadHealth(kbId)
+        }
+
+        const events: TimelineEvent[] = []
+
+        // 1. Created events from each memory
+        for (const mem of this.memories) {
+          const preview = mem.content.length > 80 ? mem.content.slice(0, 77) + '...' : mem.content
+          events.push({
+            id: `created-${mem.id}`,
+            type: 'created',
+            timestamp: mem.created_at,
+            description: `Memory created`,
+            memory_id: mem.id,
+            memory_content_preview: preview,
+          })
+
+          // 2. Updated event if updated_at differs from created_at
+          if (mem.updated_at !== mem.created_at) {
+            events.push({
+              id: `updated-${mem.id}-${mem.updated_at}`,
+              type: 'updated',
+              timestamp: mem.updated_at,
+              description: `Memory updated`,
+              memory_id: mem.id,
+              memory_content_preview: preview,
+            })
+          }
+        }
+
+        // 3. Health check events
+        if (this.healthReport?.checked_at) {
+          const total = this.healthReport.total_issues ?? 0
+          events.push({
+            id: 'health-check',
+            type: 'health_check',
+            timestamp: this.healthReport.checked_at,
+            description: `Health check completed — ${total} issue${total !== 1 ? 's' : ''} found`,
+            metadata: { total_issues: total },
+          })
+        }
+
+        // 4. Dreamer action events from last dream result
+        if (this.lastDreamResult?.actions) {
+          for (const action of this.lastDreamResult.actions) {
+            const desc = `Dreamer: ${action.reason}`
+            events.push({
+              id: `dreamer-${action.target_id}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+              type: 'dreamer_action',
+              timestamp: new Date().toISOString(),
+              description: desc.length > 120 ? desc.slice(0, 117) + '...' : desc,
+              memory_id: action.target_id,
+              metadata: {
+                action_type: action.type,
+                confidence: action.confidence,
+              },
+            })
+          }
+        }
+
+        // 5. Verdict-changed events from dreamer actions that change verdict
+        if (this.lastDreamResult?.actions) {
+          for (const action of this.lastDreamResult.actions) {
+            if (action.new_verdict) {
+              events.push({
+                id: `verdict-${action.target_id}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+                type: 'verdict_changed',
+                timestamp: new Date().toISOString(),
+                description: `Verdict changed to "${action.new_verdict}"`,
+                memory_id: action.target_id,
+                metadata: {
+                  old_verdict: action.new_verdict,
+                  new_verdict: action.new_verdict,
+                },
+              })
+            }
+          }
+        }
+
+        // Sort descending by timestamp
+        events.sort((a, b) => Date.parse(b.timestamp) - Date.parse(a.timestamp))
+
+        this.historyEvents = events
+        this.historyPagination.total = events.length
+        this.historyPagination.page = 1
+      } finally {
+        this.historyLoading = false
+      }
+    },
+
+    /** Set the history event type filter and reset pagination. */
+    setHistoryFilter(type: '' | TimelineEvent['type']) {
+      this.historyFilterType = type
+      this.historyPagination.page = 1
+    },
+
+    /** Load the next page of history events. */
+    loadMoreHistory() {
+      const maxPage = Math.ceil(this.historyPagination.total / this.historyPagination.pageSize)
+      if (this.historyPagination.page < maxPage) {
+        this.historyPagination.page++
       }
     },
 
