@@ -19,7 +19,7 @@ type HealthChecker struct {
 
 // NewHealthChecker creates a new HealthChecker.
 func NewHealthChecker(repo interfaces.MemoryRepositoryV2) *HealthChecker {
-	return &HealthChecker{}
+	return &HealthChecker{repo: repo}
 }
 
 // Run starts the health checker worker loop. Runs daily at 4:00 AM.
