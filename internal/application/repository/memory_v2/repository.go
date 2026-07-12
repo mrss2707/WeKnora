@@ -35,6 +35,13 @@ func (r *MemoryRepository) Create(ctx context.Context, memory *types.AgentMemory
 	now := time.Now()
 	memory.CreatedAt = now
 	memory.UpdatedAt = now
+	// pgvector requires at least 1 dimension matching the column definition;
+	// use a zero vector of appropriate dimensionality when no embedding is available
+	if len(memory.Embedding.Slice()) == 0 {
+		// 1536 is the default embedding dimension for the column
+		zeroVec := make([]float32, 1536)
+		memory.Embedding = pgvector.NewVector(zeroVec)
+	}
 	return r.db.WithContext(ctx).Create(memory).Error
 }
 
@@ -82,7 +89,7 @@ func (r *MemoryRepository) checkProtectedVerdict(ctx context.Context, memory *ty
 	}
 
 	// Check the actor stored in context
-	actor, _ := ctx.Value("actor").(string)
+	actor, _ := ctx.Value(types.ActorKey{}).(string)
 	if actor == "dreamer" || actor == "system" {
 		return &types.ErrProtectedVerdict{}
 	}

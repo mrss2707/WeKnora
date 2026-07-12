@@ -37,6 +37,8 @@ func (v MemoryVerdict) IsProtected() bool {
 type AgentMemory struct {
 	ID          string            `gorm:"column:id;type:varchar(36);primaryKey;default:uuid_generate_v4()" json:"id"`
 	TenantID    string            `gorm:"column:tenant_id;type:varchar(36);not null;index:idx_agent_memories_tenant" json:"tenant_id"`
+	KbID        string            `gorm:"column:kb_id;type:varchar(36);not null" json:"kb_id"`
+	UserID      string            `gorm:"column:user_id;type:varchar(36);not null;default:''" json:"user_id"`
 	Content     string            `gorm:"column:content;type:text;not null" json:"content"`
 	MemoryType  string            `gorm:"column:memory_type;type:varchar(32);default:''" json:"memory_type"`
 	Importance  int               `gorm:"column:importance;type:int;default:0" json:"importance"`

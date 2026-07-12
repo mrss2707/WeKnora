@@ -51,7 +51,6 @@ import (
 	chatpipeline "github.com/Tencent/WeKnora/internal/application/service/chat_pipeline"
 	"github.com/Tencent/WeKnora/internal/application/service/file"
 	memoryService "github.com/Tencent/WeKnora/internal/application/service/memory"
-	memoryV2Service "github.com/Tencent/WeKnora/internal/application/service/memory_v2"
 	"github.com/Tencent/WeKnora/internal/application/service/retriever"
 	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/database"
@@ -211,25 +210,8 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(service.NewCustomAgentService))
 	must(container.Provide(service.NewUserResourceFavoriteService))
 
-	// Memory service — register both implementations with named tags, then a factory
-	// that selects by MEMORY_BACKEND env var (defaults to Neo4j).
-	must(container.Provide(memoryService.NewMemoryService, dig.Name("neo4j")))
-	must(container.Provide(memoryV2Service.NewMemoryServiceV2, dig.Name("v2"), dig.As(new(interfaces.MemoryService))))
-
-	// Factory: selects MemoryService implementation based on MEMORY_BACKEND env var
-	must(container.Provide(func(in struct {
-		dig.In
-		Neo4j interfaces.MemoryService `name:"neo4j"`
-		V2    interfaces.MemoryService `name:"v2"`
-	}) interfaces.MemoryService {
-		if os.Getenv("MEMORY_BACKEND") == "v2" {
-			return in.V2
-		}
-		return in.Neo4j
-	}))
-
-	// MemoryServiceV2 registration (unnamed) for handlers that need V2-specific methods
-	must(container.Provide(memoryV2Service.NewMemoryServiceV2))
+	// Memory service
+	must(container.Provide(memoryService.NewMemoryService))
 
 	must(container.Provide(service.NewWikiPageService))
 	must(container.Provide(service.NewWikiLogEntryService))
@@ -623,16 +605,31 @@ func initDatabase(cfg *config.Config) (*gorm.DB, error) {
 		return nil, err
 	}
 
-	// Configure connection pool parameters
+	// Configure connection pool parameters — defaults are safe for single-instance.
+	// Override via env: DB_MAX_OPEN_CONNS, DB_MAX_IDLE_CONNS.
+	maxOpen := 20
+	if v := os.Getenv("DB_MAX_OPEN_CONNS"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			maxOpen = n
+		}
+	}
+	maxIdle := 10
+	if v := os.Getenv("DB_MAX_IDLE_CONNS"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n >= 0 {
+			maxIdle = n
+		}
+	}
 	if os.Getenv("DB_DRIVER") == "sqlite" {
 		// SQLite only supports one concurrent writer even in WAL mode.
 		// Limiting to a single open connection serialises all DB access and
 		// prevents "database is locked" errors from concurrent goroutines.
-		sqlDB.SetMaxOpenConns(1)
-	} else {
-		sqlDB.SetMaxIdleConns(10)
+		maxOpen = 1
+		maxIdle = 1
 	}
-	sqlDB.SetConnMaxLifetime(time.Duration(10) * time.Minute)
+	sqlDB.SetMaxOpenConns(maxOpen)
+	sqlDB.SetMaxIdleConns(maxIdle)
+	sqlDB.SetConnMaxLifetime(time.Hour)
+	sqlDB.SetConnMaxIdleTime(15 * time.Minute)
 
 	return db, nil
 }
