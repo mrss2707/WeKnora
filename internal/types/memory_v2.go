@@ -116,8 +116,8 @@ type MemoryFilter struct {
 type MemorySearchResult struct {
 	Memory    *AgentMemory `json:"memory"`
 	Score     float64      `json:"score"`
-	IsStale   bool         `json:"is_stale"`
 	StaleDays int          `json:"stale_days"`
+	IsStale   bool         `json:"is_stale"`
 }
 
 // ---------------------------------------------------------------------------
