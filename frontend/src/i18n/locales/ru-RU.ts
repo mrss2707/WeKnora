@@ -1068,6 +1068,7 @@ export default {
     autoCheckUpdateDesc: 'При включении автоматически проверять и скачивать последнюю версию в фоновом режиме при запуске.',
     memoryRequiresNeo4j: 'Функция памяти требует графовую базу данных Neo4j. Пожалуйста, настройте и включите Neo4j (установите NEO4J_ENABLE=true) перед активацией этой функции.',
     memoryHowToEnable: 'Руководство по настройке Neo4j',
+    memoryNotAvailable: 'Недоступно',
     vectorStoreEngine: 'Движок векторной БД',
     parserEngine: 'Движок парсинга',
     storageEngine: 'Движок хранения',

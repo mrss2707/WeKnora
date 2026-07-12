@@ -1157,6 +1157,7 @@ export default {
     autoCheckUpdateDesc: 'When enabled, automatically check and download the latest version in the background.',
     memoryRequiresNeo4j: 'Memory feature requires Neo4j graph database. Please configure and enable Neo4j (set NEO4J_ENABLE=true) before enabling this feature.',
     memoryHowToEnable: 'View Neo4j Configuration Guide',
+    memoryNotAvailable: 'Not available',
     vectorStoreEngine: 'Vector DB Engine',
     parserEngine: 'Parser Engine',
     storageEngine: 'Storage Engine',

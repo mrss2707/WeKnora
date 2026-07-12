@@ -1012,6 +1012,7 @@ export default {
     autoCheckUpdateDesc: '활성화하면 시작 시 최신 버전을 자동으로 확인하고 백그라운드에서 다운로드합니다.',
     memoryRequiresNeo4j: "기억 기능은 Neo4j 그래프 데이터베이스가 필요합니다. 이 기능을 활성화하기 전에 Neo4j를 구성하고 활성화해 주세요 (NEO4J_ENABLE=true 설정).",
     memoryHowToEnable: "Neo4j 구성 가이드 보기",
+    memoryNotAvailable: "사용 불가",
     vectorStoreEngine: "벡터 DB 엔진",
     parserEngine: "파싱 엔진",
     storageEngine: "스토리지 엔진",

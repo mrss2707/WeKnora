@@ -1020,6 +1020,7 @@ export default {
     autoCheckUpdateDesc: '开启后自动检查并在后台下载最新版本安装包。',
     memoryRequiresNeo4j: "记忆功能依赖 Neo4j 图数据库，请先配置并启用 Neo4j（设置环境变量 NEO4J_ENABLE=true）后再开启此功能。",
     memoryHowToEnable: "查看 Neo4j 配置指南",
+    memoryNotAvailable: "不可用",
     vectorStoreEngine: "向量数据库引擎",
     parserEngine: "解析引擎",
     storageEngine: "存储引擎",

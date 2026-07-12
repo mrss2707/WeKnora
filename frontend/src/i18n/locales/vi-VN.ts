@@ -1150,6 +1150,7 @@ export default {
     autoCheckUpdateDesc: 'Khi bật, tự động kiểm tra và tải xuống phiên bản mới nhất trong nền.',
     memoryRequiresNeo4j: 'Tính năng bộ nhớ cần cơ sở dữ liệu đồ thị Neo4j. Vui lòng cấu hình và bật Neo4j (đặt NEO4J_ENABLE=true) trước khi bật tính năng này.',
     memoryHowToEnable: 'Xem Hướng dẫn Cấu hình Neo4j',
+    memoryNotAvailable: 'Không khả dụng',
     vectorStoreEngine: 'Trường Vector DB',
     parserEngine: 'Trường Phân tích',
     storageEngine: 'Trường Lưu trữ',

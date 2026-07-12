@@ -127,28 +127,24 @@
         <div class="setting-info">
           <label>{{ $t('settings.enableMemory') }}</label>
           <p class="desc">{{ $t('settings.enableMemoryDesc') }}</p>
+          <p v-if="memoryStatus" class="desc memory-status-info">
+            <template v-if="memoryStatus.available">
+              {{ memoryStatus.backend }} - {{ memoryStatus.memory_count.toLocaleString() }}
+            </template>
+            <template v-else>
+              {{ $t('settings.memoryNotAvailable') }}
+            </template>
+          </p>
         </div>
         <div class="setting-control">
           <t-switch
             :value="isMemoryEnabled"
-            :disabled="!isNeo4jAvailable || memorySaving"
+            :disabled="!memoryBackendAvailable || memorySaving"
             :loading="memorySaving"
             @change="handleMemoryChange"
           />
         </div>
       </div>
-      <t-alert
-        v-if="!isNeo4jAvailable"
-        theme="warning"
-        style="margin-top: -8px; margin-bottom: 16px;"
-      >
-        <template #message>
-          <div>{{ $t('settings.memoryRequiresNeo4j') }}</div>
-          <t-link theme="primary" href="https://github.com/Tencent/WeKnora/blob/main/docs/KnowledgeGraph.md" target="_blank">
-            {{ $t('settings.memoryHowToEnable') }}
-          </t-link>
-        </template>
-      </t-alert>
 
       <!-- 自动下载更新开关 (Lite edition only) -->
       <div class="setting-row" v-if="authStore.isLiteMode">
@@ -172,7 +168,7 @@ import { MessagePlugin } from 'tdesign-vue-next'
 import { useI18n } from 'vue-i18n'
 import { useSettingsStore } from '@/stores/settings'
 import { useAuthStore } from '@/stores/auth'
-import { getSystemInfo } from '@/api/system'
+import { getMemoryStatus, type MemoryStatus } from '@/api/memory'
 import { useTheme, type ThemeMode } from '@/composables/useTheme'
 import {
   useFont,
@@ -233,12 +229,10 @@ const monoFontOptions = computed<{ value: MonoFontKey; label: string; preview: s
 const currentSansStack = computed(() => SANS_STACKS[localSansFont.value] ?? SANS_STACKS.system)
 const currentMonoStack = computed(() => MONO_STACKS[localMonoFont.value] ?? MONO_STACKS.system)
 
-// 系统信息
-const systemInfo = ref<any>(null)
+// 记忆后端状态
+const memoryStatus = ref<MemoryStatus | null>(null)
 
-const isNeo4jAvailable = computed(() => {
-  return systemInfo.value?.graph_database_engine && systemInfo.value.graph_database_engine !== '未启用'
-})
+const memoryBackendAvailable = computed(() => memoryStatus.value?.available ?? false)
 
 // 记忆功能状态：只读 computed（toggleMemory 现在是 async + 后端持久化，
 // 触发路径统一走 @change → handleMemoryChange，避免 v-model setter 二次调用）。
@@ -271,16 +265,16 @@ onMounted(async () => {
     localLanguage.value = locale.value
   }
 
-  // 加载系统信息以检查 Neo4j 可用性
+  // 加载记忆后端状态
   try {
-    const response = await getSystemInfo()
-    systemInfo.value = response.data
-    if (!isNeo4jAvailable.value && settingsStore.isMemoryEnabled) {
-      // Neo4j 不可用 → 兜底关掉。后端写入失败不打断主流程（页面级 best-effort）。
+    const response = await getMemoryStatus()
+    memoryStatus.value = response.data
+    if (!memoryBackendAvailable.value && settingsStore.isMemoryEnabled) {
+      // 记忆后端不可用 → 兜底关掉。后端写入失败不打断主流程（页面级 best-effort）。
       void settingsStore.toggleMemory(false).catch(() => {})
     }
   } catch (error) {
-    console.error('Failed to load system info:', error)
+    console.error('Failed to load memory status:', error)
   }
 })
 
@@ -295,8 +289,8 @@ const handleLanguageChange = () => {
 // toggleMemory 是 async：先乐观写本地、再 PUT 后端；失败会回滚并 throw。
 // UI 在 saving 期间禁用开关 + 显示 loading，避免用户在请求未完成时反复点。
 const handleMemoryChange = async (val: boolean) => {
-  if (val && !isNeo4jAvailable.value) {
-    MessagePlugin.warning(t('settings.memoryRequiresNeo4j'))
+  if (val && !memoryBackendAvailable.value) {
+    MessagePlugin.warning(t('settings.memoryNotAvailable'))
     return
   }
   memorySaving.value = true
@@ -406,6 +400,13 @@ const handleFontSizeChange = (val: FontSizeKey) => {
     color: var(--td-text-color-secondary);
     margin: 0;
     line-height: 1.5;
+  }
+
+  .memory-status-info {
+    margin-top: 6px;
+    font-size: 12px;
+    color: var(--td-text-color-placeholder);
+    font-family: var(--td-font-family-mono, monospace);
   }
 }
 
