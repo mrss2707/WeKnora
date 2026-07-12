@@ -125,11 +125,11 @@ func (p *Pruner) softDeleteExpired(ctx context.Context) {
 // that have been deleted for >14 days with access_count=0.
 // This is a simplification since the repository only supports soft-delete.
 // In production, this would query deleted_at and access_count conditions.
-func (p *Pruner) hardDeleteSoftDeleted(_ context.Context) {
+func (p *Pruner) hardDeleteSoftDeleted(ctx context.Context) {
 	// The repository's Delete method does soft-delete. Hard delete would
 	// require a dedicated repo method. For now, this is a no-op that
 	// documents the intended behavior.
-	logger.Infof(nil, "pruner: hard-delete pass - requires dedicated repo method for permanent deletion")
+	logger.Infof(ctx, "pruner: hard-delete pass - requires dedicated repo method for permanent deletion")
 }
 
 // hasProtectedTag checks if tags contain "critical" or "permanent".
