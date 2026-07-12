@@ -51,6 +51,7 @@ import (
 	chatpipeline "github.com/Tencent/WeKnora/internal/application/service/chat_pipeline"
 	"github.com/Tencent/WeKnora/internal/application/service/file"
 	memoryService "github.com/Tencent/WeKnora/internal/application/service/memory"
+	memoryV2Service "github.com/Tencent/WeKnora/internal/application/service/memory_v2"
 	"github.com/Tencent/WeKnora/internal/application/service/retriever"
 	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/database"
@@ -209,7 +210,27 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(service.NewMCPToolApprovalService))
 	must(container.Provide(service.NewCustomAgentService))
 	must(container.Provide(service.NewUserResourceFavoriteService))
-	must(container.Provide(memoryService.NewMemoryService))
+
+	// Memory service — register both implementations with named tags, then a factory
+	// that selects by MEMORY_BACKEND env var (defaults to Neo4j).
+	must(container.Provide(memoryService.NewMemoryService, dig.Name("neo4j")))
+	must(container.Provide(memoryV2Service.NewMemoryServiceV2, dig.Name("v2"), dig.As(new(interfaces.MemoryService))))
+
+	// Factory: selects MemoryService implementation based on MEMORY_BACKEND env var
+	must(container.Provide(func(in struct {
+		dig.In
+		Neo4j interfaces.MemoryService `name:"neo4j"`
+		V2    interfaces.MemoryService `name:"v2"`
+	}) interfaces.MemoryService {
+		if os.Getenv("MEMORY_BACKEND") == "v2" {
+			return in.V2
+		}
+		return in.Neo4j
+	}))
+
+	// MemoryServiceV2 registration (unnamed) for handlers that need V2-specific methods
+	must(container.Provide(memoryV2Service.NewMemoryServiceV2))
+
 	must(container.Provide(service.NewWikiPageService))
 	must(container.Provide(service.NewWikiLogEntryService))
 	must(container.Provide(service.NewWikiIngestService, dig.Name("wikiIngest")))
