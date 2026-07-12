@@ -123,6 +123,7 @@ type MemorySearchResult struct {
 // ---------------------------------------------------------------------------
 // Lint / Save result
 // ---------------------------------------------------------------------------
+// Phase 0.5 — New domain types for Memory V2
 
 // MemoryLintIssue describes a single lint finding.
 type MemoryLintIssue struct {
