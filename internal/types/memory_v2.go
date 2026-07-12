@@ -267,6 +267,7 @@ type DedupConfig struct {
 // ---------------------------------------------------------------------------
 
 // MemoryV2Config is the top-level configuration for the Memory v2 module.
+// See design.md section 2.7 for field specifications.
 type MemoryV2Config struct {
 	Enabled             bool               `json:"enabled"`
 	MaxSearchResults    int                `json:"max_search_results"`
