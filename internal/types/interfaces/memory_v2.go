@@ -27,6 +27,7 @@ type MemoryRepositoryV2 interface {
 
 	// Cache invalidation
 	InvalidateResultCache(ctx context.Context, tenantID string)
+
 }
 
 // MemoryServiceV2 defines the business-logic contract for Memory v2.
@@ -55,4 +56,3 @@ type MemoryServiceV2 interface {
 	// Cleanup stops all workers gracefully.
 	Cleanup()
 }
-
