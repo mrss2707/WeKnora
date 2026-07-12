@@ -925,7 +925,7 @@ func TestContainsNegation(t *testing.T) {
 		{"nope with not", "Nope, not happening.", true},
 		{"nothing no match", "Nothing to see here.", false},
 		{"no as substring", "Anode is a term.", false},
-		{"negation without space", "No! Don't go!", false},
+		{"negation without space", "No! Don't go!", true},
 		// "No!" doesn't have trailing space, so "no " won't match
 		// "Don't" -> matches "don't "
 		{"uppercase negation", "It is NOT blue.", true},
@@ -947,7 +947,7 @@ func TestContainsNegation_EmptyContent(t *testing.T) {
 }
 
 func TestContainsNegation_ContentShorterThanNegation(t *testing.T) {
-	assert.False(t, containsNegation("no"), "single word shorter than negation pattern 'no ' should not match")
+	assert.True(t, containsNegation("no"), "'no' is a standalone negation word")
 }
 
 // ---------------------------------------------------------------------------

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"strings"
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/logger"
@@ -282,14 +283,30 @@ func (h *HealthChecker) checkVerdictConsistency(memories []*types.AgentMemory) [
 
 // containsNegation checks if content contains negation words.
 func containsNegation(content string) bool {
-	negations := []string{"not ", "never ", "no ", "cannot ", "can't ", "don't ", "doesn't "}
+	negations := []string{"not", "never", "no", "cannot", "can't", "don't", "doesn't"}
+	lower := strings.ToLower(content)
 	for _, n := range negations {
-		// Simple substring check
-		for i := 0; i <= len(content)-len(n); i++ {
-			if i+len(n) <= len(content) && toLower(content[i:i+len(n)]) == n {
+		start := 0
+		for {
+			idx := strings.Index(lower[start:], n)
+			if idx == -1 {
+				break
+			}
+			absIdx := start + idx
+			endIdx := absIdx + len(n)
+			// Word must be at start or preceded by non-letter
+			prevOk := absIdx == 0 || !isLetter(rune(lower[absIdx-1]))
+			// Word must be at end or followed by non-letter
+			nextOk := endIdx >= len(lower) || !isLetter(rune(lower[endIdx]))
+			if prevOk && nextOk {
 				return true
 			}
+			start = endIdx
 		}
 	}
 	return false
+}
+
+func isLetter(r rune) bool {
+	return (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z')
 }
