@@ -100,8 +100,8 @@ type MemoryFilter struct {
 	Query      string          `json:"query,omitempty"`
 	MemoryType string          `json:"memory_type,omitempty"`
 	Tier       *int            `json:"tier,omitempty"` // nil means no filter; 0-3 are valid values
-	Verdicts   []MemoryVerdict `json:"verdicts,omitempty"`
 	SessionID  string          `json:"session_id,omitempty"`
+	Verdicts   []MemoryVerdict `json:"verdicts,omitempty"`
 	MinScore   float64         `json:"min_score,omitempty"`
 	DeepGraph  bool            `json:"deep_graph,omitempty"`
 	Limit      int             `json:"limit,omitempty"`
