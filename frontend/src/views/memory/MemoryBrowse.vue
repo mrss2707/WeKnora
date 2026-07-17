@@ -256,7 +256,7 @@
 
       <!-- Empty state -->
       <div v-if="displayMemories.length === 0 && !memoryStore.loading" class="empty-state">
-        <t-icon name="memory" size="48px" class="empty-icon" />
+        <t-icon name="layers" size="48px" class="empty-icon" />
         <span class="empty-title">{{ $t('memory.browse.empty') }}</span>
         <span class="empty-desc">{{ $t('memory.browse.emptyDesc') }}</span>
       </div>

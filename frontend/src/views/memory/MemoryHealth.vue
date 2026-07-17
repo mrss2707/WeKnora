@@ -7,7 +7,7 @@
 
     <!-- Empty state (no data) -->
     <div v-else-if="!healthReport" class="empty-state">
-      <t-icon name="health" size="48px" class="empty-icon" />
+      <t-icon name="info-circle" size="48px" class="empty-icon" />
       <span class="empty-title">{{ $t('memory.health.emptyTitle') || 'Health Report Unavailable' }}</span>
       <span class="empty-desc">{{ $t('memory.health.emptyDesc') || 'No health data available for this knowledge base. Run a health check to generate a report.' }}</span>
     </div>

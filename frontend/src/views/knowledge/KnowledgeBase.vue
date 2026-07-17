@@ -71,10 +71,10 @@ const { t } = useI18n();
 const memoryStore = useMemoryStore()
 const hasCriticalIssues = ref(false)
 const subTabs = computed(() => [
-  { key: 'browse', icon: 'list', label: 'Browse' },
-  { key: 'graph', icon: 'chart-bubble', label: 'Graph' },
-  { key: 'health', icon: 'health', label: 'Health', badge: hasCriticalIssues.value ? 1 : undefined },
-  { key: 'history', icon: 'time', label: 'History' },
+  { key: 'browse', icon: 'list', label: t('memory.subtabBrowse') },
+  { key: 'graph', icon: 'chart-bubble', label: t('memory.subtabGraph') },
+  { key: 'health', icon: 'info-circle', label: t('memory.subtabHealth'), badge: hasCriticalIssues.value ? 1 : undefined },
+  { key: 'history', icon: 'time', label: t('memory.subtabHistory') },
 ] as const)
 const memoryDrawerVisible = ref(false)
 const selectedMemory = ref<AgentMemory | null>(null)
@@ -2052,7 +2052,7 @@ async function createNewSession(value: string): Promise<void> {
                 <span class="breadcrumb-tab-sep">/</span>
                 <span :class="['breadcrumb-tab', { active: activeKbTab === 'wiki', indexing: wikiIsIndexing }]"
                   @click="activeKbTab = 'wiki'">
-                  Wiki
+                  {{ $t('knowledgeEditor.wikiBrowser.tabWiki') }}
                   <t-tooltip v-if="wikiIsIndexing" :content="wikiIndexingTip" placement="bottom">
                     <t-loading size="small" class="breadcrumb-tab-indicator" />
                   </t-tooltip>
@@ -2070,7 +2070,7 @@ async function createNewSession(value: string): Promise<void> {
                 <span class="breadcrumb-tab-sep">/</span>
                 <span :class="['breadcrumb-tab', { active: activeKbTab === 'memory' }]"
                   @click="activeKbTab = 'memory'">
-                  {{ $t('knowledgeEditor.wikiBrowser.tabMemory', 'Memory') }}
+                  {{ $t('knowledgeEditor.wikiBrowser.tabMemory') }}
                 </span>
               </template>
               <template v-else>
@@ -2079,7 +2079,7 @@ async function createNewSession(value: string): Promise<void> {
                 <span class="breadcrumb-tab-sep">/</span>
                 <span :class="['breadcrumb-tab', { active: activeKbTab === 'memory' }]"
                   @click="activeKbTab = 'memory'">
-                  {{ $t('knowledgeEditor.wikiBrowser.tabMemory', 'Memory') }}
+                  {{ $t('knowledgeEditor.wikiBrowser.tabMemory') }}
                 </span>
               </template>
             </h2>

@@ -166,7 +166,7 @@ const eventTypeIcons: Record<TimelineEventType, string> = {
   dreamer_action: 'auto',
   consolidation: 'refresh',
   pruner: 'clear',
-  health_check: 'health',
+  health_check: 'info-circle',
 }
 
 const eventTypeColors: Record<TimelineEventType, string> = {
