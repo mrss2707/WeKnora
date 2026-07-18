@@ -2,6 +2,7 @@ package interfaces
 
 import (
 	"context"
+	"time"
 
 	"github.com/Tencent/WeKnora/internal/types"
 )
@@ -11,8 +12,14 @@ type MemoryRepositoryV2 interface {
 	// CRUD
 	Create(ctx context.Context, memory *types.AgentMemory) error
 	GetByID(ctx context.Context, tenantID, id string) (*types.AgentMemory, error)
+	GetByFingerprint(ctx context.Context, tenantID, fingerprint string) (*types.AgentMemory, error)
 	Update(ctx context.Context, memory *types.AgentMemory) error
 	Delete(ctx context.Context, tenantID, id string) error
+
+	// Relations
+	CreateRelation(ctx context.Context, rel *types.MemoryRelation) error
+	GetRelations(ctx context.Context, memoryID, tenantID string) ([]*types.MemoryRelation, error)
+	DeleteRelation(ctx context.Context, id, tenantID string) error
 
 	// Search
 	Search(ctx context.Context, filter *types.MemoryFilter) ([]*types.MemorySearchResult, int64, error)
@@ -25,9 +32,17 @@ type MemoryRepositoryV2 interface {
 	// Hub score
 	ComputeHubScores(ctx context.Context, tenantID string) error
 
+	// Hard delete (pruner)
+	HardDeleteExpired(ctx context.Context, tenantID string, olderThan time.Time) (int64, error)
+
 	// Cache invalidation
 	InvalidateResultCache(ctx context.Context, tenantID string)
+	SetCacheInvalidator(invalidator CacheInvalidator)
+}
 
+// CacheInvalidator is a minimal interface for cache prefix invalidation.
+type CacheInvalidator interface {
+	InvalidateByPrefix(prefix string)
 }
 
 // MemoryServiceV2 defines the business-logic contract for Memory v2.

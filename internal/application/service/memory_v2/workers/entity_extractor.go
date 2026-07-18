@@ -129,17 +129,16 @@ Memories:
 				continue
 			}
 			// Store extracted entity as a relation from the memory
-			relation := &types.MemoryRelation{
-				TenantID: mem.TenantID,
-				FromUUID: mem.ID,
-				ToUUID:   "", // Entity gets a new ID
-				Relation: "mentions_" + ent.Type,
-				Weight:   ent.Confidence,
+			rel := &types.MemoryRelation{
+				TenantID:     mem.TenantID,
+				FromUUID:     mem.ID,
+				ToUUID:       "", // Entity name stored as tag, not FK
+				RelationType: "mentions_" + ent.Type,
+				Weight:       ent.Confidence,
 			}
-			_ = relation
-			// In a full implementation, entities would be stored in an entities table
-			// and relations would link memories to entities.
-			_ = e.repo
+			if err := e.repo.CreateRelation(ctx, rel); err != nil {
+				logger.Errorf(ctx, "entity extractor: failed to create relation: %v", err)
+			}
 		}
 	}
 }

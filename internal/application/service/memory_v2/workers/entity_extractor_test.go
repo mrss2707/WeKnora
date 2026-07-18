@@ -9,6 +9,7 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/Tencent/WeKnora/internal/types"
+	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -82,6 +83,23 @@ func (m *mockEntityExtractorRepo) ComputeHubScores(ctx context.Context, tenantID
 }
 
 func (m *mockEntityExtractorRepo) InvalidateResultCache(ctx context.Context, tenantID string) {}
+
+func (m *mockEntityExtractorRepo) GetByFingerprint(ctx context.Context, tenantID, fingerprint string) (*types.AgentMemory, error) {
+	return nil, nil
+}
+func (m *mockEntityExtractorRepo) CreateRelation(ctx context.Context, rel *types.MemoryRelation) error {
+	return nil
+}
+func (m *mockEntityExtractorRepo) GetRelations(ctx context.Context, memoryID, tenantID string) ([]*types.MemoryRelation, error) {
+	return nil, nil
+}
+func (m *mockEntityExtractorRepo) DeleteRelation(ctx context.Context, id, tenantID string) error {
+	return nil
+}
+func (m *mockEntityExtractorRepo) HardDeleteExpired(ctx context.Context, tenantID string, olderThan time.Time) (int64, error) {
+	return 0, nil
+}
+func (m *mockEntityExtractorRepo) SetCacheInvalidator(invalidator interfaces.CacheInvalidator) {}
 
 // mockEntityExtractorChat implements chat.Chat for testing the entity extractor.
 type mockEntityExtractorChat struct {

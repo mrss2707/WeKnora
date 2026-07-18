@@ -16,7 +16,7 @@ type Pruner struct {
 
 // NewPruner creates a new Pruner.
 func NewPruner(repo interfaces.MemoryRepositoryV2) *Pruner {
-	return &Pruner{}
+	return &Pruner{repo: repo}
 }
 
 // Run starts the pruner worker loop. Runs daily at 3:00 AM.
@@ -123,13 +123,15 @@ func (p *Pruner) softDeleteExpired(ctx context.Context) {
 
 // hardDeleteSoftDeleted permanently deletes tier-3 soft-deleted memories
 // that have been deleted for >14 days with access_count=0.
-// This is a simplification since the repository only supports soft-delete.
-// In production, this would query deleted_at and access_count conditions.
 func (p *Pruner) hardDeleteSoftDeleted(ctx context.Context) {
-	// The repository's Delete method does soft-delete. Hard delete would
-	// require a dedicated repo method. For now, this is a no-op that
-	// documents the intended behavior.
-	logger.Infof(ctx, "pruner: hard-delete pass - requires dedicated repo method for permanent deletion")
+	count, err := p.repo.HardDeleteExpired(ctx, "", time.Now().Add(-14*24*time.Hour))
+	if err != nil {
+		logger.Errorf(ctx, "pruner: hard-delete failed: %v", err)
+		return
+	}
+	if count > 0 {
+		logger.Infof(ctx, "pruner: hard-deleted %d expired memories", count)
+	}
 }
 
 // hasProtectedTag checks if tags contain "critical" or "permanent".

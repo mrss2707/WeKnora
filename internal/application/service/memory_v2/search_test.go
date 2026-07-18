@@ -10,6 +10,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/Tencent/WeKnora/internal/models/embedding"
 	"github.com/Tencent/WeKnora/internal/types"
+	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -1025,6 +1026,22 @@ func (m *mockSearchRepo) TryDreamerLock(ctx context.Context, tenantID string, wo
 func (m *mockSearchRepo) UnlockDreamer(ctx context.Context, tenantID string) error { return nil }
 func (m *mockSearchRepo) ComputeHubScores(ctx context.Context, tenantID string) error { return nil }
 func (m *mockSearchRepo) InvalidateResultCache(ctx context.Context, tenantID string) {}
+func (m *mockSearchRepo) GetByFingerprint(ctx context.Context, tenantID, fingerprint string) (*types.AgentMemory, error) {
+	return nil, nil
+}
+func (m *mockSearchRepo) CreateRelation(ctx context.Context, rel *types.MemoryRelation) error {
+	return nil
+}
+func (m *mockSearchRepo) GetRelations(ctx context.Context, memoryID, tenantID string) ([]*types.MemoryRelation, error) {
+	return nil, nil
+}
+func (m *mockSearchRepo) DeleteRelation(ctx context.Context, id, tenantID string) error {
+	return nil
+}
+func (m *mockSearchRepo) HardDeleteExpired(ctx context.Context, tenantID string, olderThan time.Time) (int64, error) {
+	return 0, nil
+}
+func (m *mockSearchRepo) SetCacheInvalidator(invalidator interfaces.CacheInvalidator) {}
 
 // mockEmbedder implements embedding.Embedder
 type mockEmbedder struct {

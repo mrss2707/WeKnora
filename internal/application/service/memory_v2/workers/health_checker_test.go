@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/types"
+	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -105,6 +106,23 @@ func (m *mockHealthCheckerRepo) InvalidateResultCache(ctx context.Context, tenan
 		m.invalidateCache(ctx, tenantID)
 	}
 }
+
+func (m *mockHealthCheckerRepo) GetByFingerprint(ctx context.Context, tenantID, fingerprint string) (*types.AgentMemory, error) {
+	return nil, nil
+}
+func (m *mockHealthCheckerRepo) CreateRelation(ctx context.Context, rel *types.MemoryRelation) error {
+	return nil
+}
+func (m *mockHealthCheckerRepo) GetRelations(ctx context.Context, memoryID, tenantID string) ([]*types.MemoryRelation, error) {
+	return nil, nil
+}
+func (m *mockHealthCheckerRepo) DeleteRelation(ctx context.Context, id, tenantID string) error {
+	return nil
+}
+func (m *mockHealthCheckerRepo) HardDeleteExpired(ctx context.Context, tenantID string, olderThan time.Time) (int64, error) {
+	return 0, nil
+}
+func (m *mockHealthCheckerRepo) SetCacheInvalidator(invalidator interfaces.CacheInvalidator) {}
 
 // ---------------------------------------------------------------------------
 // Helpers

@@ -10,6 +10,7 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/Tencent/WeKnora/internal/types"
+	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -129,6 +130,23 @@ func (m *mockDreamerRepo) InvalidateResultCache(ctx context.Context, tenantID st
 		m.invalidateCache(ctx, tenantID)
 	}
 }
+
+func (m *mockDreamerRepo) GetByFingerprint(ctx context.Context, tenantID, fingerprint string) (*types.AgentMemory, error) {
+	return nil, nil
+}
+func (m *mockDreamerRepo) CreateRelation(ctx context.Context, rel *types.MemoryRelation) error {
+	return nil
+}
+func (m *mockDreamerRepo) GetRelations(ctx context.Context, memoryID, tenantID string) ([]*types.MemoryRelation, error) {
+	return nil, nil
+}
+func (m *mockDreamerRepo) DeleteRelation(ctx context.Context, id, tenantID string) error {
+	return nil
+}
+func (m *mockDreamerRepo) HardDeleteExpired(ctx context.Context, tenantID string, olderThan time.Time) (int64, error) {
+	return 0, nil
+}
+func (m *mockDreamerRepo) SetCacheInvalidator(invalidator interfaces.CacheInvalidator) {}
 
 // mockDreamerChat implements chat.Chat for testing.
 type mockDreamerChat struct {

@@ -8,6 +8,7 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/models/embedding"
 	"github.com/Tencent/WeKnora/internal/types"
+	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -120,6 +121,23 @@ func (m *mockConsolidatorRepo) InvalidateResultCache(ctx context.Context, tenant
 		m.invalidateCache(ctx, tenantID)
 	}
 }
+
+func (m *mockConsolidatorRepo) GetByFingerprint(ctx context.Context, tenantID, fingerprint string) (*types.AgentMemory, error) {
+	return nil, nil
+}
+func (m *mockConsolidatorRepo) CreateRelation(ctx context.Context, rel *types.MemoryRelation) error {
+	return nil
+}
+func (m *mockConsolidatorRepo) GetRelations(ctx context.Context, memoryID, tenantID string) ([]*types.MemoryRelation, error) {
+	return nil, nil
+}
+func (m *mockConsolidatorRepo) DeleteRelation(ctx context.Context, id, tenantID string) error {
+	return nil
+}
+func (m *mockConsolidatorRepo) HardDeleteExpired(ctx context.Context, tenantID string, olderThan time.Time) (int64, error) {
+	return 0, nil
+}
+func (m *mockConsolidatorRepo) SetCacheInvalidator(invalidator interfaces.CacheInvalidator) {}
 
 // mockConsolidatorEmbedder implements embedding.Embedder for testing.
 type mockConsolidatorEmbedder struct {

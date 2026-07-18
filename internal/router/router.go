@@ -87,6 +87,7 @@ type RouterParams struct {
 	DataSourceCredentialsHandler *handler.DataSourceCredentialsHandler
 	WeKnoraCloudHandler          *handler.WeKnoraCloudHandler
 	WikiPageHandler              *handler.WikiPageHandler
+	MemoryV2Handler              *handler.MemoryV2Handler
 }
 
 // NewRouter 创建新的路由
@@ -232,9 +233,33 @@ func NewRouter(params RouterParams) *gin.Engine {
 		RegisterWeKnoraCloudRoutes(v1, params.WeKnoraCloudHandler, rbacGuards)
 		RegisterWikiPageRoutes(v1, params.WikiPageHandler, rbacGuards)
 		RegisterChunkerDebugRoutes(v1, rbacGuards)
+		RegisterMemoryV2Routes(v1, params.MemoryV2Handler, rbacGuards)
 	}
 
 	return r
+}
+
+// RegisterMemoryV2Routes registers Memory V2 API routes.
+// All routes are nil-safe: if the handler is nil (V2 disabled), the function
+// is a no-op so callers don't need their own nil guard.
+func RegisterMemoryV2Routes(v1 *gin.RouterGroup, handler *handler.MemoryV2Handler, g *rbacGuards) {
+	if handler == nil {
+		return
+	}
+	memories := v1.Group("/memories")
+	{
+		memories.GET("", g.Viewer(), handler.ListMemories)
+		memories.GET("/search", g.Viewer(), handler.SearchMemories)
+		memories.GET("/stats", g.Viewer(), handler.GetMemoryStats)
+		memories.GET("/health", g.Viewer(), handler.GetHealthReport)
+		memories.GET("/graph/:id", g.Viewer(), handler.GetMemoryGraph)
+		memories.GET("/:id", g.Viewer(), handler.GetMemory)
+		memories.POST("", g.Contributor(), handler.CreateMemory)
+		memories.PUT("/:id", g.Contributor(), handler.UpdateMemory)
+		memories.DELETE("/:id", g.Contributor(), handler.DeleteMemory)
+		memories.POST("/dream", g.Admin(), handler.TriggerDream)
+	}
+	v1.GET("/tenants/memory-status", g.Viewer(), handler.MemoryStatus)
 }
 
 // RegisterChunkerDebugRoutes wires the read-only chunker preview endpoint

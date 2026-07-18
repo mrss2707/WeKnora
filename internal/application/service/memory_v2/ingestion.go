@@ -42,6 +42,8 @@ func (s *MemoryServiceV2Impl) SaveMemory(ctx context.Context, memory *types.Agen
 
 	// Step 2: SHA256 fingerprint dedup
 	fingerprint := computeFingerprint(memory.Content)
+	fingerprintStr := fingerprint // capture for use in memory struct
+	memory.Fingerprint = &fingerprintStr
 	existing, err := s.findByFingerprint(ctx, memory.TenantID, fingerprint)
 	if err != nil {
 		return nil, fmt.Errorf("fingerprint lookup failed: %w", err)
@@ -97,8 +99,8 @@ func (s *MemoryServiceV2Impl) SaveMemory(ctx context.Context, memory *types.Agen
 		return nil, fmt.Errorf("store failed: %w", err)
 	}
 
-	// Step 9: Lint on write
-	lintIssues := RunLintOnWrite(ctx, memory, s.repo, s.config.LintOnWrite)
+	// Step 9: Lint on write (pass pre-computed embedding to avoid re-embed)
+	lintIssues := RunLintOnWrite(ctx, memory, s.repo, s.config.LintOnWrite, embedding)
 
 	// Step 10: Enqueue for batch entity extraction
 	s.entityExtractor.Enqueue(memory)
@@ -145,17 +147,8 @@ func computeFingerprint(content string) string {
 }
 
 // findByFingerprint looks up a memory by its content fingerprint.
-// Uses content lookup as a proxy for fingerprint dedup.
 func (s *MemoryServiceV2Impl) findByFingerprint(ctx context.Context, tenantID, fingerprint string) (*types.AgentMemory, error) {
-	// Use repo search with exact content matching, or query by fingerprint.
-	// Since we don't have a direct fingerprint column, we search by exact content.
-	// The repository's Search method with Query filters by LIKE, but for exact
-	// matching we can list and compare.
-	// For efficiency, we store a hash. In practice, the dedup threshold cosine
-	// search handles most cases. Return nil to let semantic dedup handle it.
-	_ = tenantID
-	_ = fingerprint
-	return nil, nil
+	return s.repo.GetByFingerprint(ctx, tenantID, fingerprint)
 }
 
 // checkSemanticDedup checks cosine similarity against existing memories.
@@ -293,7 +286,7 @@ func detectMemoryType(content string) string {
 }
 
 // suggestTags extracts simple keyword tags from content.
-func suggestTags(content string, memoryType string) []string {
+func suggestTags(content string, memoryType string) types.TagsArray {
 	// Simple tag extraction: pick significant words
 	words := strings.Fields(content)
 	seen := make(map[string]bool)

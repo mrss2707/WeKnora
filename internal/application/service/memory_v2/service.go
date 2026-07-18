@@ -2,7 +2,9 @@ package memory_v2
 
 import (
 	"context"
+	"strings"
 	"sync"
+	"time"
 
 	"github.com/Tencent/WeKnora/internal/application/service/memory_v2/workers"
 	"github.com/Tencent/WeKnora/internal/logger"
@@ -17,19 +19,21 @@ var _ interfaces.MemoryServiceV2 = (*MemoryServiceV2Impl)(nil)
 
 // MemoryCache provides a simple in-memory cache for embeddings and results.
 type MemoryCache struct {
-	mu    sync.RWMutex
-	items map[string]cacheEntry
+	mu       sync.RWMutex
+	items    map[string]cacheEntry
+	maxSize  int
 }
 
 type cacheEntry struct {
 	value     interface{}
-	expiresAt int64 // unix nano
+	expiresAt time.Time
 }
 
-// NewMemoryCache creates a new MemoryCache.
+// NewMemoryCache creates a new MemoryCache with default max 10000 entries.
 func NewMemoryCache() *MemoryCache {
 	return &MemoryCache{
-		items: make(map[string]cacheEntry),
+		items:   make(map[string]cacheEntry),
+		maxSize: 10000,
 	}
 }
 
@@ -41,15 +45,35 @@ func (c *MemoryCache) Get(key string) interface{} {
 	if !ok {
 		return nil
 	}
+	if !entry.expiresAt.IsZero() && time.Now().After(entry.expiresAt) {
+		return nil
+	}
 	return entry.value
 }
 
-// Set stores a value with a TTL.
+// Set stores a value with a TTL in seconds. If the cache is at max capacity,
+// a random entry is evicted to make room.
 func (c *MemoryCache) Set(key string, value interface{}, ttlSeconds int) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	_ = ttlSeconds
-	c.items[key] = cacheEntry{value: value}
+
+	if len(c.items) >= c.maxSize {
+		c.evictOne()
+	}
+
+	expiresAt := time.Time{}
+	if ttlSeconds > 0 {
+		expiresAt = time.Now().Add(time.Duration(ttlSeconds) * time.Second)
+	}
+	c.items[key] = cacheEntry{value: value, expiresAt: expiresAt}
+}
+
+// evictOne removes one random entry. Must be called with lock held.
+func (c *MemoryCache) evictOne() {
+	for k := range c.items {
+		delete(c.items, k)
+		return
+	}
 }
 
 // Invalidate removes a key from the cache.
@@ -57,6 +81,17 @@ func (c *MemoryCache) Invalidate(key string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	delete(c.items, key)
+}
+
+// InvalidateByPrefix removes all keys matching the given prefix.
+func (c *MemoryCache) InvalidateByPrefix(prefix string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for k := range c.items {
+		if strings.HasPrefix(k, prefix) {
+			delete(c.items, k)
+		}
+	}
 }
 
 // Keys returns all cache keys for iteration.
@@ -75,6 +110,34 @@ func (c *MemoryCache) Len() int {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	return len(c.items)
+}
+
+// StartCleanup runs a background goroutine that evicts expired entries.
+// Safe to call multiple times; only the first call starts the loop.
+func (c *MemoryCache) StartCleanup(interval time.Duration) *sync.Once {
+	var once sync.Once
+	once.Do(func() {
+		go func() {
+			ticker := time.NewTicker(interval)
+			defer ticker.Stop()
+			for range ticker.C {
+				c.evictExpired()
+			}
+		}()
+	})
+	return &once
+}
+
+// evictExpired removes all expired entries.
+func (c *MemoryCache) evictExpired() {
+	now := time.Now()
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for k, entry := range c.items {
+		if !entry.expiresAt.IsZero() && now.After(entry.expiresAt) {
+			delete(c.items, k)
+		}
+	}
 }
 
 // MemoryServiceV2Impl implements MemoryServiceV2.
@@ -108,6 +171,7 @@ func NewMemoryServiceV2(
 	config types.MemoryV2Config,
 ) *MemoryServiceV2Impl {
 	cache := NewMemoryCache()
+	cache.StartCleanup(30 * time.Second)
 
 	svc := &MemoryServiceV2Impl{
 		repo:        repo,
@@ -117,6 +181,9 @@ func NewMemoryServiceV2(
 		cache:       cache,
 		tokenBudget: NewTokenBudgetManager().WithChat(ch),
 	}
+
+	// Wire cache into repository for invalidation
+	repo.SetCacheInvalidator(cache)
 
 	// Initialize workers (pass explicit dependencies to avoid circular imports)
 	svc.entityExtractor = workers.NewEntityExtractor(repo, ch)

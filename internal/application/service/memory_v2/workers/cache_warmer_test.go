@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/models/embedding"
+	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/stretchr/testify/assert"
 )
@@ -105,6 +106,22 @@ func (m *mockCacheWarmerRepo) InvalidateResultCache(ctx context.Context, tenantI
 		m.invalidateCache(ctx, tenantID)
 	}
 }
+func (m *mockCacheWarmerRepo) GetByFingerprint(ctx context.Context, tenantID, fingerprint string) (*types.AgentMemory, error) {
+	return nil, nil
+}
+func (m *mockCacheWarmerRepo) CreateRelation(ctx context.Context, rel *types.MemoryRelation) error {
+	return nil
+}
+func (m *mockCacheWarmerRepo) GetRelations(ctx context.Context, memoryID, tenantID string) ([]*types.MemoryRelation, error) {
+	return nil, nil
+}
+func (m *mockCacheWarmerRepo) DeleteRelation(ctx context.Context, id, tenantID string) error {
+	return nil
+}
+func (m *mockCacheWarmerRepo) HardDeleteExpired(ctx context.Context, tenantID string, olderThan time.Time) (int64, error) {
+	return 0, nil
+}
+func (m *mockCacheWarmerRepo) SetCacheInvalidator(invalidator interfaces.CacheInvalidator) {}
 
 // mockCacheWarmerEmbedder implements embedding.Embedder for testing the cache warmer.
 type mockCacheWarmerEmbedder struct {

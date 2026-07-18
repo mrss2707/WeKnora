@@ -1,9 +1,11 @@
 package types
 
 import (
+	"database/sql/driver"
 	"math"
 	"time"
 
+	"github.com/lib/pq"
 	"github.com/pgvector/pgvector-go"
 	"gorm.io/gorm"
 )
@@ -30,28 +32,49 @@ func (v MemoryVerdict) IsProtected() bool {
 }
 
 // ---------------------------------------------------------------------------
+// Custom types
+// ---------------------------------------------------------------------------
+
+// TagsArray wraps []string for PostgreSQL text[] scanning via lib/pq.
+type TagsArray []string
+
+// Scan implements the sql.Scanner interface.
+func (t *TagsArray) Scan(src interface{}) error {
+	return (*pq.StringArray)(t).Scan(src)
+}
+
+// Value implements the driver.Valuer interface.
+func (t TagsArray) Value() (driver.Value, error) {
+	return pq.StringArray(t).Value()
+}
+
+// ---------------------------------------------------------------------------
 // GORM models
 // ---------------------------------------------------------------------------
 
 // AgentMemory represents a single memory record stored in agent_memories.
 type AgentMemory struct {
-	ID          string            `gorm:"column:id;type:varchar(36);primaryKey;default:uuid_generate_v4()" json:"id"`
-	TenantID    string            `gorm:"column:tenant_id;type:varchar(36);not null;index:idx_agent_memories_tenant" json:"tenant_id"`
-	KbID        string            `gorm:"column:kb_id;type:varchar(36);not null" json:"kb_id"`
-	UserID      string            `gorm:"column:user_id;type:varchar(36);not null;default:''" json:"user_id"`
-	Content     string            `gorm:"column:content;type:text;not null" json:"content"`
-	MemoryType  string            `gorm:"column:memory_type;type:varchar(32);default:''" json:"memory_type"`
-	Importance  int               `gorm:"column:importance;type:int;default:0" json:"importance"`
-	Tier        int               `gorm:"column:tier;type:int;default:2" json:"tier"`
-	Verdict     MemoryVerdict     `gorm:"column:verdict;type:varchar(16);default:none" json:"verdict"`
-	HubScore    float64           `gorm:"column:hub_score;default:0" json:"hub_score"`
-	Embedding   pgvector.Vector   `gorm:"column:embedding;type:vector(1536)" json:"embedding"`
-	AccessCount int               `gorm:"column:access_count;type:int;default:0" json:"access_count"`
-	SessionID   string            `gorm:"column:session_id;type:varchar(36);default:'';index:idx_agent_memories_session" json:"session_id"`
-	Tags        []string          `gorm:"-" json:"tags,omitempty"`          // not stored in agent_memories; managed via join table or jsonb
-	CreatedAt   time.Time         `gorm:"column:created_at" json:"created_at"`
-	UpdatedAt   time.Time         `gorm:"column:updated_at" json:"updated_at"`
-	DeletedAt   gorm.DeletedAt    `gorm:"column:deleted_at;index:idx_agent_memories_deleted" json:"-"`
+	ID             string          `gorm:"column:id;type:varchar(36);primaryKey;default:uuid_generate_v4()" json:"id"`
+	TenantID       string          `gorm:"column:tenant_id;type:varchar(36);not null;index:idx_agent_memories_tenant" json:"tenant_id"`
+	KbID           string          `gorm:"column:kb_id;type:varchar(36);not null" json:"kb_id"`
+	UserID         string          `gorm:"column:user_id;type:varchar(36);not null;default:''" json:"user_id"`
+	Content        string          `gorm:"column:content;type:text;not null" json:"content"`
+	MemoryType     string          `gorm:"column:memory_type;type:varchar(32);default:''" json:"memory_type"`
+	Importance     int             `gorm:"column:importance;type:int;default:0" json:"importance"`
+	Tier           int             `gorm:"column:tier;type:int;default:2" json:"tier"`
+	Verdict        MemoryVerdict   `gorm:"column:verdict;type:varchar(16);default:none" json:"verdict"`
+	HubScore       float64         `gorm:"column:hub_score;default:0" json:"hub_score"`
+	Embedding      pgvector.Vector `gorm:"column:embedding;type:vector(1536)" json:"embedding"`
+	AccessCount    int             `gorm:"column:access_count;type:int;default:0" json:"access_count"`
+	SessionID      string          `gorm:"column:session_id;type:varchar(36);default:'';index:idx_agent_memories_session" json:"session_id"`
+	Fingerprint    *string         `gorm:"column:fingerprint;type:varchar(64);index:idx_agent_memories_fingerprint,where:fingerprint IS NOT NULL AND deleted_at IS NULL" json:"fingerprint,omitempty"`
+	Tags           TagsArray       `gorm:"column:tags;type:text[];default:'{}'" json:"tags,omitempty"`
+	Metadata       []byte          `gorm:"column:metadata;type:jsonb;default:'{}'" json:"metadata,omitempty"`
+	LastAccessedAt *time.Time      `gorm:"column:last_accessed_at" json:"last_accessed_at,omitempty"`
+	ExpiresAt      *time.Time      `gorm:"column:expires_at" json:"expires_at,omitempty"`
+	CreatedAt      time.Time       `gorm:"column:created_at" json:"created_at"`
+	UpdatedAt      time.Time       `gorm:"column:updated_at" json:"updated_at"`
+	DeletedAt      gorm.DeletedAt  `gorm:"column:deleted_at;index:idx_agent_memories_deleted" json:"-"`
 }
 
 // TableName overrides the GORM table name.
@@ -61,14 +84,14 @@ func (AgentMemory) TableName() string {
 
 // MemoryRelation represents an edge between two memories.
 type MemoryRelation struct {
-	ID        string         `gorm:"column:id;type:varchar(36);primaryKey;default:uuid_generate_v4()" json:"id"`
-	TenantID  string         `gorm:"column:tenant_id;type:varchar(36);not null;index" json:"tenant_id"`
-	FromUUID  string         `gorm:"column:from_uuid;type:varchar(36);not null;index:idx_mr_from" json:"from_uuid"`
-	ToUUID    string         `gorm:"column:to_uuid;type:varchar(36);not null;index:idx_mr_to" json:"to_uuid"`
-	Relation  string         `gorm:"column:relation;type:varchar(64);default:''" json:"relation"`
-	Weight    float64        `gorm:"column:weight;type:real;default:1.0" json:"weight"`
-	CreatedAt time.Time      `gorm:"column:created_at" json:"created_at"`
-	DeletedAt gorm.DeletedAt `gorm:"column:deleted_at;index" json:"-"`
+	ID           string         `gorm:"column:id;type:varchar(36);primaryKey;default:uuid_generate_v4()" json:"id"`
+	TenantID     string         `gorm:"column:tenant_id;type:varchar(36);not null;index" json:"tenant_id"`
+	FromUUID     string         `gorm:"column:from_uuid;type:varchar(36);not null;index:idx_mr_from" json:"from_uuid"`
+	ToUUID       string         `gorm:"column:to_uuid;type:varchar(36);not null;index:idx_mr_to" json:"to_uuid"`
+	RelationType string         `gorm:"column:relation_type;type:varchar(64);default:''" json:"relation_type"`
+	Weight       float64        `gorm:"column:weight;type:real;default:1.0" json:"weight"`
+	CreatedAt    time.Time      `gorm:"column:created_at" json:"created_at"`
+	DeletedAt    gorm.DeletedAt `gorm:"column:deleted_at;index" json:"-"`
 }
 
 func (MemoryRelation) TableName() string {

@@ -36,6 +36,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/agent/approval"
 	"github.com/Tencent/WeKnora/internal/application/repository"
 	memoryRepo "github.com/Tencent/WeKnora/internal/application/repository/memory/neo4j"
+	memoryRepoV2 "github.com/Tencent/WeKnora/internal/application/repository/memory_v2"
 	dorisRepo "github.com/Tencent/WeKnora/internal/application/repository/retriever/doris"
 	elasticsearchRepoV7 "github.com/Tencent/WeKnora/internal/application/repository/retriever/elasticsearch/v7"
 	elasticsearchRepoV8 "github.com/Tencent/WeKnora/internal/application/repository/retriever/elasticsearch/v8"
@@ -51,6 +52,7 @@ import (
 	chatpipeline "github.com/Tencent/WeKnora/internal/application/service/chat_pipeline"
 	"github.com/Tencent/WeKnora/internal/application/service/file"
 	memoryService "github.com/Tencent/WeKnora/internal/application/service/memory"
+	memoryServiceV2 "github.com/Tencent/WeKnora/internal/application/service/memory_v2"
 	"github.com/Tencent/WeKnora/internal/application/service/retriever"
 	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/database"
@@ -151,6 +153,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(repository.NewSystemSettingRepository))
 	must(container.Provide(neo4jRepo.NewNeo4jRepository))
 	must(container.Provide(memoryRepo.NewMemoryRepository))
+	must(container.Provide(memoryRepoV2.NewMemoryRepository, dig.As(new(interfaces.MemoryRepositoryV2))))
 	must(container.Provide(repository.NewMCPServiceRepository))
 	must(container.Provide(repository.NewMCPToolApprovalRepository))
 	must(container.Provide(repository.NewMCPOAuthRepository))
@@ -212,6 +215,19 @@ func BuildContainer(container *dig.Container) *dig.Container {
 
 	// Memory service
 	must(container.Provide(memoryService.NewMemoryService))
+	must(container.Provide(func(
+		repo interfaces.MemoryRepositoryV2,
+		embedder embedding.Embedder,
+		chatModel chat.Chat,
+		cfg *config.Config,
+	) interfaces.MemoryServiceV2 {
+		memCfg := cfg.MemoryV2
+		if memCfg == nil {
+			defaults := types.DefaultMemoryV2Config()
+			memCfg = &defaults
+		}
+		return memoryServiceV2.NewMemoryServiceV2(repo, embedder, chatModel, *memCfg)
+	}))
 
 	must(container.Provide(service.NewWikiPageService))
 	must(container.Provide(service.NewWikiLogEntryService))
@@ -308,7 +324,18 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Invoke(chatpipeline.NewPluginSearchEntity))
 	must(container.Invoke(chatpipeline.NewPluginSearchParallel))
 	must(container.Invoke(chatpipeline.NewPluginWikiBoost))
-	must(container.Invoke(chatpipeline.NewMemoryPlugin))
+	must(container.Invoke(func(
+		eventManager *chatpipeline.EventManager,
+		memV1 interfaces.MemoryService,
+		memV2 interfaces.MemoryServiceV2,
+		cfg *config.Config,
+	) {
+		if cfg.MemoryV2 != nil && cfg.MemoryV2.Enabled {
+			chatpipeline.NewMemoryPluginV2(eventManager, memV2)
+		} else {
+			chatpipeline.NewMemoryPlugin(eventManager, memV1)
+		}
+	}))
 	logger.Debugf(ctx, "[Container] Chat pipeline plugins registered")
 
 	// HTTP handlers layer
@@ -356,6 +383,20 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(handler.NewIMHandler))
 	must(container.Provide(handler.NewEmbedChannelHandler))
 	must(container.Provide(handler.NewWeKnoraCloudHandler))
+	must(container.Provide(handler.NewMemoryV2Handler))
+	logger.Debugf(ctx, "[Container] HTTP handlers registered")
+
+	// Memory V2 worker lifecycle
+	must(container.Invoke(func(svc interfaces.MemoryServiceV2, cleaner interfaces.ResourceCleaner, cfg *config.Config) {
+		if cfg.MemoryV2 == nil || !cfg.MemoryV2.Enabled {
+			return
+		}
+		svc.StartWorkers(context.Background())
+		cleaner.RegisterWithName("MemoryV2Workers", func() error {
+			svc.Cleanup()
+			return nil
+		})
+	}))
 	logger.Debugf(ctx, "[Container] HTTP handlers registered")
 
 	// Wire the chat package's local image resolver so multimodal chat can read
@@ -625,6 +666,18 @@ func initDatabase(cfg *config.Config) (*gorm.DB, error) {
 		// prevents "database is locked" errors from concurrent goroutines.
 		maxOpen = 1
 		maxIdle = 1
+	}
+	// Memory V2 workers share the GORM pool with HTTP handlers.
+	// Increase pool size by MEMORY_V2_DB_POOL_DELTA (default 5) when V2 is enabled.
+	if cfg.MemoryV2 != nil && cfg.MemoryV2.Enabled {
+		poolDelta := 5
+		if v := os.Getenv("MEMORY_V2_DB_POOL_DELTA"); v != "" {
+			if d, err := strconv.Atoi(v); err == nil && d > 0 {
+				poolDelta = d
+			}
+		}
+		maxOpen += poolDelta
+		maxIdle += poolDelta / 2
 	}
 	sqlDB.SetMaxOpenConns(maxOpen)
 	sqlDB.SetMaxIdleConns(maxIdle)

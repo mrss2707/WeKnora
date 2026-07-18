@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"errors"
+	"sync"
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/types"
@@ -15,12 +16,20 @@ import (
 
 // MemoryRepository implements MemoryRepositoryV2 using GORM + PostgreSQL/pgvector.
 type MemoryRepository struct {
-	db *gorm.DB
+	db            *gorm.DB
+	cache         interfaces.CacheInvalidator
+	paradeDBOnce  sync.Once
+	paradeDBAvail bool
 }
 
 // NewMemoryRepository creates a new MemoryRepository.
 func NewMemoryRepository(db *gorm.DB) *MemoryRepository {
 	return &MemoryRepository{db: db}
+}
+
+// SetCacheInvalidator injects the cache invalidator.
+func (r *MemoryRepository) SetCacheInvalidator(cache interfaces.CacheInvalidator) {
+	r.cache = cache
 }
 
 // ---------------------------------------------------------------------------
@@ -55,6 +64,18 @@ func (r *MemoryRepository) GetByID(ctx context.Context, tenantID, id string) (*t
 		return nil, err
 	}
 	return &m, nil
+}
+
+// GetByFingerprint retrieves a memory by its content fingerprint.
+func (r *MemoryRepository) GetByFingerprint(ctx context.Context, tenantID, fingerprint string) (*types.AgentMemory, error) {
+	var m types.AgentMemory
+	err := r.db.WithContext(ctx).
+		Where("fingerprint = ? AND tenant_id = ? AND deleted_at IS NULL", fingerprint, tenantID).
+		First(&m).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, nil
+	}
+	return &m, err
 }
 
 // Update persists changes to a memory. If the memory has a protected verdict
@@ -101,6 +122,46 @@ func (r *MemoryRepository) Delete(ctx context.Context, tenantID, id string) erro
 	return r.db.WithContext(ctx).
 		Where("tenant_id = ? AND id = ?", tenantID, id).
 		Delete(&types.AgentMemory{}).Error
+}
+
+// ---------------------------------------------------------------------------
+// Relations
+// ---------------------------------------------------------------------------
+
+// CreateRelation inserts a new relation, ignoring on conflict (unique constraint).
+func (r *MemoryRepository) CreateRelation(ctx context.Context, rel *types.MemoryRelation) error {
+	if rel.ID == "" {
+		rel.ID = uuid.New().String()
+	}
+	return r.db.WithContext(ctx).
+		Clauses(clause.OnConflict{DoNothing: true}).
+		Create(rel).Error
+}
+
+// GetRelations returns all relations connected to a memory (both directions).
+func (r *MemoryRepository) GetRelations(ctx context.Context, memoryID, tenantID string) ([]*types.MemoryRelation, error) {
+	var rels []*types.MemoryRelation
+	err := r.db.WithContext(ctx).
+		Where("(from_uuid = ? OR to_uuid = ?) AND tenant_id = ? AND deleted_at IS NULL", memoryID, memoryID, tenantID).
+		Find(&rels).Error
+	return rels, err
+}
+
+// DeleteRelation hard-deletes a relation by ID and tenant.
+func (r *MemoryRepository) DeleteRelation(ctx context.Context, id, tenantID string) error {
+	return r.db.WithContext(ctx).
+		Where("id = ? AND tenant_id = ?", id, tenantID).
+		Delete(&types.MemoryRelation{}).Error
+}
+
+// HardDeleteExpired permanently deletes soft-deleted memories past the retention
+// window. Only removes entries with access_count=0 to preserve cold-but-used data.
+func (r *MemoryRepository) HardDeleteExpired(ctx context.Context, tenantID string, olderThan time.Time) (int64, error) {
+	result := r.db.WithContext(ctx).
+		Unscoped().
+		Where("tenant_id = ? AND deleted_at IS NOT NULL AND deleted_at < ? AND access_count = 0", tenantID, olderThan).
+		Delete(&types.AgentMemory{})
+	return result.RowsAffected, result.Error
 }
 
 // ---------------------------------------------------------------------------
@@ -170,10 +231,111 @@ func (r *MemoryRepository) buildSearchQuery(ctx context.Context, filter *types.M
 		db = db.Where("session_id = ?", filter.SessionID)
 	}
 	if filter.Query != "" {
-		db = db.Where("content LIKE ?", "%"+filter.Query+"%")
+		if r.paradeDBAvailable(ctx) {
+			db = db.Where("content @@@ paradedb.phrase(field => 'content', phrase => ?)", filter.Query)
+		} else {
+			db = db.Where("to_tsvector('english', content) @@ plainto_tsquery('english', ?)", filter.Query)
+		}
 	}
 
 	return db
+}
+
+// paradeDBAvailable checks for pg_search extension once and caches the result.
+func (r *MemoryRepository) paradeDBAvailable(ctx context.Context) bool {
+	r.paradeDBOnce.Do(func() {
+		var count int
+		if err := r.db.WithContext(ctx).Raw(
+			"SELECT COUNT(*) FROM pg_extension WHERE extname = 'pg_search'",
+		).Scan(&count).Error; err == nil && count > 0 {
+			r.paradeDBAvail = true
+		}
+	})
+	return r.paradeDBAvail
+}
+
+// BM25Search performs full-text search using ParadeDB or PostgreSQL tsvector fallback.
+func (r *MemoryRepository) BM25Search(ctx context.Context, filter *types.MemoryFilter) ([]*types.MemorySearchResult, error) {
+	if filter.Query == "" {
+		return nil, nil
+	}
+	limit := filter.Limit
+	if limit <= 0 {
+		limit = 20
+	}
+
+	if r.paradeDBAvailable(ctx) {
+		return r.bm25Raw(ctx, filter, limit, true)
+	}
+	return r.bm25Raw(ctx, filter, limit, false)
+}
+
+// bm25Row is a scan target for BM25 search results.
+type bm25Row struct {
+	ID          string            `gorm:"column:id"`
+	TenantID    string            `gorm:"column:tenant_id"`
+	Content     string            `gorm:"column:content"`
+	MemoryType  string            `gorm:"column:memory_type"`
+	Importance  int               `gorm:"column:importance"`
+	Tier        int               `gorm:"column:tier"`
+	Verdict     types.MemoryVerdict `gorm:"column:verdict"`
+	HubScore    float64           `gorm:"column:hub_score"`
+	AccessCount int               `gorm:"column:access_count"`
+	SessionID   string            `gorm:"column:session_id"`
+	CreatedAt   time.Time         `gorm:"column:created_at"`
+	UpdatedAt   time.Time         `gorm:"column:updated_at"`
+	BM25Score   float64           `gorm:"column:bm25_score"`
+}
+
+// bm25Raw executes the BM25 query (ParadeDB or tsvector path).
+func (r *MemoryRepository) bm25Raw(ctx context.Context, filter *types.MemoryFilter, limit int, paradeDB bool) ([]*types.MemorySearchResult, error) {
+	var rows []bm25Row
+	var err error
+
+	if paradeDB {
+		err = r.db.WithContext(ctx).Table("agent_memories").
+			Select("*, paradedb.score(id) AS bm25_score").
+			Where("tenant_id = ?", filter.TenantID).
+			Where("deleted_at IS NULL").
+			Where("content @@@ paradedb.phrase(field => 'content', phrase => ?)", filter.Query).
+			Order("bm25_score DESC").
+			Limit(limit).
+			Find(&rows).Error
+	} else {
+		err = r.db.WithContext(ctx).Table("agent_memories").
+			Select("*, ts_rank(to_tsvector('english', content), plainto_tsquery('english', ?)) AS bm25_score", filter.Query).
+			Where("tenant_id = ?", filter.TenantID).
+			Where("deleted_at IS NULL").
+			Where("to_tsvector('english', content) @@ plainto_tsquery('english', ?)", filter.Query).
+			Order("bm25_score DESC").
+			Limit(limit).
+			Find(&rows).Error
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	results := make([]*types.MemorySearchResult, len(rows))
+	for i, row := range rows {
+		results[i] = &types.MemorySearchResult{
+			Memory: &types.AgentMemory{
+				ID:          row.ID,
+				TenantID:    row.TenantID,
+				Content:     row.Content,
+				MemoryType:  row.MemoryType,
+				Importance:  row.Importance,
+				Tier:        row.Tier,
+				Verdict:     row.Verdict,
+				HubScore:    row.HubScore,
+				AccessCount: row.AccessCount,
+				SessionID:   row.SessionID,
+				CreatedAt:   row.CreatedAt,
+				UpdatedAt:   row.UpdatedAt,
+			},
+			Score: row.BM25Score,
+		}
+	}
+	return results, nil
 }
 
 // ---------------------------------------------------------------------------
@@ -368,9 +530,12 @@ func (r *MemoryRepository) ComputeHubScores(ctx context.Context, tenantID string
 // Cache
 // ---------------------------------------------------------------------------
 
-// InvalidateResultCache is a no-op stub. Full cache invalidation will be
-// implemented when the query result cache is added in Phase 2.
-func (r *MemoryRepository) InvalidateResultCache(_ context.Context, _ string) {}
+// InvalidateResultCache clears all cached entries matching the tenant prefix.
+func (r *MemoryRepository) InvalidateResultCache(_ context.Context, tenantID string) {
+	if r.cache != nil {
+		r.cache.InvalidateByPrefix("mem:" + tenantID)
+	}
+}
 
 // ---------------------------------------------------------------------------
 // Helpers

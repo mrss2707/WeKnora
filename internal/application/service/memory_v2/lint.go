@@ -12,8 +12,9 @@ import (
 )
 
 // RunLintOnWrite runs all 6 lint rules on a newly saved memory.
+// embedding is the pre-computed vector from SaveMemory to avoid duplicate embed cost.
 // Lint is advisory and does not block the save.
-func RunLintOnWrite(ctx context.Context, memory *types.AgentMemory, repo interfaces.MemoryRepositoryV2, config types.LintOnWriteConfig) []types.MemoryLintIssue {
+func RunLintOnWrite(ctx context.Context, memory *types.AgentMemory, repo interfaces.MemoryRepositoryV2, config types.LintOnWriteConfig, embedding []float32) []types.MemoryLintIssue {
 	if !config.Enabled {
 		return nil
 	}
@@ -27,10 +28,10 @@ func RunLintOnWrite(ctx context.Context, memory *types.AgentMemory, repo interfa
 	issues = append(issues, lintStaleness(ctx, memory, config)...)
 
 	// Rule 3: Contradiction — high similarity with memories of opposite verdict
-	issues = append(issues, lintContradiction(ctx, memory, repo, config)...)
+	issues = append(issues, lintContradiction(ctx, memory, repo, config, embedding)...)
 
 	// Rule 4: Duplication — potential fingerprint collision with existing memories
-	issues = append(issues, lintDuplication(ctx, memory, repo, config)...)
+	issues = append(issues, lintDuplication(ctx, memory, repo, config, embedding)...)
 
 	// Rule 5: Graph fragmentation — memory has no relations and low hub potential
 	issues = append(issues, lintGraphFragmentation(ctx, memory)...)
@@ -78,18 +79,84 @@ func lintStaleness(_ context.Context, memory *types.AgentMemory, config types.Li
 }
 
 // lintContradiction checks for near-duplicate memories with opposite verdicts.
-func lintContradiction(_ context.Context, _ *types.AgentMemory, _ interfaces.MemoryRepositoryV2, config types.LintOnWriteConfig) []types.MemoryLintIssue {
-	_ = config.ContradictionThreshold
-	// This check requires full scan of similar memories, which is expensive.
-	// It will be implemented more thoroughly in the health checker.
+func lintContradiction(ctx context.Context, memory *types.AgentMemory, repo interfaces.MemoryRepositoryV2, config types.LintOnWriteConfig, embedding []float32) []types.MemoryLintIssue {
+	threshold := config.ContradictionThreshold
+	if threshold <= 0 {
+		threshold = 0.85
+	}
+
+	if len(embedding) == 0 {
+		return nil
+	}
+
+	filter := &types.MemoryFilter{
+		TenantID: memory.TenantID,
+		Limit:    5,
+	}
+	similar, err := repo.CosineSearch(ctx, filter, embedding, 5)
+	if err != nil {
+		return nil
+	}
+
+	for _, sr := range similar {
+		if sr.Memory == nil || sr.Memory.ID == memory.ID {
+			continue
+		}
+		if sr.Score < threshold {
+			continue
+		}
+
+		// Check for opposite verdicts
+		oppositeVerdicts := map[types.MemoryVerdict]types.MemoryVerdict{
+			types.VerdictFixed:   types.VerdictRefuted,
+			types.VerdictRefuted: types.VerdictFixed,
+			types.VerdictWIP:     types.VerdictDecision,
+		}
+		if opposite, ok := oppositeVerdicts[memory.Verdict]; ok && sr.Memory.Verdict == opposite {
+			return []types.MemoryLintIssue{{
+				Rule:     "contradiction",
+				Severity: "critical",
+				Message:  fmt.Sprintf("Memory %s contradicts %s (verdict %s vs %s, similarity %.2f)", memory.ID, sr.Memory.ID, memory.Verdict, sr.Memory.Verdict, sr.Score),
+				SourceID: sr.Memory.ID,
+			}}
+		}
+	}
 	return nil
 }
 
-// lintDuplication checks for potential duplicate fingerprints.
-func lintDuplication(_ context.Context, _ *types.AgentMemory, _ interfaces.MemoryRepositoryV2, config types.LintOnWriteConfig) []types.MemoryLintIssue {
-	_ = config.NearDuplicateThreshold
-	// This check requires comparing against all existing memories.
-	// The dedup stage already handles this; lint is advisory.
+// lintDuplication checks for near-duplicate memories by cosine similarity.
+func lintDuplication(ctx context.Context, memory *types.AgentMemory, repo interfaces.MemoryRepositoryV2, config types.LintOnWriteConfig, embedding []float32) []types.MemoryLintIssue {
+	threshold := config.NearDuplicateThreshold
+	if threshold <= 0 {
+		threshold = 0.95
+	}
+
+	if len(embedding) == 0 {
+		return nil
+	}
+
+	filter := &types.MemoryFilter{
+		TenantID: memory.TenantID,
+		Limit:    3,
+	}
+	similar, err := repo.CosineSearch(ctx, filter, embedding, 3)
+	if err != nil {
+		return nil
+	}
+
+	for _, sr := range similar {
+		if sr.Memory == nil || sr.Memory.ID == memory.ID {
+			continue
+		}
+		if sr.Score >= threshold {
+			return []types.MemoryLintIssue{{
+				Rule:     "duplication",
+				Severity: "warning",
+				Message:  fmt.Sprintf("Memory %s is near-duplicate of %s (similarity %.2f)", memory.ID, sr.Memory.ID, sr.Score),
+				SourceID: sr.Memory.ID,
+			}}
+		}
+	}
 	return nil
 }
 

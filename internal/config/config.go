@@ -33,6 +33,7 @@ type Config struct {
 	PromptTemplates *PromptTemplatesConfig `yaml:"prompt_templates" json:"prompt_templates"`
 	IM              *IMConfig              `yaml:"im"               json:"im"`
 	Agent           *AgentConfig           `yaml:"agent"            json:"agent"`
+	MemoryV2        *types.MemoryV2Config  `yaml:"memory_v2"        json:"memory_v2"`
 	// FrontendBaseURL is the externally-visible origin of the SPA, used
 	// to compose absolute share-link URLs. Empty falls back to a host-
 	// relative URL ("/register?token=…") which the SPA then resolves
@@ -565,6 +566,7 @@ func LoadConfig() (*Config, error) {
 	applyKnowledgeBaseEnvOverrides(&cfg)
 	applyAuthAndTenantDefaults(&cfg)
 	applyAuditDefaults(&cfg)
+		applyMemoryV2Defaults(&cfg)
 
 	if err := ValidateConfig(&cfg); err != nil {
 		return nil, err
@@ -866,6 +868,19 @@ func applyAuditDefaults(cfg *Config) {
 		if n, err := strconv.Atoi(value); err == nil && n >= 0 {
 			cfg.Audit.RetentionDays = n
 		}
+	}
+}
+
+// applyMemoryV2Defaults initializes the Memory V2 config.
+// Enabled by default; set MEMORY_V2_ENABLED=false to opt out.
+func applyMemoryV2Defaults(cfg *Config) {
+	if cfg.MemoryV2 == nil {
+		defaults := types.DefaultMemoryV2Config()
+		cfg.MemoryV2 = &defaults
+	}
+	// Env override: explicit "false" disables; anything else keeps the default (true).
+	if v := strings.ToLower(strings.TrimSpace(os.Getenv("MEMORY_V2_ENABLED"))); v == "false" || v == "0" {
+		cfg.MemoryV2.Enabled = false
 	}
 }
 

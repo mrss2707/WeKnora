@@ -100,7 +100,7 @@ func createTestRelation(t *testing.T, db *gorm.DB, tenantID, fromID, toID string
 		TenantID: tenantID,
 		FromUUID: fromID,
 		ToUUID:   toID,
-		Relation: "related_to",
+		RelationType: "related_to",
 		Weight:   weight,
 	}
 	require.NoError(t, db.Create(rel).Error)

@@ -64,13 +64,14 @@ func (a *AutoLinker) LinkMemory(ctx context.Context, memory *types.AgentMemory) 
 				TenantID:  memory.TenantID,
 				FromUUID:  memory.ID,
 				ToUUID:    candidate.ID,
-				Relation:  "related_to",
+				RelationType: "related_to",
 				Weight:    similarity,
 				CreatedAt: time.Now(),
 			}
 			// Store using repo
-			_ = relation
-			_ = a.repo
+				if err := a.repo.CreateRelation(ctx, relation); err != nil {
+					logger.Errorf(ctx, "auto-linker: failed to create relation: %v", err)
+				}
 
 			// If the candidate has a decision verdict, it justifies this memory
 			if candidate.Verdict == types.VerdictDecision {
@@ -78,11 +79,13 @@ func (a *AutoLinker) LinkMemory(ctx context.Context, memory *types.AgentMemory) 
 					TenantID:  memory.TenantID,
 					FromUUID:  candidate.ID,
 					ToUUID:    memory.ID,
-					Relation:  "justifies",
+					RelationType: "justifies",
 					Weight:    similarity,
 					CreatedAt: time.Now(),
 				}
-				_ = justifiesRel
+				if err := a.repo.CreateRelation(ctx, justifiesRel); err != nil {
+					logger.Errorf(ctx, "auto-linker: failed to create justifies relation: %v", err)
+				}
 			}
 		}
 	}

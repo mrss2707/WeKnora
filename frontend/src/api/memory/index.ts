@@ -21,6 +21,8 @@ export type MemoryType = 'semantic' | 'episodic' | 'procedural' | string
 export interface AgentMemory {
   id: string
   tenant_id: string
+  kb_id: string
+  user_id: string
   content: string
   memory_type: string
   importance: number
@@ -29,7 +31,11 @@ export interface AgentMemory {
   hub_score: number
   access_count: number
   session_id: string
+  fingerprint?: string
   tags?: string[]
+  metadata?: Record<string, unknown>
+  last_accessed_at?: string
+  expires_at?: string
   created_at: string
   updated_at: string
 }
@@ -58,7 +64,7 @@ export interface MemoryRelation {
   tenant_id: string
   from_uuid: string
   to_uuid: string
-  relation: string
+  relation_type: string
   weight: number
   created_at: string
 }
@@ -132,7 +138,7 @@ export interface GraphNode {
 export interface GraphEdge {
   source: string
   target: string
-  relation: string
+  relation_type: string
   weight: number
 }
 
