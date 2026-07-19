@@ -215,10 +215,11 @@ func BuildContainer(container *dig.Container) *dig.Container {
 
 	// Memory service
 	must(container.Provide(memoryService.NewMemoryService))
+	// Memory V2 service — embedder and chat model are resolved lazily at first use
+	// to avoid tenant context dependency during DI registration.
 	must(container.Provide(func(
 		repo interfaces.MemoryRepositoryV2,
-		embedder embedding.Embedder,
-		chatModel chat.Chat,
+		modelSvc interfaces.ModelService,
 		cfg *config.Config,
 	) interfaces.MemoryServiceV2 {
 		memCfg := cfg.MemoryV2
@@ -226,7 +227,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 			defaults := types.DefaultMemoryV2Config()
 			memCfg = &defaults
 		}
-		return memoryServiceV2.NewMemoryServiceV2(repo, embedder, chatModel, *memCfg)
+		return memoryServiceV2.NewMemoryServiceV2(repo, modelSvc, *memCfg)
 	}))
 
 	must(container.Provide(service.NewWikiPageService))
@@ -386,17 +387,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(handler.NewMemoryV2Handler))
 	logger.Debugf(ctx, "[Container] HTTP handlers registered")
 
-	// Memory V2 worker lifecycle
-	must(container.Invoke(func(svc interfaces.MemoryServiceV2, cleaner interfaces.ResourceCleaner, cfg *config.Config) {
-		if cfg.MemoryV2 == nil || !cfg.MemoryV2.Enabled {
-			return
-		}
-		svc.StartWorkers(context.Background())
-		cleaner.RegisterWithName("MemoryV2Workers", func() error {
-			svc.Cleanup()
-			return nil
-		})
-	}))
+
 	logger.Debugf(ctx, "[Container] HTTP handlers registered")
 
 	// Wire the chat package's local image resolver so multimodal chat can read

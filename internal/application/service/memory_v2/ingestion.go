@@ -57,7 +57,11 @@ func (s *MemoryServiceV2Impl) SaveMemory(ctx context.Context, memory *types.Agen
 	}
 
 	// Step 3: Semantic dedup (requires embedding)
-	embedding, err := s.embedder.Embed(ctx, memory.Content)
+	embedder, err := s.getEmbedder(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("embedder not available: %w", err)
+	}
+	embedding, err := embedder.Embed(ctx, memory.Content)
 	if err != nil {
 		return nil, fmt.Errorf("embedding failed: %w", err)
 	}

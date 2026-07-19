@@ -41,18 +41,23 @@ func (s *MemoryServiceV2Impl) SearchMemories(ctx context.Context, query string, 
 	// Step 2: Run cosine vector search (requires embedding)
 	var cosineResults []*types.MemorySearchResult
 	if query != "" {
-		vector, err := s.embedder.Embed(ctx, query)
+		embedder, err := s.getEmbedder(ctx)
 		if err != nil {
-			logger.Errorf(ctx, "embedding query failed: %v", err)
-		} else if len(vector) > 0 {
-			cosineFilter := &types.MemoryFilter{
-				TenantID: filter.TenantID,
-				Verdicts: filter.Verdicts,
-			}
-			cosineResults, err = s.repo.CosineSearch(ctx, cosineFilter, vector, filter.Limit*2)
+			logger.Errorf(ctx, "embedder not available: %v", err)
+		} else {
+			vector, err := embedder.Embed(ctx, query)
 			if err != nil {
-				logger.Errorf(ctx, "cosine search failed: %v", err)
-				cosineResults = nil
+				logger.Errorf(ctx, "embedding query failed: %v", err)
+			} else if len(vector) > 0 {
+				cosineFilter := &types.MemoryFilter{
+					TenantID: filter.TenantID,
+					Verdicts: filter.Verdicts,
+				}
+				cosineResults, err = s.repo.CosineSearch(ctx, cosineFilter, vector, filter.Limit*2)
+				if err != nil {
+					logger.Errorf(ctx, "cosine search failed: %v", err)
+					cosineResults = nil
+				}
 			}
 		}
 	}

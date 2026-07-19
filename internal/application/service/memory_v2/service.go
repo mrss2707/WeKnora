@@ -2,6 +2,7 @@ package memory_v2
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"sync"
 	"time"
@@ -142,13 +143,15 @@ func (c *MemoryCache) evictExpired() {
 
 // MemoryServiceV2Impl implements MemoryServiceV2.
 type MemoryServiceV2Impl struct {
-	repo     interfaces.MemoryRepositoryV2
-	embedder embedding.Embedder
-	chat     chat.Chat
-	config   types.MemoryV2Config
-	cache    *MemoryCache
-	cancel   context.CancelFunc
-	wg       sync.WaitGroup
+	repo         interfaces.MemoryRepositoryV2
+	modelService interfaces.ModelService // lazy init for embedder and chat
+	embedder     embedding.Embedder
+	chat         chat.Chat
+	config       types.MemoryV2Config
+	cache        *MemoryCache
+	cancel       context.CancelFunc
+	wg           sync.WaitGroup
+	workerOnce   sync.Once
 
 	// Sub-components
 	tokenBudget *TokenBudgetManager
@@ -164,43 +167,135 @@ type MemoryServiceV2Impl struct {
 }
 
 // NewMemoryServiceV2 creates a new MemoryServiceV2Impl.
+// embedder and chat may be nil; they are lazily initialized via modelService on first use.
 func NewMemoryServiceV2(
 	repo interfaces.MemoryRepositoryV2,
-	embedder embedding.Embedder,
-	ch chat.Chat,
+	modelService interfaces.ModelService,
 	config types.MemoryV2Config,
 ) *MemoryServiceV2Impl {
 	cache := NewMemoryCache()
 	cache.StartCleanup(30 * time.Second)
 
 	svc := &MemoryServiceV2Impl{
-		repo:        repo,
-		embedder:    embedder,
-		chat:        ch,
-		config:      config,
-		cache:       cache,
-		tokenBudget: NewTokenBudgetManager().WithChat(ch),
+		repo:         repo,
+		modelService: modelService,
+		config:       config,
+		cache:        cache,
+		tokenBudget:  NewTokenBudgetManager().WithChat(nil),
 	}
 
 	// Wire cache into repository for invalidation
 	repo.SetCacheInvalidator(cache)
 
-	// Initialize workers (pass explicit dependencies to avoid circular imports)
-	svc.entityExtractor = workers.NewEntityExtractor(repo, ch)
-	svc.autoLinker = workers.NewAutoLinker(repo, embedder)
-	svc.consolidator = workers.NewConsolidator(repo, embedder)
-	svc.dreamer = workers.NewDreamerWorker(repo, ch, config.Dreamer)
+	// Initialize workers that don't need embedder/chat (nil-safe).
+	// embedder/chat-dependent workers are created lazily on first use.
 	svc.pruner = workers.NewPruner(repo)
 	svc.healthChecker = workers.NewHealthChecker(repo)
-	svc.cacheWarmer = workers.NewCacheWarmer(repo, embedder, config.CacheWarmer)
 
 	return svc
 }
 
+// getEmbedder returns the embedder, initializing it lazily via modelService.
+// Resolves the first available Embedding model — does NOT pass empty ID
+// (the system has no "default model by empty ID" convention).
+func (s *MemoryServiceV2Impl) getEmbedder(ctx context.Context) (embedding.Embedder, error) {
+	if s.embedder != nil {
+		return s.embedder, nil
+	}
+	if s.modelService == nil {
+		return nil, fmt.Errorf("memory V2: model service not available")
+	}
+
+	// Resolve default embedding model: list models, find first Embedding type
+	models, err := s.modelService.ListModels(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("memory V2: failed to list models: %w", err)
+	}
+	var modelID string
+	for _, m := range models {
+		if m.Type == types.ModelTypeEmbedding {
+			modelID = m.ID
+			break
+		}
+	}
+	if modelID == "" {
+		return nil, fmt.Errorf("memory V2: no Embedding model configured")
+	}
+
+	embedder, err := s.modelService.GetEmbeddingModel(ctx, modelID)
+	if err != nil {
+		return nil, fmt.Errorf("memory V2: failed to get embedding model %s: %w", modelID, err)
+	}
+	s.embedder = embedder
+	return embedder, nil
+}
+
+// getChat returns the chat model, initializing it lazily via modelService.
+// Resolves the first available KnowledgeQA model — does NOT pass empty ID.
+func (s *MemoryServiceV2Impl) getChat(ctx context.Context) (chat.Chat, error) {
+	if s.chat != nil {
+		return s.chat, nil
+	}
+	if s.modelService == nil {
+		return nil, fmt.Errorf("memory V2: model service not available")
+	}
+
+	// Resolve default chat model: list models, find first KnowledgeQA type
+	models, err := s.modelService.ListModels(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("memory V2: failed to list models: %w", err)
+	}
+	var modelID string
+	for _, m := range models {
+		if m.Type == types.ModelTypeKnowledgeQA {
+			modelID = m.ID
+			break
+		}
+	}
+	if modelID == "" {
+		return nil, fmt.Errorf("memory V2: no KnowledgeQA model configured")
+	}
+
+	ch, err := s.modelService.GetChatModel(ctx, modelID)
+	if err != nil {
+		return nil, fmt.Errorf("memory V2: failed to get chat model %s: %w", modelID, err)
+	}
+	s.chat = ch
+	if s.tokenBudget != nil {
+		s.tokenBudget.WithChat(ch)
+	}
+	return ch, nil
+}
+
+// ensureWorkers initializes embedder/chat-dependent workers on first call.
+func (s *MemoryServiceV2Impl) ensureWorkers(ctx context.Context) {
+	if s.entityExtractor != nil {
+		return
+	}
+	embedder, err := s.getEmbedder(ctx)
+	if err != nil {
+		return
+	}
+	ch, err := s.getChat(ctx)
+	if err != nil {
+		return
+	}
+	s.entityExtractor = workers.NewEntityExtractor(s.repo, ch)
+	s.autoLinker = workers.NewAutoLinker(s.repo, embedder)
+	s.consolidator = workers.NewConsolidator(s.repo, embedder)
+	s.dreamer = workers.NewDreamerWorker(s.repo, ch, s.config.Dreamer)
+	s.cacheWarmer = workers.NewCacheWarmer(s.repo, embedder, s.config.CacheWarmer)
+}
+
 // StartWorkers launches all background workers.
+// Safe to call multiple times; actual init only happens once, on the first
+// call with a valid tenant context.
 func (s *MemoryServiceV2Impl) StartWorkers(ctx context.Context) {
-	ctx, s.cancel = context.WithCancel(ctx)
-	s.wg.Add(7)
+	s.workerOnce.Do(func() {
+		s.ensureWorkers(ctx)
+		ctx, s.cancel = context.WithCancel(ctx)
+		s.wg.Add(7)
+
 
 	go runWorker(ctx, &s.wg, s.entityExtractor.Run)
 	go runWorker(ctx, &s.wg, s.consolidator.Run)
@@ -211,6 +306,7 @@ func (s *MemoryServiceV2Impl) StartWorkers(ctx context.Context) {
 		s.wg.Add(1)
 		go runWorker(ctx, &s.wg, s.cacheWarmer.Run)
 	}
+	})
 }
 
 // Cleanup stops all workers gracefully.
@@ -242,6 +338,8 @@ func (s *MemoryServiceV2Impl) AddEpisode(ctx context.Context, userID, sessionID 
 	if len(messages) == 0 {
 		return nil
 	}
+
+	s.ensureWorkers(ctx)
 
 	// Construct conversation content from messages
 	content := ""
