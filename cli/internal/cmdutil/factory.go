@@ -118,7 +118,16 @@ func buildClient(f *Factory) (*sdk.Client, error) {
 		return nil, err
 	}
 	profileName := cfg.CurrentProfile
+
+	// Env var fallback: WEKNORA_API_KEY + WEKNORA_BASE_URL bypass the profile
+	// system entirely. This is the primary auth path for MCP server mode, where
+	// the parent process (e.g. PaiCode) sets these env vars in the MCP config.
 	if profileName == "" {
+		if apiKey := os.Getenv("WEKNORA_API_KEY"); apiKey != "" {
+			if baseURL := os.Getenv("WEKNORA_BASE_URL"); baseURL != "" {
+				return sdk.NewClient(baseURL, sdk.WithAPIKey(apiKey)), nil
+			}
+		}
 		return nil, NewError(CodeAuthUnauthenticated, "no current profile configured; run `weknora auth login` to set one up")
 	}
 	prof, ok := cfg.Profiles[profileName]

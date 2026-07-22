@@ -71,7 +71,7 @@ const { t } = useI18n();
 const memoryStore = useMemoryStore()
 const hasCriticalIssues = ref(false)
 const subTabs = computed(() => [
-  { key: 'browse', icon: 'list', label: t('memory.subtabBrowse') },
+  { key: 'browse', icon: 'browse', label: t('memory.subtabBrowse') },
   { key: 'graph', icon: 'chart-bubble', label: t('memory.subtabGraph') },
   { key: 'health', icon: 'info-circle', label: t('memory.subtabHealth'), badge: hasCriticalIssues.value ? 1 : undefined },
   { key: 'history', icon: 'time', label: t('memory.subtabHistory') },

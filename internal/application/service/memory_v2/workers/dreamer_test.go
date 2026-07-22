@@ -188,7 +188,7 @@ func makeDreamerMemory(id, tenantID, content string, verdict types.MemoryVerdict
 }
 
 func newTestDreamer(repo *mockDreamerRepo, chatClient chat.Chat, config types.DreamerConfig) *DreamerWorker {
-	return NewDreamerWorker(repo, chatClient, config)
+	return NewDreamerWorker(repo, chatClient, config, nil)
 }
 
 // dreamerActionJSON builds the JSON for the LLM to return for a list of actions.

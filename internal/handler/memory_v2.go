@@ -40,6 +40,16 @@ func (h *MemoryV2Handler) getTenantID(c *gin.Context) (string, bool) {
 	return strconv.FormatUint(tid, 10), true
 }
 
+// getUserID extracts the user ID string from the auth context.
+func (h *MemoryV2Handler) getUserID(c *gin.Context) (string, bool) {
+	uid, exists := c.Get(types.UserIDContextKey.String())
+	if !exists {
+		return "", false
+	}
+	uidStr, ok := uid.(string)
+	return uidStr, ok
+}
+
 // parseOptionalVerdicts parses a comma-separated verdicts query parameter.
 func parseOptionalVerdicts(raw string) []types.MemoryVerdict {
 	raw = strings.TrimSpace(raw)
@@ -79,6 +89,7 @@ func (h *MemoryV2Handler) ListMemories(c *gin.Context) {
 
 	filter := &types.MemoryFilter{
 		TenantID:   tenantID,
+		KbID:       strings.TrimSpace(c.Query("kb_id")),
 		Limit:      pageSize,
 		Offset:     (page - 1) * pageSize,
 		MemoryType: strings.TrimSpace(c.Query("memory_type")),
@@ -177,6 +188,9 @@ func (h *MemoryV2Handler) CreateMemory(c *gin.Context) {
 	}
 
 	memory.TenantID = tenantID
+	if uid, ok := h.getUserID(c); ok {
+		memory.UserID = uid
+	}
 
 	result, err := h.memorySvc.SaveMemory(ctx, &memory)
 	if err != nil {
@@ -228,6 +242,9 @@ func (h *MemoryV2Handler) UpdateMemory(c *gin.Context) {
 
 	memory.ID = id
 	memory.TenantID = tenantID
+	if uid, ok := h.getUserID(c); ok {
+		memory.UserID = uid
+	}
 
 	result, err := h.memorySvc.SaveMemory(ctx, &memory)
 	if err != nil {
@@ -303,6 +320,7 @@ func (h *MemoryV2Handler) SearchMemories(c *gin.Context) {
 
 	filter := &types.MemoryFilter{
 		TenantID:   tenantID,
+		KbID:       strings.TrimSpace(c.Query("kb_id")),
 		MemoryType: strings.TrimSpace(c.Query("memory_type")),
 		SessionID:  strings.TrimSpace(c.Query("session_id")),
 	}
@@ -379,6 +397,7 @@ func (h *MemoryV2Handler) GetMemoryGraph(c *gin.Context) {
 	}
 	relatedFilter := &types.MemoryFilter{
 		TenantID: tenantID,
+		KbID:     strings.TrimSpace(c.Query("kb_id")),
 		Limit:    20,
 		Query:    memory.Content[:queryLen],
 	}
@@ -449,6 +468,7 @@ func (h *MemoryV2Handler) GetMemoryStats(c *gin.Context) {
 	// Total count (Limit=1 is enough since total is returned separately)
 	totalFilter := &types.MemoryFilter{
 		TenantID: tenantID,
+		KbID:     strings.TrimSpace(c.Query("kb_id")),
 		Limit:    1,
 	}
 	_, total, err := h.memoryRepo.Search(ctx, totalFilter)

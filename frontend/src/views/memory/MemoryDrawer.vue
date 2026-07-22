@@ -453,25 +453,26 @@ function formatRelativeTime(dateStr: string): string {
   const diffHour = Math.floor(diffMin / 60)
   const diffDay = Math.floor(diffHour / 24)
 
-  if (diffSec < 60) return t('common.justNow') !== 'common.justNow' ? t('common.justNow') : 'just now'
-  if (diffMin < 60) return `${diffMin}m ago`
-  if (diffHour < 24) return `${diffHour}h ago`
-  if (diffDay < 7) return `${diffDay}d ago`
+  if (diffSec < 60) return t('memory.time.justNow')
+  if (diffMin < 60) return t('memory.time.minutesAgo', { n: diffMin })
+  if (diffHour < 24) return t('memory.time.hoursAgo', { n: diffHour })
+  if (diffDay < 7) return t('memory.time.daysAgo', { n: diffDay })
   return formatDate(dateStr)
 }
 
 function historyEventLabel(type: string): string {
   const labels: Record<string, string> = {
-    created: 'Created',
-    updated: 'Updated',
-    deleted: 'Deleted',
-    verdict_changed: 'Verdict Changed',
-    dreamer_action: 'Dreamer',
-    consolidation: 'Consolidated',
-    pruner: 'Pruned',
-    health_check: 'Health Check',
+    created: 'created',
+    updated: 'updated',
+    deleted: 'deleted',
+    verdict_changed: 'verdictChanged',
+    dreamer_action: 'dreamer',
+    consolidation: 'consolidated',
+    pruner: 'pruned',
+    health_check: 'healthCheck',
   }
-  return labels[type] || type
+  const key = `memory.drawer.historyEvents.${labels[type] || type}`
+  return t(key)
 }
 
 function lintSeverityIcon(severity: string): string {

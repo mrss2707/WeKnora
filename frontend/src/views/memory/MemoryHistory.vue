@@ -129,6 +129,7 @@
 
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { useMemoryStore } from '@/stores/memory'
 import type { TimelineEvent, TimelineEventType } from '@/api/memory/index'
 
@@ -140,6 +141,7 @@ const emit = defineEmits<{
   'view-memory': [memoryId: string]
 }>()
 
+const { t } = useI18n()
 const memoryStore = useMemoryStore()
 
 // -----------------------------------------------------------------------
@@ -181,14 +183,14 @@ const eventTypeColors: Record<TimelineEventType, string> = {
 }
 
 const eventTypeLabels: Record<TimelineEventType, string> = {
-  created: 'Created',
-  updated: 'Updated',
-  deleted: 'Deleted',
-  verdict_changed: 'Verdict Changed',
-  dreamer_action: 'Dreamer',
-  consolidation: 'Consolidation',
-  pruner: 'Pruner',
-  health_check: 'Health Check',
+  created: 'created',
+  updated: 'updated',
+  deleted: 'deleted',
+  verdict_changed: 'verdictChanged',
+  dreamer_action: 'dreamer',
+  consolidation: 'consolidation',
+  pruner: 'pruner',
+  health_check: 'healthCheck',
 }
 
 function eventTypeIcon(type: string): string {
@@ -200,10 +202,8 @@ function eventTypeColor(type: string): string {
 }
 
 function eventTypeLabel(type: string): string {
-  // Try i18n first, fall back to hardcoded label
-  const key = `memory.history.eventTypes.${type.replace(/_/g, '')}`
-  // We can't use $t dynamically in script, so use the label map
-  return eventTypeLabels[type as TimelineEventType] || type
+  const key = `memory.history.eventTypes.${eventTypeLabels[type as TimelineEventType] || type}`
+  return t(key)
 }
 
 // -----------------------------------------------------------------------
@@ -229,8 +229,8 @@ const hasMoreEvents = computed(() => {
 const displayedCountLabel = computed(() => {
   const shown = pagedEvents.value.length
   const total = filteredEvents.value.length
-  if (shown === total) return `${shown} events`
-  return `${shown} / ${total} events`
+  if (shown === total) return t('memory.time.eventsShown', { shown, total })
+  return t('memory.time.eventsShown', { shown, total })
 })
 
 // -----------------------------------------------------------------------
@@ -249,10 +249,10 @@ function formatDateLabel(timestamp: string): string {
   const eventDay = new Date(eventDate.getFullYear(), eventDate.getMonth(), eventDate.getDate())
 
   if (eventDay.getTime() === today.getTime()) {
-    return 'Today'
+    return t('memory.history.today')
   }
   if (eventDay.getTime() === yesterday.getTime()) {
-    return 'Yesterday'
+    return t('memory.history.yesterday')
   }
 
   return eventDate.toLocaleDateString(undefined, {

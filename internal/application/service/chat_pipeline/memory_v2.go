@@ -3,6 +3,7 @@ package chatpipeline
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"sync"
 
 	"github.com/Tencent/WeKnora/internal/event"
@@ -101,9 +102,10 @@ func (p *MemoryPluginV2) handleStorage(
 		}
 		userID := chatManage.UserID
 		sessionID := chatManage.SessionID
+		tenantID := strconv.FormatUint(chatManage.TenantID, 10)
 		bgCtx := context.WithoutCancel(ctx)
 		go func() {
-			if err := p.memoryService.AddEpisode(bgCtx, userID, sessionID, messages); err != nil {
+			if err := p.memoryService.AddEpisode(bgCtx, tenantID, userID, sessionID, messages); err != nil {
 				logger.Errorf(bgCtx, "failed to add episode (V2): %v", err)
 			}
 		}()
@@ -115,6 +117,7 @@ func (p *MemoryPluginV2) handleStorage(
 		var storeOnce sync.Once
 		userID := chatManage.UserID
 		sessionID := chatManage.SessionID
+		tenantID := strconv.FormatUint(chatManage.TenantID, 10)
 		bgCtx := context.WithoutCancel(ctx)
 
 		chatManage.EventBus.On(types.EventType(event.EventAgentFinalAnswer), func(_ context.Context, evt types.Event) error {
@@ -130,7 +133,7 @@ func (p *MemoryPluginV2) handleStorage(
 						{Role: "assistant", Content: fullResponse},
 					}
 					go func() {
-						if err := p.memoryService.AddEpisode(bgCtx, userID, sessionID, messages); err != nil {
+						if err := p.memoryService.AddEpisode(bgCtx, tenantID, userID, sessionID, messages); err != nil {
 							logger.Errorf(bgCtx, "failed to add episode (V2): %v", err)
 						}
 					}()

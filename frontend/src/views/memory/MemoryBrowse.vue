@@ -280,6 +280,7 @@
 
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { useMemoryStore } from '@/stores/memory'
 import type { AgentMemory, MemoryVerdict } from '@/api/memory/index'
 import { isVerdictProtected } from '@/api/memory/index'
@@ -294,6 +295,7 @@ defineEmits<{
   'open-detail': [memory: AgentMemory]
 }>()
 
+const { t } = useI18n()
 const memoryStore = useMemoryStore()
 
 // -----------------------------------------------------------------------
@@ -334,14 +336,14 @@ const displayMemories = computed(() => {
 // -----------------------------------------------------------------------
 const tableColumns = computed(() => [
   { colKey: 'selection', width: 40, cell: 'selection' },
-  { colKey: 'memory_type', title: 'Type', width: 100, cell: 'memory_type' },
-  { colKey: 'content', title: 'Content', minWidth: 200, cell: 'content', ellipsis: true },
-  { colKey: 'verdict', title: 'Verdict', width: 90, cell: 'verdict' },
-  { colKey: 'importance', title: 'Imp.', width: 80, cell: 'importance' },
-  { colKey: 'tags', title: 'Tags', width: 140, cell: 'tags' },
-  { colKey: 'tier', title: 'Tier', width: 60 },
+  { colKey: 'memory_type', title: t('memory.browse.table.type'), width: 100, cell: 'memory_type' },
+  { colKey: 'content', title: t('memory.browse.table.content'), minWidth: 200, cell: 'content', ellipsis: true },
+  { colKey: 'verdict', title: t('memory.browse.table.verdict'), width: 90, cell: 'verdict' },
+  { colKey: 'importance', title: t('memory.browse.table.importance'), width: 80, cell: 'importance' },
+  { colKey: 'tags', title: t('memory.browse.table.tags'), width: 140, cell: 'tags' },
+  { colKey: 'tier', title: t('memory.browse.table.tier'), width: 60 },
   { colKey: 'stale', title: '', width: 50, cell: 'stale' },
-  { colKey: 'created_at', title: 'Date', width: 100, cell: 'created_at' },
+  { colKey: 'created_at', title: t('memory.browse.table.date'), width: 100, cell: 'created_at' },
 ])
 
 // -----------------------------------------------------------------------

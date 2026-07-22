@@ -51,6 +51,10 @@ var dryRunExpectation = map[string]bool{
 	"auth login": false,
 	// long-running stdio server, not a one-shot command.
 	"mcp serve": false,
+	// memory hooks process stdin and call the API — read/process, no local writes to preview.
+	"memory hook": false,
+	// memory setup writes config files — mutation, has --dry-run.
+	"memory setup": true,
 }
 
 func TestDryRunCoverageMatchesExpectation(t *testing.T) {

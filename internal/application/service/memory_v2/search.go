@@ -51,6 +51,7 @@ func (s *MemoryServiceV2Impl) SearchMemories(ctx context.Context, query string, 
 			} else if len(vector) > 0 {
 				cosineFilter := &types.MemoryFilter{
 					TenantID: filter.TenantID,
+					KbID:     filter.KbID,
 					Verdicts: filter.Verdicts,
 				}
 				cosineResults, err = s.repo.CosineSearch(ctx, cosineFilter, vector, filter.Limit*2)
@@ -101,6 +102,7 @@ func (s *MemoryServiceV2Impl) SearchMemories(ctx context.Context, query string, 
 func (s *MemoryServiceV2Impl) fullTextSearch(ctx context.Context, query string, filter *types.MemoryFilter) ([]*types.MemorySearchResult, error) {
 	searchFilter := &types.MemoryFilter{
 		TenantID:   filter.TenantID,
+		KbID:       filter.KbID,
 		UserID:     filter.UserID,
 		Query:      query,
 		MemoryType: filter.MemoryType,

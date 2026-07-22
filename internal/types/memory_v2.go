@@ -121,6 +121,7 @@ func (DreamerState) TableName() string {
 // MemoryFilter represents search/filter parameters for memories.
 type MemoryFilter struct {
 	TenantID   string          `json:"tenant_id"`
+	KbID       string          `json:"kb_id,omitempty"`
 	UserID     string          `json:"user_id,omitempty"`
 	Query      string          `json:"query,omitempty"`
 	MemoryType string          `json:"memory_type,omitempty"`
@@ -354,6 +355,13 @@ func DefaultMemoryV2Config() MemoryV2Config {
 		HNSWEfConstruction: 200,
 		HNSWEfSearch:       100,
 	}
+}
+
+// MemoryStatusResponse is the typed response for GET /api/v1/tenants/memory-status.
+type MemoryStatusResponse struct {
+	Backend     string `json:"backend"`
+	Available   bool   `json:"available"`
+	MemoryCount int64  `json:"memory_count,omitempty"`
 }
 
 // ---------------------------------------------------------------------------

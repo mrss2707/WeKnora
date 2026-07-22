@@ -48,7 +48,7 @@ type CacheInvalidator interface {
 // MemoryServiceV2 defines the business-logic contract for Memory v2.
 type MemoryServiceV2 interface {
 	// AddEpisode processes a conversation session and adds memories.
-	AddEpisode(ctx context.Context, userID, sessionID string, messages []types.Message) error
+	AddEpisode(ctx context.Context, tenantID, userID, sessionID string, messages []types.Message) error
 
 	// RetrieveMemory retrieves relevant memory context.
 	RetrieveMemory(ctx context.Context, userID, query string) (*types.MemoryContext, error)

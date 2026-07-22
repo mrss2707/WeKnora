@@ -227,7 +227,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 			defaults := types.DefaultMemoryV2Config()
 			memCfg = &defaults
 		}
-		return memoryServiceV2.NewMemoryServiceV2(repo, modelSvc, *memCfg)
+		return memoryServiceV2.NewMemoryServiceV2(repo, modelSvc, *memCfg, nil)
 	}))
 
 	must(container.Provide(service.NewWikiPageService))

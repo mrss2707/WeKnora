@@ -20,16 +20,18 @@ type DreamerWorker struct {
 	config     types.DreamerConfig
 	interval   time.Duration
 	workerID   string
+	tenantIDs  []string
 }
 
 // NewDreamerWorker creates a new DreamerWorker.
-func NewDreamerWorker(repo interfaces.MemoryRepositoryV2, chat chat.Chat, config types.DreamerConfig) *DreamerWorker {
+func NewDreamerWorker(repo interfaces.MemoryRepositoryV2, chat chat.Chat, config types.DreamerConfig, tenantIDs []string) *DreamerWorker {
 	return &DreamerWorker{
-		repo:     repo,
-		chat:     chat,
-		config:   config,
-		interval: parseDuration(config.Interval, 1*time.Hour),
-		workerID: fmt.Sprintf("dreamer-%d", time.Now().UnixNano()),
+		repo:      repo,
+		chat:      chat,
+		config:    config,
+		interval:  parseDuration(config.Interval, 1*time.Hour),
+		workerID:  fmt.Sprintf("dreamer-%d", time.Now().UnixNano()),
+		tenantIDs: tenantIDs,
 	}
 }
 
@@ -63,15 +65,29 @@ func (d *DreamerWorker) RunPass(ctx context.Context, tenantID string) (*types.Dr
 	return d.executePass(ctx, tenantID)
 }
 
-// dreamPass attempts to run the dreamer for each known tenant.
+// dreamPass runs the dreamer for each known tenant.
 func (d *DreamerWorker) dreamPass(ctx context.Context) {
-	result, err := d.executePass(ctx, "")
-	if err != nil {
-		logger.Errorf(ctx, "dreamer: pass failed: %v", err)
+	if len(d.tenantIDs) == 0 {
+		// Fallback to empty tenant for backward compatibility
+		result, err := d.executePass(ctx, "")
+		if err != nil {
+			logger.Errorf(ctx, "dreamer: pass failed: %v", err)
+			return
+		}
+		logger.Infof(ctx, "dreamer: pass complete: %d proposed, %d applied, %d tokens used",
+			result.ActionsProposed, result.ActionsApplied, result.TokenUsed)
 		return
 	}
-	logger.Infof(ctx, "dreamer: pass complete: %d proposed, %d applied, %d tokens used",
-		result.ActionsProposed, result.ActionsApplied, result.TokenUsed)
+
+	for _, tid := range d.tenantIDs {
+		result, err := d.executePass(ctx, tid)
+		if err != nil {
+			logger.Errorf(ctx, "dreamer: pass failed for tenant %s: %v", tid, err)
+			continue
+		}
+		logger.Infof(ctx, "dreamer: pass complete for tenant %s: %d proposed, %d applied, %d tokens used",
+			tid, result.ActionsProposed, result.ActionsApplied, result.TokenUsed)
+	}
 }
 
 // executePass runs the full dreamer pipeline for a tenant.

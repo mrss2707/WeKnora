@@ -152,6 +152,7 @@ type MemoryServiceV2Impl struct {
 	cancel       context.CancelFunc
 	wg           sync.WaitGroup
 	workerOnce   sync.Once
+	tenantIDs    []string
 
 	// Sub-components
 	tokenBudget *TokenBudgetManager
@@ -172,6 +173,7 @@ func NewMemoryServiceV2(
 	repo interfaces.MemoryRepositoryV2,
 	modelService interfaces.ModelService,
 	config types.MemoryV2Config,
+	tenantIDs []string,
 ) *MemoryServiceV2Impl {
 	cache := NewMemoryCache()
 	cache.StartCleanup(30 * time.Second)
@@ -182,6 +184,7 @@ func NewMemoryServiceV2(
 		config:       config,
 		cache:        cache,
 		tokenBudget:  NewTokenBudgetManager().WithChat(nil),
+		tenantIDs:    tenantIDs,
 	}
 
 	// Wire cache into repository for invalidation
@@ -283,7 +286,7 @@ func (s *MemoryServiceV2Impl) ensureWorkers(ctx context.Context) {
 	s.entityExtractor = workers.NewEntityExtractor(s.repo, ch)
 	s.autoLinker = workers.NewAutoLinker(s.repo, embedder)
 	s.consolidator = workers.NewConsolidator(s.repo, embedder)
-	s.dreamer = workers.NewDreamerWorker(s.repo, ch, s.config.Dreamer)
+	s.dreamer = workers.NewDreamerWorker(s.repo, ch, s.config.Dreamer, s.tenantIDs)
 	s.cacheWarmer = workers.NewCacheWarmer(s.repo, embedder, s.config.CacheWarmer)
 }
 
@@ -334,7 +337,7 @@ func runWorker(ctx context.Context, wg *sync.WaitGroup, fn func(context.Context)
 
 // AddEpisode processes a conversation session and adds memories.
 // This is a bridge method for compatibility with the existing interface.
-func (s *MemoryServiceV2Impl) AddEpisode(ctx context.Context, userID, sessionID string, messages []types.Message) error {
+func (s *MemoryServiceV2Impl) AddEpisode(ctx context.Context, tenantID, userID, sessionID string, messages []types.Message) error {
 	if len(messages) == 0 {
 		return nil
 	}
@@ -349,7 +352,8 @@ func (s *MemoryServiceV2Impl) AddEpisode(ctx context.Context, userID, sessionID 
 
 	// Save each message as an episodic memory
 	memory := &types.AgentMemory{
-		TenantID:   "",
+		TenantID:   tenantID,
+		UserID:     userID,
 		Content:    content,
 		MemoryType: "episodic",
 		SessionID:  sessionID,

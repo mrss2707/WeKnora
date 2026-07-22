@@ -135,6 +135,22 @@ func (f *fakeSvc) ListKnowledgeChunks(_ context.Context, docID string, page, pag
 	return f.chunks, f.chunksTotal, f.chunksErr
 }
 
+// ---- memory service fakes ----
+
+func (f *fakeSvc) SearchMemories(_ context.Context, kbID, query string, limit int, _, _ string, _ float64) ([]sdk.MemorySearchResult, error) {
+	f.calls.hybridKBID = kbID
+	return nil, nil
+}
+func (f *fakeSvc) CreateMemory(_ context.Context, req *sdk.CreateMemoryRequest) (*sdk.SaveMemoryResult, error) {
+	return &sdk.SaveMemoryResult{Created: true}, nil
+}
+func (f *fakeSvc) GetMemoryGraph(_ context.Context, id, kbID string) (*sdk.MemoryGraphResult, error) {
+	return &sdk.MemoryGraphResult{}, nil
+}
+func (f *fakeSvc) GetMemoryStatus(_ context.Context) (*sdk.MemoryStatusResult, error) {
+	return &sdk.MemoryStatusResult{Backend: "v2", Available: true}, nil
+}
+
 // newTestServer wires svc to an in-process MCP server and returns a
 // connected client session ready to CallTool against it.
 func newTestServer(t *testing.T, svc ServiceClient) (*mcpsdk.ClientSession, context.CancelFunc) {
@@ -196,7 +212,7 @@ func TestTool_ListsRegistered(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListTools: %v", err)
 	}
-	want := []string{"kb_list", "kb_view", "doc_list", "doc_view", "doc_download", "search_chunks", "chat", "agent_list", "session_ask", "chunk_list"}
+	want := []string{"kb_list", "kb_view", "doc_list", "doc_view", "doc_download", "search_chunks", "chat", "agent_list", "session_ask", "chunk_list", "memory_recall", "memory_save", "memory_graph", "memory_status"}
 	got := map[string]bool{}
 	for _, tool := range res.Tools {
 		got[tool.Name] = true
@@ -621,7 +637,7 @@ func derefBool(p *bool) bool {
 }
 
 // TestToolAnnotations_AllToolsHaveExpectedHints locks the per-tool hint
-// table. Each of the 10 registered tools must surface the exact
+// table. Each of the 14 registered tools must surface the exact
 // DestructiveHint / ReadOnlyHint / IdempotentHint / OpenWorldHint + Title
 // values shown below. This guards against silent drift during future
 // refactors (e.g. someone marking chat as readOnly, or an invoke tool as
@@ -650,6 +666,10 @@ func TestToolAnnotations_AllToolsHaveExpectedHints(t *testing.T) {
 		"agent_list":    {destructive: false, readOnly: true, idempotent: true, openWorld: false, title: "List Custom Agents"},
 		"session_ask":   {destructive: false, readOnly: false, idempotent: false, openWorld: true, title: "Ask a Custom Agent (session ask --agent)"},
 		"chunk_list":    {destructive: false, readOnly: true, idempotent: true, openWorld: false, title: "List Knowledge Chunks"},
+		"memory_recall": {destructive: false, readOnly: true, idempotent: true, openWorld: false, title: "Recall Memories"},
+		"memory_save":   {destructive: true, readOnly: false, idempotent: false, openWorld: false, title: "Save Memory"},
+		"memory_graph":  {destructive: false, readOnly: true, idempotent: true, openWorld: false, title: "Memory Graph"},
+		"memory_status": {destructive: false, readOnly: true, idempotent: true, openWorld: false, title: "Memory Status"},
 	}
 
 	c, _ := newTestServer(t, &fakeSvc{})

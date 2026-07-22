@@ -168,6 +168,7 @@ func (s *MemoryServiceV2Impl) checkSemanticDedup(ctx context.Context, memory *ty
 	// Search for semantically similar memories
 	filter := &types.MemoryFilter{
 		TenantID: memory.TenantID,
+		KbID:     memory.KbID,
 	}
 	filter.Limit = s.config.SemanticDedup.MaxMerges
 	if filter.Limit <= 0 {

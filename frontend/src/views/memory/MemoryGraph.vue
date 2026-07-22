@@ -3,7 +3,7 @@
     <!-- Toolbar -->
     <div class="graph-toolbar">
       <div class="toolbar-left">
-        <span class="toolbar-label">Depth:</span>
+        <span class="toolbar-label">{{ t('memory.graph.depth') }}:</span>
         <t-radio-group
           :value="depth"
           variant="default"
@@ -19,7 +19,7 @@
         <t-button
           variant="text"
           size="small"
-          :title="'Fit to screen'"
+          :title="t('memory.graph.fitToScreen')"
           @click="fitToScreen"
         >
           <t-icon name="fullscreen" />
@@ -27,7 +27,7 @@
         <t-button
           variant="text"
           size="small"
-          :title="'Center graph'"
+          :title="t('memory.graph.centerGraph')"
           @click="recenterGraph"
         >
           <t-icon name="focus" />
@@ -39,7 +39,7 @@
     <div class="graph-canvas-wrapper">
       <!-- Loading state -->
       <div v-if="memoryStore.graphLoading" class="loading-container">
-        <t-loading :text="'Loading graph...'" size="large" />
+        <t-loading :text="t('memory.graph.loading')" size="large" />
       </div>
 
       <!-- Empty state (no data) -->
@@ -48,9 +48,9 @@
         class="empty-state"
       >
         <t-icon name="chart-bubble" size="48px" class="empty-icon" />
-        <span class="empty-title">Graph unavailable</span>
+        <span class="empty-title">{{ t('memory.graph.emptyTitle') }}</span>
         <span class="empty-desc">
-          No memory graph data available. Create multiple memories linked by relations to see the graph.
+          {{ t('memory.graph.emptyDesc') }}
         </span>
       </div>
 
@@ -186,12 +186,12 @@
         <!-- Legend overlay -->
         <div class="graph-legend" :class="{ collapsed: legendCollapsed }">
           <div class="legend-header" @click="legendCollapsed = !legendCollapsed">
-            <span>Legend</span>
+            <span>{{ t('memory.graph.legend') }}</span>
             <t-icon :name="legendCollapsed ? 'chevron-up' : 'chevron-down'" size="14px" />
           </div>
           <div v-show="!legendCollapsed" class="legend-body">
             <div class="legend-section">
-              <div class="legend-section-title">Node Types</div>
+              <div class="legend-section-title">{{ t('memory.graph.nodeTypes') }}</div>
               <div
                 v-for="item in typeLegendItems"
                 :key="item.key"
@@ -202,22 +202,22 @@
               </div>
             </div>
             <div class="legend-section">
-              <div class="legend-section-title">Verdict</div>
+              <div class="legend-section-title">{{ t('memory.graph.verdict') }}</div>
               <div class="legend-item">
                 <span class="legend-ring-demo" />
-                <span class="legend-label">Decision (blue ring)</span>
+                <span class="legend-label">{{ t('memory.graph.decisionRing') }}</span>
               </div>
               <div class="legend-item">
                 <span class="legend-dot-dimmed" />
-                <span class="legend-label">Refuted (dimmed)</span>
+                <span class="legend-label">{{ t('memory.graph.refutedDimmed') }}</span>
               </div>
               <div class="legend-item">
                 <span class="legend-dot-hub" />
-                <span class="legend-label">Hub score &gt; 1.0</span>
+                <span class="legend-label">{{ t('memory.graph.hubScore') }}</span>
               </div>
             </div>
             <div class="legend-section">
-              <div class="legend-section-title">Relations</div>
+              <div class="legend-section-title">{{ t('memory.graph.relations') }}</div>
               <div
                 v-for="item in relationLegendItems"
                 :key="item.key"
@@ -228,15 +228,15 @@
               </div>
             </div>
             <div class="legend-section">
-              <div class="legend-section-title">Interaction</div>
+              <div class="legend-section-title">{{ t('memory.graph.interaction') }}</div>
               <div class="legend-item">
-                <span class="legend-label legend-hint">Click node = refocus center</span>
+                <span class="legend-label legend-hint">{{ t('memory.graph.clickNodeHint') }}</span>
               </div>
               <div class="legend-item">
-                <span class="legend-label legend-hint">Drag node = reposition</span>
+                <span class="legend-label legend-hint">{{ t('memory.graph.dragNodeHint') }}</span>
               </div>
               <div class="legend-item">
-                <span class="legend-label legend-hint">Scroll = zoom, drag bg = pan</span>
+                <span class="legend-label legend-hint">{{ t('memory.graph.scrollHint') }}</span>
               </div>
             </div>
           </div>
@@ -248,6 +248,7 @@
 
 <script setup lang="ts">
 import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { useMemoryStore } from '@/stores/memory'
 import type { GraphNode, GraphEdge, GraphData } from '@/api/memory/index'
 
@@ -255,6 +256,7 @@ const props = defineProps<{
   kbId: string
 }>()
 
+const { t } = useI18n()
 const memoryStore = useMemoryStore()
 
 // ---------------------------------------------------------------------------
@@ -313,27 +315,27 @@ const NODE_TYPE_COLORS: Record<string, string> = {
 }
 
 const NODE_TYPE_LABELS: Record<string, string> = {
-  episodic: 'Episodic',
-  semantic: 'Semantic',
-  procedural: 'Procedural',
-  decision: 'Decision',
-  preference: 'Preference',
-  fact: 'Fact',
+  episodic: 'episodic',
+  semantic: 'semantic',
+  procedural: 'procedural',
+  decision: 'decision',
+  preference: 'preference',
+  fact: 'fact',
 }
 
 const typeLegendItems = computed(() =>
   Object.entries(NODE_TYPE_COLORS).map(([key, color]) => ({
     key,
     color,
-    label: NODE_TYPE_LABELS[key] || key,
+    label: t(`memory.types.${NODE_TYPE_LABELS[key] || key}`),
   }))
 )
 
-const relationLegendItems = [
-  { key: 'related_to', color: '#8c8c8c', cssClass: 'line-solid', label: 'Related to' },
-  { key: 'justifies', color: '#1890ff', cssClass: 'line-dashed', label: 'Justifies' },
-  { key: 'contradicts', color: '#e34d59', cssClass: 'line-dotted', label: 'Contradicts' },
-]
+const relationLegendItems = computed(() => [
+  { key: 'related_to', color: '#8c8c8c', cssClass: 'line-solid', label: t('memory.graph.relatedTo') },
+  { key: 'justifies', color: '#1890ff', cssClass: 'line-dashed', label: t('memory.graph.justifies') },
+  { key: 'contradicts', color: '#e34d59', cssClass: 'line-dotted', label: t('memory.graph.contradicts') },
+])
 
 // ---------------------------------------------------------------------------
 // Helpers

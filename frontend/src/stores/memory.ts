@@ -160,7 +160,8 @@ export const useMemoryStore = defineStore('memory', {
         if (this.filter.keyword) params.keyword = this.filter.keyword
 
         const resp = await listMemories(params)
-        this.memories = resp.data?.data ?? []
+        const items = resp.data?.items ?? []
+        this.memories = items.map((item: any) => item.memory ? { ...item.memory, score: item.score, stale_days: item.stale_days, is_stale: item.is_stale } : item) as AgentMemory[]
         this.pagination.total = resp.data?.total ?? 0
         this.pagination.page = resp.data?.page ?? this.filter.page
         this.pagination.pageSize = resp.data?.page_size ?? this.filter.pageSize

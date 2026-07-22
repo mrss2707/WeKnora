@@ -214,6 +214,10 @@ func (r *MemoryRepository) buildSearchQuery(ctx context.Context, filter *types.M
 		Where("tenant_id = ?", filter.TenantID).
 		Where("deleted_at IS NULL")
 
+	if filter.KbID != "" {
+		db = db.Where("kb_id = ?", filter.KbID)
+	}
+
 	// Default: exclude refuted
 	if len(filter.Verdicts) == 0 {
 		db = db.Where("verdict != ?", types.VerdictRefuted)
@@ -293,20 +297,26 @@ func (r *MemoryRepository) bm25Raw(ctx context.Context, filter *types.MemoryFilt
 	var err error
 
 	if paradeDB {
-		err = r.db.WithContext(ctx).Table("agent_memories").
+		q := r.db.WithContext(ctx).Table("agent_memories").
 			Select("*, paradedb.score(id) AS bm25_score").
 			Where("tenant_id = ?", filter.TenantID).
-			Where("deleted_at IS NULL").
-			Where("content @@@ paradedb.phrase(field => 'content', phrase => ?)", filter.Query).
+			Where("deleted_at IS NULL")
+		if filter.KbID != "" {
+			q = q.Where("kb_id = ?", filter.KbID)
+		}
+		err = q.Where("content @@@ paradedb.phrase(field => 'content', phrase => ?)", filter.Query).
 			Order("bm25_score DESC").
 			Limit(limit).
 			Find(&rows).Error
 	} else {
-		err = r.db.WithContext(ctx).Table("agent_memories").
+		q := r.db.WithContext(ctx).Table("agent_memories").
 			Select("*, ts_rank(to_tsvector('english', content), plainto_tsquery('english', ?)) AS bm25_score", filter.Query).
 			Where("tenant_id = ?", filter.TenantID).
-			Where("deleted_at IS NULL").
-			Where("to_tsvector('english', content) @@ plainto_tsquery('english', ?)", filter.Query).
+			Where("deleted_at IS NULL")
+		if filter.KbID != "" {
+			q = q.Where("kb_id = ?", filter.KbID)
+		}
+		err = q.Where("to_tsvector('english', content) @@ plainto_tsquery('english', ?)", filter.Query).
 			Order("bm25_score DESC").
 			Limit(limit).
 			Find(&rows).Error
@@ -371,8 +381,13 @@ func (r *MemoryRepository) CosineSearch(ctx context.Context, filter *types.Memor
 	query := db.Table("agent_memories").
 		Select("id, tenant_id, content, memory_type, importance, tier, verdict, hub_score, access_count, session_id, created_at, updated_at, 1 - (embedding <=> ?) AS cosine_score", vec).
 		Where("tenant_id = ?", filter.TenantID).
-		Where("deleted_at IS NULL").
-		Clauses(clause.OrderBy{
+		Where("deleted_at IS NULL")
+
+	if filter.KbID != "" {
+		query = query.Where("kb_id = ?", filter.KbID)
+	}
+
+	query = query.Clauses(clause.OrderBy{
 			Expression: clause.Expr{SQL: "embedding <=> ?", Vars: []interface{}{vec}},
 		}).
 		Limit(limit)

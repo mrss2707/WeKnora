@@ -20,6 +20,7 @@ import (
 	"github.com/Tencent/WeKnora/cli/cmd/kb"
 	linkcmd "github.com/Tencent/WeKnora/cli/cmd/link"
 	mcpcmd "github.com/Tencent/WeKnora/cli/cmd/mcp"
+	memorycmd "github.com/Tencent/WeKnora/cli/cmd/memory"
 	profilecmd "github.com/Tencent/WeKnora/cli/cmd/profile"
 	"github.com/Tencent/WeKnora/cli/cmd/search"
 	sessioncmd "github.com/Tencent/WeKnora/cli/cmd/session"
@@ -198,6 +199,7 @@ a curated read-only MCP tool surface for AI agents.`,
 	cmd.AddCommand(agentcmd.NewCmd(f))
 	cmd.AddCommand(chunkcmd.NewCmdChunk(f))
 	cmd.AddCommand(mcpcmd.NewCmd(f))
+	cmd.AddCommand(memorycmd.NewCmd(f))
 	installUnknownSubcommandGuard(cmd)
 	return cmd
 }
