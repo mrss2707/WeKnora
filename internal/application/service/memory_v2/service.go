@@ -403,6 +403,9 @@ func (s *MemoryServiceV2Impl) RetrieveMemory(ctx context.Context, userID, query 
 
 // ConsolidateDream runs one dreamer pass for a tenant.
 func (s *MemoryServiceV2Impl) ConsolidateDream(ctx context.Context, tenantID string) (*types.DreamResult, error) {
+	if s.dreamer == nil {
+		return &types.DreamResult{}, nil
+	}
 	return s.dreamer.RunPass(ctx, tenantID)
 }
 

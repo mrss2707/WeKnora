@@ -106,8 +106,10 @@ func (s *MemoryServiceV2Impl) SaveMemory(ctx context.Context, memory *types.Agen
 	// Step 9: Lint on write (pass pre-computed embedding to avoid re-embed)
 	lintIssues := RunLintOnWrite(ctx, memory, s.repo, s.config.LintOnWrite, embedding)
 
-	// Step 10: Enqueue for batch entity extraction
-	s.entityExtractor.Enqueue(memory)
+	// Step 10: Enqueue for batch entity extraction (skip if workers not initialized)
+	if s.entityExtractor != nil {
+		s.entityExtractor.Enqueue(memory)
+	}
 
 	result := &types.SaveMemoryResult{
 		Memory:     memory,
