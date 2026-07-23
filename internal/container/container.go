@@ -35,7 +35,6 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/agent/approval"
 	"github.com/Tencent/WeKnora/internal/application/repository"
-	memoryRepo "github.com/Tencent/WeKnora/internal/application/repository/memory/neo4j"
 	memoryRepoV2 "github.com/Tencent/WeKnora/internal/application/repository/memory_v2"
 	dorisRepo "github.com/Tencent/WeKnora/internal/application/repository/retriever/doris"
 	elasticsearchRepoV7 "github.com/Tencent/WeKnora/internal/application/repository/retriever/elasticsearch/v7"
@@ -51,7 +50,6 @@ import (
 	"github.com/Tencent/WeKnora/internal/application/service"
 	chatpipeline "github.com/Tencent/WeKnora/internal/application/service/chat_pipeline"
 	"github.com/Tencent/WeKnora/internal/application/service/file"
-	memoryService "github.com/Tencent/WeKnora/internal/application/service/memory"
 	memoryServiceV2 "github.com/Tencent/WeKnora/internal/application/service/memory_v2"
 	"github.com/Tencent/WeKnora/internal/application/service/retriever"
 	"github.com/Tencent/WeKnora/internal/config"
@@ -152,7 +150,6 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(repository.NewAuthTokenRepository))
 	must(container.Provide(repository.NewSystemSettingRepository))
 	must(container.Provide(neo4jRepo.NewNeo4jRepository))
-	must(container.Provide(memoryRepo.NewMemoryRepository))
 	must(container.Provide(memoryRepoV2.NewMemoryRepository, dig.As(new(interfaces.MemoryRepositoryV2))))
 	must(container.Provide(repository.NewMCPServiceRepository))
 	must(container.Provide(repository.NewMCPToolApprovalRepository))
@@ -213,8 +210,6 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(service.NewCustomAgentService))
 	must(container.Provide(service.NewUserResourceFavoriteService))
 
-	// Memory service
-	must(container.Provide(memoryService.NewMemoryService))
 	// Memory V2 service — embedder and chat model are resolved lazily at first use
 	// to avoid tenant context dependency during DI registration.
 	must(container.Provide(func(
@@ -327,15 +322,9 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Invoke(chatpipeline.NewPluginWikiBoost))
 	must(container.Invoke(func(
 		eventManager *chatpipeline.EventManager,
-		memV1 interfaces.MemoryService,
 		memV2 interfaces.MemoryServiceV2,
-		cfg *config.Config,
 	) {
-		if cfg.MemoryV2 != nil && cfg.MemoryV2.Enabled {
-			chatpipeline.NewMemoryPluginV2(eventManager, memV2)
-		} else {
-			chatpipeline.NewMemoryPlugin(eventManager, memV1)
-		}
+		chatpipeline.NewMemoryPluginV2(eventManager, memV2)
 	}))
 	logger.Debugf(ctx, "[Container] Chat pipeline plugins registered")
 

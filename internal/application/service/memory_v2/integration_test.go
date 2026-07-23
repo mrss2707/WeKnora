@@ -322,60 +322,6 @@ func TestMemoryV2Integration_MemoryContextBridge(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// Test: Rollback to Neo4j via MEMORY_BACKEND env var
-// ---------------------------------------------------------------------------
-
-func TestMemoryV2Integration_RollbackToNeo4j(t *testing.T) {
-	// Simulate the MEMORY_BACKEND env var check that the DI container would perform.
-	// The MemoryServiceV2Impl should only be created when MEMORY_BACKEND=postgres or unset.
-	// When MEMORY_BACKEND=neo4j, the V2 service should not be instantiated.
-
-	t.Run("unset backend defaults to postgres", func(t *testing.T) {
-		// Without MEMORY_BACKEND set, the service should initialize normally
-		repo := newMockIntegrationRepo()
-		svc := newIntegrationService(repo)
-		require.NotNil(t, svc, "service should initialize without MEMORY_BACKEND set")
-	})
-
-	t.Run("postgres backend creates v2 service", func(t *testing.T) {
-		repo := newMockIntegrationRepo()
-		svc := newIntegrationService(repo)
-		require.NotNil(t, svc, "service should initialize with postgres backend")
-
-		// Verify the service works
-		ctx := context.Background()
-		memory := &types.AgentMemory{
-			TenantID: "tenant-rollback-1",
-			Content:  "Test memory for rollback scenario validation.",
-		}
-		result, err := svc.SaveMemory(ctx, memory)
-		require.NoError(t, err)
-		assert.True(t, result.Created)
-	})
-
-	t.Run("neo4j backend should not use v2 service", func(t *testing.T) {
-		// When MEMORY_BACKEND=neo4j, the V2 service is never created.
-		// Instead, the Neo4j-backed MemoryService is used.
-		// This test verifies that we can detect the backend choice.
-		// In production, the DI container checks:
-		//
-		// if os.Getenv("MEMORY_BACKEND") == "neo4j" {
-		//     // don't wire MemoryServiceV2
-		// }
-		//
-		// We verify the contract: the MemoryServiceV2Impl is the postgres implementation.
-		// If MEMORY_BACKEND=neo4j, the handler layer routes to the old MemoryService.
-
-		repo := newMockIntegrationRepo()
-		svc := newIntegrationService(repo)
-		// In a real rollback scenario, the impl type would be different.
-		// Here we verify the service contract holds regardless:
-		_, ok := interface{}(svc).(interfaces.MemoryServiceV2)
-		assert.True(t, ok, "MemoryServiceV2Impl implements MemoryServiceV2 interface")
-	})
-}
-
-// ---------------------------------------------------------------------------
 // Test: Dreamer in dry-run mode
 // ---------------------------------------------------------------------------
 
