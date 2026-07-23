@@ -7,6 +7,7 @@ type PipelineRequest struct {
 	SessionID string `json:"session_id"`
 	UserID    string `json:"user_id"`
 	Query     string `json:"query,omitempty"`
+	EnableMemory bool   `json:"enable_memory"`
 	MaxRounds int    `json:"max_rounds"`
 
 	// Knowledge base retrieval parameters
@@ -203,6 +204,7 @@ func (c *ChatManage) Clone() *ChatManage {
 			Query:                    c.Query,
 			SessionID:                c.SessionID,
 			UserID:                   c.UserID,
+			EnableMemory:             c.EnableMemory,
 			MaxRounds:                c.MaxRounds,
 			KnowledgeBaseIDs:         knowledgeBaseIDs,
 			KnowledgeIDs:             knowledgeIDs,
@@ -273,6 +275,8 @@ const (
 	CHAT_COMPLETION        EventType = "chat_completion"
 	CHAT_COMPLETION_STREAM EventType = "chat_completion_stream"
 	FILTER_TOP_K           EventType = "filter_top_k"
+	MEMORY_RETRIEVAL       EventType = "memory_retrieval"
+	MEMORY_STORAGE         EventType = "memory_storage"
 )
 
 // PipelineBuilder dynamically assembles a pipeline as an ordered list of EventTypes.
@@ -317,7 +321,9 @@ var Pipeline = map[string][]EventType{
 	},
 	"chat_history_stream": {
 		LOAD_HISTORY,
+		MEMORY_RETRIEVAL,
 		CHAT_COMPLETION_STREAM,
+		MEMORY_STORAGE,
 	},
 	"rag": {
 		CHUNK_SEARCH,

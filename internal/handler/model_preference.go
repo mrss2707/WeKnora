@@ -70,7 +70,7 @@ func (h *ModelPreferenceHandler) ListPreferences(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
-		"data":    dto.NewModelResponses(models),
+		"data":    dto.NewModelResponses(c.Request.Context(), models),
 	})
 }
 
@@ -148,7 +148,7 @@ func (h *ModelPreferenceHandler) SetDefault(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
-		"data":    dto.NewModelResponse(model),
+		"data":    dto.NewModelResponse(c.Request.Context(), model),
 	})
 }
 
