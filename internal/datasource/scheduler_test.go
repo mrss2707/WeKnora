@@ -60,6 +60,17 @@ func (r *fakeDataSourceRepo) Delete(_ context.Context, id string) error {
 	return nil
 }
 
+func (r *fakeDataSourceRepo) UpdateSyncState(_ context.Context, ds *types.DataSource) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if existing, ok := r.dataSources[ds.ID]; ok {
+		existing.Status = ds.Status
+		existing.LastSyncAt = ds.LastSyncAt
+		existing.LastSyncCursor = ds.LastSyncCursor
+	}
+	return nil
+}
+
 func (r *fakeDataSourceRepo) FindActive(_ context.Context) ([]*types.DataSource, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -134,6 +145,18 @@ func (r *fakeSyncLogRepo) HasRunningSync(_ context.Context, dsID string) (bool, 
 		}
 	}
 	return false, nil
+}
+
+func (r *fakeSyncLogRepo) UpdateResult(_ context.Context, log *types.SyncLog) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if existing, ok := r.logs[log.ID]; ok {
+		existing.Status = log.Status
+		existing.FinishedAt = log.FinishedAt
+		existing.ItemsTotal = log.ItemsTotal
+		existing.ItemsCreated = log.ItemsCreated
+	}
+	return nil
 }
 
 // fakeTaskEnqueuer counts how many tasks are enqueued.

@@ -20,6 +20,7 @@ const agentMemoriesTestDDL = `
 CREATE TABLE IF NOT EXISTS agent_memories (
     id VARCHAR(36) PRIMARY KEY,
     tenant_id VARCHAR(36) NOT NULL,
+    kb_id VARCHAR(36) NOT NULL DEFAULT '',
     content TEXT NOT NULL,
     memory_type VARCHAR(32) NOT NULL DEFAULT '',
     importance INTEGER NOT NULL DEFAULT 0,
@@ -29,6 +30,12 @@ CREATE TABLE IF NOT EXISTS agent_memories (
     embedding TEXT NOT NULL DEFAULT '[0]',
     access_count INTEGER NOT NULL DEFAULT 0,
     session_id VARCHAR(36) NOT NULL DEFAULT '',
+    user_id VARCHAR(36) NOT NULL DEFAULT '',
+    fingerprint VARCHAR(64),
+    tags TEXT NOT NULL DEFAULT '{}',
+    metadata TEXT NOT NULL DEFAULT '{}',
+    last_accessed_at DATETIME,
+    expires_at DATETIME,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     deleted_at DATETIME
@@ -54,7 +61,7 @@ CREATE TABLE IF NOT EXISTS memory_relations (
     tenant_id VARCHAR(36) NOT NULL,
     from_uuid VARCHAR(36) NOT NULL,
     to_uuid VARCHAR(36) NOT NULL,
-    relation VARCHAR(64) NOT NULL DEFAULT '',
+    relation_type VARCHAR(64) NOT NULL DEFAULT '',
     weight REAL NOT NULL DEFAULT 1.0,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     deleted_at DATETIME
@@ -282,6 +289,7 @@ func TestSearch_FilterByMemoryType(t *testing.T) {
 }
 
 func TestSearch_TextQuery(t *testing.T) {
+	t.Skip("requires PostgreSQL full-text search (tsvector)")
 	repo, db := newTestRepo(t)
 	ctx := context.Background()
 
@@ -360,7 +368,7 @@ func TestSearch_Pagination(t *testing.T) {
 func TestUpdate_ProtectedVerdictRejectedForDreamer(t *testing.T) {
 	repo, db := newTestRepo(t)
 	// Set actor = "dreamer" in context
-	ctx := context.WithValue(context.Background(), "actor", "dreamer")
+	ctx := context.WithValue(context.Background(), types.ActorKey{}, "dreamer")
 
 	mem := createTestMemory(t, db, "t1", "decision memory", types.VerdictDecision)
 
@@ -373,7 +381,7 @@ func TestUpdate_ProtectedVerdictRejectedForDreamer(t *testing.T) {
 
 func TestUpdate_ProtectedVerdictRejectedForSystem(t *testing.T) {
 	repo, db := newTestRepo(t)
-	ctx := context.WithValue(context.Background(), "actor", "system")
+	ctx := context.WithValue(context.Background(), types.ActorKey{}, "system")
 
 	mem := createTestMemory(t, db, "t1", "fixed memory", types.VerdictFixed)
 
@@ -386,7 +394,7 @@ func TestUpdate_ProtectedVerdictRejectedForSystem(t *testing.T) {
 
 func TestUpdate_ProtectedVerdictAllowedForHuman(t *testing.T) {
 	repo, db := newTestRepo(t)
-	ctx := context.WithValue(context.Background(), "actor", "human")
+	ctx := context.WithValue(context.Background(), types.ActorKey{}, "human")
 
 	mem := createTestMemory(t, db, "t1", "decision memory", types.VerdictDecision)
 
@@ -417,7 +425,7 @@ func TestUpdate_ProtectedVerdictAllowedWhenNoActorInContext(t *testing.T) {
 
 func TestUpdate_DreamerCanChangeNonProtectedVerdict(t *testing.T) {
 	repo, db := newTestRepo(t)
-	ctx := context.WithValue(context.Background(), "actor", "dreamer")
+	ctx := context.WithValue(context.Background(), types.ActorKey{}, "dreamer")
 
 	mem := createTestMemory(t, db, "t1", "normal memory", types.VerdictNone)
 
@@ -433,7 +441,7 @@ func TestUpdate_DreamerCanChangeProtectedToNonProtected(t *testing.T) {
 	// Verdict guard checks the EXISTING verdict, not the new one.
 	// Once a memory has a non-protected verdict, dreamer can update freely.
 	repo, db := newTestRepo(t)
-	ctx := context.WithValue(context.Background(), "actor", "dreamer")
+	ctx := context.WithValue(context.Background(), types.ActorKey{}, "dreamer")
 
 	mem := createTestMemory(t, db, "t1", "was refuted", types.VerdictRefuted)
 
