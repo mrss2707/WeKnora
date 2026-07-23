@@ -297,8 +297,7 @@ func (s *MemoryServiceV2Impl) StartWorkers(ctx context.Context) {
 	s.workerOnce.Do(func() {
 		s.ensureWorkers(ctx)
 		ctx, s.cancel = context.WithCancel(ctx)
-		s.wg.Add(7)
-
+		s.wg.Add(5)
 
 	go runWorker(ctx, &s.wg, s.entityExtractor.Run)
 	go runWorker(ctx, &s.wg, s.consolidator.Run)
@@ -414,8 +413,8 @@ func (s *MemoryServiceV2Impl) ConsolidateDream(ctx context.Context, tenantID str
 // ---------------------------------------------------------------------------
 
 // AssessHealth runs all 6 health checks and returns issues.
-func (s *MemoryServiceV2Impl) AssessHealth(ctx context.Context, tenantID string) ([]*types.MemoryHealthIssue, error) {
-	report, err := s.healthChecker.AssessHealth(ctx, tenantID)
+func (s *MemoryServiceV2Impl) AssessHealth(ctx context.Context, tenantID, kbID string) ([]*types.MemoryHealthIssue, error) {
+	report, err := s.healthChecker.AssessHealth(ctx, tenantID, kbID)
 	if err != nil {
 		return nil, err
 	}

@@ -67,6 +67,7 @@ func main() {
 		router *gin.Engine,
 		resourceCleaner interfaces.ResourceCleaner,
 		systemSettingSvc interfaces.SystemSettingService,
+		memV2 interfaces.MemoryServiceV2,
 	) error {
 		// Create HTTP server
 		server := &http.Server{
@@ -89,6 +90,9 @@ func main() {
 		if err := systemSettingSvc.SubscribeRedis(ctx); err != nil {
 			logger.Warnf(ctx, "[system_settings] subscribe failed: %v", err)
 		}
+
+		logger.Infof(context.Background(), "Starting Memory V2 background workers...")
+		memV2.StartWorkers(ctx)
 
 		signals := make(chan os.Signal, 1)
 		signal.Notify(signals, shutdownSignals...)
@@ -120,6 +124,8 @@ func main() {
 			}
 
 			logger.Info(context.Background(), "Cleaning up resources...")
+			logger.Info(context.Background(), "Stopping Memory V2 background workers...")
+			memV2.Cleanup()
 			errs := resourceCleaner.Cleanup(shutdownCtx)
 			if len(errs) > 0 {
 				logger.Errorf(context.Background(), "Errors occurred during resource cleanup: %v", errs)
