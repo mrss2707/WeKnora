@@ -111,6 +111,7 @@ type memoryService interface {
 	CreateMemory(ctx context.Context, req *sdk.CreateMemoryRequest) (*sdk.SaveMemoryResult, error)
 	GetMemoryGraph(ctx context.Context, id, kbID string) (*sdk.MemoryGraphResult, error)
 	GetMemoryStatus(ctx context.Context) (*sdk.MemoryStatusResult, error)
+	GetMemory(ctx context.Context, id string) (*sdk.AgentMemory, error)
 }
 
 // registerTools wires the curated 10 tools onto server. Adding a tool here
@@ -139,6 +140,7 @@ func registerTools(server *mcpsdk.Server, svc ServiceClient) {
 	addMemoryRecall(server, svc)
 	addMemorySave(server, svc)
 	addMemoryGraph(server, svc)
+	addMemoryDetail(server, svc)
 	addMemoryStatus(server, svc)
 }
 

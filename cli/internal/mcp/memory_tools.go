@@ -71,7 +71,7 @@ func addMemoryRecall(server *mcpsdk.Server, svc memoryService) {
 			Results: results,
 			Total:   len(results),
 			Query:   in.Query,
-			Hint:    "Call memory_detail(id) on interesting results to load full content.",
+			Hint:    "Use memory_detail(id) to load full content of a result.",
 		}), nil, nil
 	})
 }
@@ -242,5 +242,39 @@ func addMemoryStatus(server *mcpsdk.Server, svc memoryService) {
 			Available:   result.Available,
 			MemoryCount: result.MemoryCount,
 		}), nil, nil
+	})
+}
+
+// ---- memory_detail ---------------------------------------------------------
+
+type memoryDetailInput struct {
+	MemoryID string `json:"memory_id" jsonschema:"memory ID to fetch full content for"`
+}
+
+type memoryDetailOutput struct {
+	Memory *sdk.AgentMemory `json:"memory"`
+}
+
+func addMemoryDetail(server *mcpsdk.Server, svc memoryService) {
+	mcpsdk.AddTool(server, &mcpsdk.Tool{
+		Name:        "memory_detail",
+		Description: "Fetch full content of a single memory by ID. Use after memory_recall returns compact previews to load the complete content of interesting results.",
+		Annotations: &mcpsdk.ToolAnnotations{
+			Title:           "Memory Detail",
+			DestructiveHint: bptr(false),
+			ReadOnlyHint:    true,
+			IdempotentHint:  true,
+			OpenWorldHint:   bptr(false),
+		},
+	}, func(ctx context.Context, _ *mcpsdk.CallToolRequest, in memoryDetailInput) (*mcpsdk.CallToolResult, any, error) {
+		if strings.TrimSpace(in.MemoryID) == "" {
+			return toolErrorResult(cmdutil.NewError(cmdutil.CodeInputMissingFlag, "memory_id is required")), nil, nil
+		}
+
+		mem, err := svc.GetMemory(ctx, in.MemoryID)
+		if err != nil {
+			return toolErrorResult(cmdutil.WrapHTTP(err, "get memory")), nil, nil
+		}
+		return successResult(memoryDetailOutput{Memory: mem}), nil, nil
 	})
 }

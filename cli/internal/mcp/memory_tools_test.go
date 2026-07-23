@@ -146,6 +146,40 @@ func TestMemoryStatus_ReturnsHealth(t *testing.T) {
 	assert.True(t, out.Available)
 }
 
+// ---- memory_detail tests ----
+
+func TestMemoryDetail_Validation(t *testing.T) {
+	c, _ := newTestServer(t, &fakeSvc{})
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	res, err := c.CallTool(ctx, &mcpsdk.CallToolParams{
+		Name:      "memory_detail",
+		Arguments: memoryDetailInput{},
+	})
+	require.NoError(t, err)
+	assert.True(t, res.IsError)
+	assert.Contains(t, toolContentText(res), "memory_id is required")
+}
+
+func TestMemoryDetail_Success(t *testing.T) {
+	c, _ := newTestServer(t, &fakeSvc{})
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	res, err := c.CallTool(ctx, &mcpsdk.CallToolParams{
+		Name:      "memory_detail",
+		Arguments: memoryDetailInput{MemoryID: "mem-1"},
+	})
+	require.NoError(t, err)
+	assert.False(t, res.IsError)
+
+	var out memoryDetailOutput
+	require.NoError(t, json.Unmarshal([]byte(toolContentText(res)), &out))
+	assert.Equal(t, "mem-1", out.Memory.ID)
+	assert.Equal(t, "test content", out.Memory.Content)
+}
+
 // ---- helpers ----
 
 func toolContentText(res *mcpsdk.CallToolResult) string {

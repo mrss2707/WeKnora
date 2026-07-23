@@ -150,6 +150,9 @@ func (f *fakeSvc) GetMemoryGraph(_ context.Context, id, kbID string) (*sdk.Memor
 func (f *fakeSvc) GetMemoryStatus(_ context.Context) (*sdk.MemoryStatusResult, error) {
 	return &sdk.MemoryStatusResult{Backend: "v2", Available: true}, nil
 }
+func (f *fakeSvc) GetMemory(_ context.Context, id string) (*sdk.AgentMemory, error) {
+	return &sdk.AgentMemory{ID: id, Content: "test content"}, nil
+}
 
 // newTestServer wires svc to an in-process MCP server and returns a
 // connected client session ready to CallTool against it.
@@ -212,7 +215,7 @@ func TestTool_ListsRegistered(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListTools: %v", err)
 	}
-	want := []string{"kb_list", "kb_view", "doc_list", "doc_view", "doc_download", "search_chunks", "chat", "agent_list", "session_ask", "chunk_list", "memory_recall", "memory_save", "memory_graph", "memory_status"}
+	want := []string{"kb_list", "kb_view", "doc_list", "doc_view", "doc_download", "search_chunks", "chat", "agent_list", "session_ask", "chunk_list", "memory_recall", "memory_save", "memory_graph", "memory_detail", "memory_status"}
 	got := map[string]bool{}
 	for _, tool := range res.Tools {
 		got[tool.Name] = true
@@ -637,7 +640,7 @@ func derefBool(p *bool) bool {
 }
 
 // TestToolAnnotations_AllToolsHaveExpectedHints locks the per-tool hint
-// table. Each of the 14 registered tools must surface the exact
+// table. Each of the 15 registered tools must surface the exact
 // DestructiveHint / ReadOnlyHint / IdempotentHint / OpenWorldHint + Title
 // values shown below. This guards against silent drift during future
 // refactors (e.g. someone marking chat as readOnly, or an invoke tool as
