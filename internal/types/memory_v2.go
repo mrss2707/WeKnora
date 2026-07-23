@@ -63,7 +63,9 @@ type Episode struct {
 
 // MemoryContext represents the retrieved memory context for a conversation.
 type MemoryContext struct {
-	RelatedEpisodes []Episode `json:"related_episodes"`
+	RelatedEpisodes   []Episode      `json:"related_episodes"`
+	RelatedEntities   []Entity       `json:"related_entities"`
+	RelatedRelations  []Relationship `json:"related_relations"`
 }
 
 // ---------------------------------------------------------------------------
