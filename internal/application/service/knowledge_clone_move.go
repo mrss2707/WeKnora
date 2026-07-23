@@ -5,7 +5,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"net/http"
+	"path/filepath"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/application/service/retriever"
@@ -20,13 +24,18 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
-// copyOwnedObject performs a real copy of srcPath into a NEW object owned by
-// (tenantID, knowledgeID) using the destination FileService, returning the new
-// provider:// path. The same-backend check lives inside dstSvc.CopyFile, which
-// returns file.ErrCrossBackendCopy when srcPath belongs to a different provider;
-// that error is propagated unchanged so callers can fail the clone explicitly.
-// srcSvc is accepted for symmetry with the read side but is not used directly:
-// server-side copies are issued by the destination service.
+// copyOwnedObject copies srcPath into a NEW object owned by the destination
+// tenant, returning the new provider:// (resource) path.
+//
+// Extracted/embedded chunk images MUST land in the tenant's exports/ namespace,
+// because GET /knowledge-bases/:id/files only serves objects that pass
+// ValidateKBScopedStoragePath (i.e. {tenant}/exports/...). CopyFile writes to
+// the knowledge-scoped upload layout ({tenant}/{knowledgeID}/...) used for raw
+// source files, which the KB proxy rejects — so a clone that used CopyFile
+// produced images that could no longer be rendered. Instead, read the source
+// bytes and re-save them via SaveBytes, exactly mirroring how the original
+// images were persisted during ingestion (see image_resolver.saveReferencedImage),
+// so the copy is a genuine independent object in the servable namespace.
 func copyOwnedObject(
 	ctx context.Context,
 	srcSvc, dstSvc interfaces.FileService,
@@ -34,15 +43,64 @@ func copyOwnedObject(
 	tenantID uint64,
 	knowledgeID string,
 ) (string, error) {
-	_ = srcSvc // reserved for future cross-backend streaming fallback
-	return dstSvc.CopyFile(ctx, srcPath, tenantID, knowledgeID)
+	_ = knowledgeID // exports objects are tenant-scoped, not knowledge-scoped
+	rc, err := srcSvc.GetFile(ctx, srcPath)
+	if err != nil {
+		return "", fmt.Errorf("read source image %q: %w", srcPath, err)
+	}
+	defer rc.Close()
+	data, err := io.ReadAll(rc)
+	if err != nil {
+		return "", fmt.Errorf("buffer source image %q: %w", srcPath, err)
+	}
+
+	fileName := uuid.New().String() + imageExtForCopy(srcPath, data)
+	newPath, err := dstSvc.SaveBytes(ctx, data, tenantID, fileName, false)
+	if err != nil {
+		return "", fmt.Errorf("save copied image for %q: %w", srcPath, err)
+	}
+	return newPath, nil
+}
+
+// imageExtForCopy resolves the file extension to use for a copied image. It
+// prefers an image extension already present on the source path, then falls
+// back to sniffing the content bytes, and finally defaults to ".png" (matching
+// image_resolver's default) so the object is always served with a sane type.
+func imageExtForCopy(srcPath string, data []byte) string {
+	if ext := strings.ToLower(filepath.Ext(srcPath)); isImageExt(ext) {
+		return ext
+	}
+	switch http.DetectContentType(data) {
+	case "image/png":
+		return ".png"
+	case "image/jpeg":
+		return ".jpg"
+	case "image/gif":
+		return ".gif"
+	case "image/webp":
+		return ".webp"
+	case "image/bmp":
+		return ".bmp"
+	}
+	return ".png"
+}
+
+func isImageExt(ext string) bool {
+	switch ext {
+	case ".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".svg":
+		return true
+	default:
+		return false
+	}
 }
 
 // cloneChunkImageInfo parses a chunk's image_info JSON, copies every referenced
 // object into a NEW object owned by (tenantID, knowledgeID), and returns the
 // re-serialized image_info plus the list of newly-created object URLs (for
 // rollback on failure). urlCache dedups identical source objects across chunks
-// so the same source image is copied at most once per clone.
+// so the same source image is copied at most once per clone AND accumulates the
+// full old->new URL mapping so callers can rewrite in-content Markdown image
+// references (see rewriteContentImageURLs).
 //
 // An empty srcImageInfo yields ("", nil, nil). A JSON parse failure returns an
 // error (the clone fails) rather than silently inheriting the shared-reference
@@ -93,6 +151,36 @@ func cloneChunkImageInfo(
 		return "", copiedURLs, fmt.Errorf("failed to re-serialize chunk image_info: %w", err)
 	}
 	return string(out), copiedURLs, nil
+}
+
+// rewriteContentImageURLs replaces every occurrence of an old image URL with its
+// new (copied) URL in content, using the old->new mapping accumulated in
+// urlCache. It is the second half of the image deep-copy: chunk Content embeds
+// image URLs as Markdown ![](url) references, but for document knowledge the
+// image objects live in independent image_ocr/image_caption child chunks — the
+// parent text chunk carries the ![](url) reference with an empty image_info. So
+// the old->new mapping is only known after every chunk's image_info has been
+// processed; this rewrite must therefore run as a final pass once urlCache is
+// complete, over ALL cloned chunks, not per-chunk.
+//
+// Replacements are applied longest-old-URL first so a URL that is a prefix of
+// another is not partially rewritten. Entries whose old==new are skipped.
+func rewriteContentImageURLs(content string, urlCache map[string]string) string {
+	if content == "" || len(urlCache) == 0 {
+		return content
+	}
+	oldURLs := make([]string, 0, len(urlCache))
+	for oldURL, newURL := range urlCache {
+		if oldURL == "" || oldURL == newURL {
+			continue
+		}
+		oldURLs = append(oldURLs, oldURL)
+	}
+	slices.SortFunc(oldURLs, func(a, b string) int { return len(b) - len(a) })
+	for _, oldURL := range oldURLs {
+		content = strings.ReplaceAll(content, oldURL, urlCache[oldURL])
+	}
+	return content
 }
 
 // cleanupCopiedObjects deletes objects that were newly created during a clone
@@ -256,7 +344,11 @@ func (s *knowledgeService) CloneChunk(ctx context.Context, src, dst *types.Knowl
 			}
 
 			// Deep-copy extracted images into objects owned by the destination
-			// knowledge so deleting the source never breaks this clone.
+			// knowledge so deleting the source never breaks this clone. Content
+			// URL rewriting happens in a final pass below, once urlCache holds
+			// the complete old->new mapping (image objects live in independent
+			// child chunks, so a parent text chunk's ![](url) reference cannot be
+			// rewritten until its child image chunk has been processed).
 			newImageInfo, copied, copyErr := cloneChunkImageInfo(
 				ctx, dstSvc, sourceChunk.ImageInfo, dst.TenantID, dst.ID, urlCache)
 			if copyErr != nil {
@@ -293,6 +385,11 @@ func (s *knowledgeService) CloneChunk(ctx context.Context, src, dst *types.Knowl
 		}
 	}
 	for _, targetChunk := range targetChunks {
+		// Rewrite in-content Markdown image URLs now that urlCache holds the
+		// complete old->new mapping across all chunks. This fixes parent text
+		// chunks whose ![](url) reference points at a source object copied while
+		// processing an independent image_ocr/image_caption child chunk.
+		targetChunk.Content = rewriteContentImageURLs(targetChunk.Content, urlCache)
 		if val, ok := srcTodst[targetChunk.PreChunkID]; ok {
 			targetChunk.PreChunkID = val
 		} else {
@@ -675,7 +772,10 @@ func (s *knowledgeService) cloneFAQKnowledgeBase(
 			}
 
 			// Deep-copy extracted images into objects owned by the destination
-			// FAQ knowledge so deleting the source never breaks this clone.
+			// FAQ knowledge so deleting the source never breaks this clone. A FAQ
+			// chunk is self-contained (its own Content + image_info), so its
+			// ![](url) references can be rewritten immediately using the mapping
+			// just accumulated in imageURLCache.
 			newImageInfo, copied, copyErr := cloneChunkImageInfo(
 				ctx, dstSvc, srcChunk.ImageInfo, dstKB.TenantID, dstKnowledge.ID, imageURLCache)
 			if copyErr != nil {
@@ -692,7 +792,7 @@ func (s *knowledgeService) cloneFAQKnowledgeBase(
 				KnowledgeID:     dstKnowledge.ID,
 				KnowledgeBaseID: dstKB.ID,
 				TagID:           targetTagID,
-				Content:         srcChunk.Content,
+				Content:         rewriteContentImageURLs(srcChunk.Content, imageURLCache),
 				ChunkIndex:      srcChunk.ChunkIndex,
 				IsEnabled:       srcChunk.IsEnabled,
 				Flags:           srcChunk.Flags,
@@ -1098,9 +1198,11 @@ func (s *knowledgeService) moveKnowledgeReuseVectors(
 		return fmt.Errorf("failed to move chunks: %w", err)
 	}
 
-	// 4. Update knowledge record
+	// 4. Update knowledge record (tags are KB-scoped; clear relations before moving)
+	if err := s.repo.DeleteKnowledgeTagRelations(ctx, knowledge.ID); err != nil {
+		return fmt.Errorf("failed to clear knowledge tag relations: %w", err)
+	}
 	knowledge.KnowledgeBaseID = targetKB.ID
-	knowledge.TagID = "" // Clear tag since tags are KB-scoped
 	knowledge.ParseStatus = types.ParseStatusCompleted
 	knowledge.UpdatedAt = time.Now()
 	if err := s.repo.UpdateKnowledge(ctx, knowledge); err != nil {
@@ -1124,10 +1226,12 @@ func (s *knowledgeService) moveKnowledgeReparse(
 		// Continue - partial cleanup is acceptable
 	}
 
-	// 2. Update knowledge to belong to target KB
+	// 2. Update knowledge to belong to target KB (tags are KB-scoped; clear relations)
+	if err := s.repo.DeleteKnowledgeTagRelations(ctx, knowledge.ID); err != nil {
+		return fmt.Errorf("failed to clear knowledge tag relations: %w", err)
+	}
 	knowledge.KnowledgeBaseID = targetKB.ID
 	knowledge.EmbeddingModelID = targetKB.EmbeddingModelID
-	knowledge.TagID = "" // Clear tag since tags are KB-scoped
 	knowledge.ParseStatus = types.ParseStatusPending
 	knowledge.EnableStatus = "disabled"
 	knowledge.Description = ""

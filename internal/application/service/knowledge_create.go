@@ -25,7 +25,7 @@ import (
 
 // CreateKnowledgeFromFile creates a knowledge entry from an uploaded file
 func (s *knowledgeService) CreateKnowledgeFromFile(ctx context.Context,
-	kbID string, file *multipart.FileHeader, metadata map[string]string, enableMultimodel *bool, customFileName string, tagID string, channel string,
+	kbID string, file *multipart.FileHeader, metadata map[string]string, enableMultimodel *bool, customFileName string, tagIDs []string, channel string,
 	processOverrides *types.KnowledgeProcessOverrides,
 ) (*types.Knowledge, error) {
 	logger.Info(ctx, "Start creating knowledge from file")
@@ -142,15 +142,18 @@ func (s *knowledgeService) CreateKnowledgeFromFile(ctx context.Context,
 				provider = strings.ToLower(strings.TrimSpace(tenant.StorageEngineConfig.DefaultProvider))
 			}
 
-			switch provider {
-			case "cos":
+			concreteBackend := kb.StorageBackendID != nil && strings.TrimSpace(*kb.StorageBackendID) != ""
+			switch {
+			case concreteBackend:
+				// Registration already validated and tested the concrete instance.
+			case provider == "cos":
 				if tenant == nil || tenant.StorageEngineConfig == nil || tenant.StorageEngineConfig.COS == nil ||
 					tenant.StorageEngineConfig.COS.SecretID == "" || tenant.StorageEngineConfig.COS.SecretKey == "" ||
 					tenant.StorageEngineConfig.COS.Region == "" || tenant.StorageEngineConfig.COS.BucketName == "" {
 					logger.Error(ctx, "COS configuration incomplete for image multimodal processing")
 					return nil, werrors.NewBadRequestError("上传图片文件需要完整的对象存储配置信息, 请前往知识库存储设置或系统设置页面进行补全")
 				}
-			case "minio":
+			case provider == "minio":
 				ok := false
 				if tenant != nil && tenant.StorageEngineConfig != nil && tenant.StorageEngineConfig.MinIO != nil {
 					m := tenant.StorageEngineConfig.MinIO
@@ -188,7 +191,6 @@ func (s *knowledgeService) CreateKnowledgeFromFile(ctx context.Context,
 		ID:               uuid.New().String(),
 		TenantID:         tenantID,
 		KnowledgeBaseID:  kbID,
-		TagID:            tagID, // 设置分类ID，用于知识分类管理
 		Type:             "file",
 		Channel:          defaultChannel(channel),
 		Title:            safeFilename,
@@ -228,6 +230,12 @@ func (s *knowledgeService) CreateKnowledgeFromFile(ctx context.Context,
 		if deleteErr := fileSvc.DeleteFile(ctx, filePath); deleteErr != nil {
 			logger.Errorf(ctx, "Failed to delete saved file after knowledge creation failed, path: %s, error: %v", filePath, deleteErr)
 		}
+		return nil, err
+	}
+
+	// Set tag relations
+	if err := s.setAndAttachKnowledgeTags(ctx, tenantID, kbID, knowledge, tagIDs); err != nil {
+		logger.Errorf(ctx, "Failed to set knowledge tags, knowledge ID: %s, error: %v", knowledge.ID, err)
 		return nil, err
 	}
 
@@ -307,7 +315,7 @@ func isFileURL(rawURL, fileName, fileType string) bool {
 }
 
 func (s *knowledgeService) CreateKnowledgeFromURL(ctx context.Context,
-	kbID string, rawURL string, fileName string, fileType string, enableMultimodel *bool, title string, tagID string, channel string,
+	kbID string, rawURL string, fileName string, fileType string, enableMultimodel *bool, title string, tagIDs []string, channel string,
 	processOverrides *types.KnowledgeProcessOverrides,
 ) (*types.Knowledge, error) {
 	logger.Info(ctx, "Start creating knowledge from URL")
@@ -316,7 +324,7 @@ func (s *knowledgeService) CreateKnowledgeFromURL(ctx context.Context,
 	// Route to file_url logic when the URL points to a downloadable file
 	if isFileURL(rawURL, fileName, fileType) {
 		return s.createKnowledgeFromFileURL(
-			ctx, kbID, rawURL, fileName, fileType, enableMultimodel, title, tagID, channel, processOverrides,
+			ctx, kbID, rawURL, fileName, fileType, enableMultimodel, title, tagIDs, channel, processOverrides,
 		)
 	}
 
@@ -396,7 +404,6 @@ func (s *knowledgeService) CreateKnowledgeFromURL(ctx context.Context,
 		CreatedAt:        time.Now(),
 		UpdatedAt:        time.Now(),
 		EmbeddingModelID: kb.EmbeddingModelID,
-		TagID:            tagID, // 设置分类ID，用于知识分类管理
 	}
 
 	// Save knowledge record
@@ -408,6 +415,12 @@ func (s *knowledgeService) CreateKnowledgeFromURL(ctx context.Context,
 
 	if err := s.repo.CreateKnowledge(ctx, knowledge); err != nil {
 		logger.Errorf(ctx, "Failed to create knowledge record: %v", err)
+		return nil, err
+	}
+
+	// Set tag relations
+	if err := s.setAndAttachKnowledgeTags(ctx, tenantID, kbID, knowledge, tagIDs); err != nil {
+		logger.Errorf(ctx, "Failed to set knowledge tags, knowledge ID: %s, error: %v", knowledge.ID, err)
 		return nil, err
 	}
 
@@ -512,7 +525,7 @@ func (s *knowledgeService) createKnowledgeFromFileURL(
 	fileType string,
 	enableMultimodel *bool,
 	title string,
-	tagID string,
+	tagIDs []string,
 	channel string,
 	processOverrides *types.KnowledgeProcessOverrides,
 ) (*types.Knowledge, error) {
@@ -618,7 +631,6 @@ func (s *knowledgeService) createKnowledgeFromFileURL(
 		CreatedAt:        time.Now(),
 		UpdatedAt:        time.Now(),
 		EmbeddingModelID: kb.EmbeddingModelID,
-		TagID:            tagID,
 	}
 	if knowledge.Title == "" {
 		knowledge.Title = displayName
@@ -641,6 +653,12 @@ func (s *knowledgeService) createKnowledgeFromFileURL(
 
 	if err := s.repo.CreateKnowledge(ctx, knowledge); err != nil {
 		logger.Errorf(ctx, "Failed to create knowledge record: %v", err)
+		return nil, err
+	}
+
+	// Set tag relations
+	if err := s.setAndAttachKnowledgeTags(ctx, tenantID, kbID, knowledge, tagIDs); err != nil {
+		logger.Errorf(ctx, "Failed to set knowledge tags, knowledge ID: %s, error: %v", knowledge.ID, err)
 		return nil, err
 	}
 
@@ -769,7 +787,6 @@ func (s *knowledgeService) CreateKnowledgeFromManual(ctx context.Context,
 		EmbeddingModelID: kb.EmbeddingModelID,
 		FileName:         fileName,
 		FileType:         types.KnowledgeTypeManual,
-		TagID:            payload.TagID, // 设置分类ID，用于知识分类管理
 	}
 	if err := knowledge.SetManualMetadata(meta); err != nil {
 		logger.Errorf(ctx, "Failed to set manual metadata: %v", err)
@@ -789,6 +806,12 @@ func (s *knowledgeService) CreateKnowledgeFromManual(ctx context.Context,
 
 	if err := s.repo.CreateKnowledge(ctx, knowledge); err != nil {
 		logger.Errorf(ctx, "Failed to create manual knowledge record: %v", err)
+		return nil, err
+	}
+
+	// Set tag relations
+	if err := s.setAndAttachKnowledgeTags(ctx, tenantID, kbID, knowledge, payload.TagIDs); err != nil {
+		logger.Errorf(ctx, "Failed to set knowledge tags, knowledge ID: %s, error: %v", knowledge.ID, err)
 		return nil, err
 	}
 
@@ -1050,7 +1073,8 @@ func (s *knowledgeService) enqueueManualProcessing(ctx context.Context,
 		return fmt.Errorf("failed to marshal manual process payload: %w", err)
 	}
 
-	task := asynq.NewTask(types.TypeManualProcess, payloadBytes, asynq.Queue("default"), asynq.MaxRetry(3))
+	task := asynq.NewTask(types.TypeManualProcess, payloadBytes,
+		asynq.Queue(types.QueueDefault), asynq.MaxRetry(3), asynq.Timeout(30*time.Minute))
 	info, err := s.task.Enqueue(task)
 	if err != nil {
 		return fmt.Errorf("failed to enqueue manual process task: %w", err)

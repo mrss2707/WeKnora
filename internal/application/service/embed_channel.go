@@ -85,7 +85,6 @@ func (s *embedChannelService) Create(
 		ShowSuggestedQuestions: req.ShowSuggestedQuestions,
 		WidgetPosition:         types.NormalizeEmbedWidgetPosition(req.WidgetPosition),
 		AllowWebSearch:         req.AllowWebSearch,
-		AllowMemory:            req.AllowMemory,
 		AllowFileUpload:        req.AllowFileUpload,
 		DefaultLocale:          types.NormalizeEmbedDefaultLocale(req.DefaultLocale),
 	}
@@ -119,7 +118,7 @@ func (s *embedChannelService) ListByTenant(
 
 func (s *embedChannelService) Update(
 	ctx context.Context, tenantID uint64, id string, req *types.EmbedChannel,
-	enabled *bool, showSuggested *bool, allowWebSearch *bool, allowMemory *bool, allowFileUpload *bool,
+	enabled *bool, showSuggested *bool, allowWebSearch *bool, allowFileUpload *bool,
 	defaultLocale *string, webhookURL *string, webhookSecret *string,
 ) (*types.EmbedChannel, error) {
 	ch, err := s.getOwned(ctx, tenantID, id)
@@ -138,9 +137,6 @@ func (s *embedChannelService) Update(
 	}
 	if allowWebSearch != nil {
 		ch.AllowWebSearch = *allowWebSearch
-	}
-	if allowMemory != nil {
-		ch.AllowMemory = *allowMemory
 	}
 	if allowFileUpload != nil {
 		ch.AllowFileUpload = *allowFileUpload
@@ -176,6 +172,12 @@ func (s *embedChannelService) Update(
 		} else {
 			ch.AllowedOrigins = req.AllowedOrigins
 		}
+	}
+	if trimmed := strings.TrimSpace(req.AgentID); trimmed != "" && trimmed != ch.AgentID {
+		if _, err := s.ensureAgentOwned(ctx, tenantID, trimmed); err != nil {
+			return nil, err
+		}
+		ch.AgentID = trimmed
 	}
 	if err := s.repo.Update(ctx, ch); err != nil {
 		return nil, err
@@ -256,7 +258,6 @@ func (s *embedChannelService) PublicConfig(ctx context.Context, ch *types.EmbedC
 		AllowedOrigins:          ch.AllowedOriginsList(),
 		WidgetPosition:          types.NormalizeEmbedWidgetPosition(ch.WidgetPosition),
 		AllowWebSearch:          ch.AllowWebSearch,
-		AllowMemory:             ch.AllowMemory,
 		AllowFileUpload:         ch.AllowFileUpload,
 		AgentWebSearchEnabled:   agentWebSearchEnabled,
 		AgentImageUploadEnabled: agentImageUploadEnabled,
@@ -287,8 +288,8 @@ func (s *embedChannelService) chunkAllowedForEmbed(
 	if chunk == nil || chunk.KnowledgeBaseID == "" {
 		return false
 	}
-	// 显式重校验租户：GetChunkByIDOnly 无租户过滤，且 KBSelectionMode=="all"/默认
-	// 分支会无条件放行，必须在此挡住跨租户 chunk id 撞库读取他人知识库正文。
+	// 显式重校验空间：GetChunkByIDOnly 无空间过滤，且 KBSelectionMode=="all"/默认
+	// 分支会无条件放行，必须在此挡住跨空间 chunk id 撞库读取他人知识库正文。
 	if ch == nil || chunk.TenantID != ch.TenantID {
 		return false
 	}
@@ -325,7 +326,7 @@ func (s *embedChannelService) SuggestedQuestions(
 		limit = 6
 	}
 	kbIDs := s.resolveKnowledgeBaseIDs(ctx, ch)
-	return s.agentService.GetSuggestedQuestions(ctx, ch.AgentID, kbIDs, nil, limit)
+	return s.agentService.GetSuggestedQuestions(ctx, ch.AgentID, kbIDs, nil, nil, limit)
 }
 
 // EmbedDisplayTitle resolves the human-readable title for embed sessions and UI chrome.

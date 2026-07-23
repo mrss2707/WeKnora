@@ -7,9 +7,9 @@
       <div class="setting-drawer-resize-line" />
     </div>
   </teleport>
-  <t-drawer v-model:visible="drawerVisible" :size="effectiveWidth" :z-index="2500" placement="right"
-    attach="body" destroy-on-close
-    :class="['setting-drawer', { 'setting-drawer--resizing': drawerResizing }]">
+  <t-drawer v-model:visible="drawerVisible" v-bind="drawerPassthroughAttrs" :size="effectiveWidth" :z-index="2500" placement="right"
+    attach="body" destroy-on-close :footer="!hideFooter"
+    :class="drawerClass">
     <!--
       Custom header. We replace TDesign's default header so we can put a leading
       icon badge and an optional subtitle (description) right next to the title,
@@ -42,12 +42,14 @@
           <slot name="footer-left" />
         </div>
         <div class="setting-drawer__footer-right">
-          <t-button theme="default" variant="outline" @click="handleCancel">
-            {{ cancelText || t('common.cancel') }}
-          </t-button>
-          <t-button theme="primary" :loading="confirmLoading" :disabled="confirmDisabled" @click="handleConfirm">
-            {{ confirmText || t('common.save') }}
-          </t-button>
+          <slot name="footer-right">
+            <t-button theme="default" variant="outline" @click="handleCancel">
+              {{ cancelText || t('common.cancel') }}
+            </t-button>
+            <t-button theme="primary" :loading="confirmLoading" :disabled="confirmDisabled" @click="handleConfirm">
+              {{ confirmText || t('common.save') }}
+            </t-button>
+          </slot>
         </div>
       </div>
     </template>
@@ -55,7 +57,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, onMounted, onUnmounted } from 'vue'
+import { ref, computed, useAttrs, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 
 interface Props {
@@ -90,6 +92,8 @@ interface Props {
   hideFooter?: boolean
 }
 
+defineOptions({ inheritAttrs: false })
+
 const props = withDefaults(defineProps<Props>(), {
   description: '',
   icon: '',
@@ -112,6 +116,12 @@ const emit = defineEmits<{
 }>()
 
 const { t } = useI18n()
+const attrs = useAttrs()
+
+const drawerPassthroughAttrs = computed(() => {
+  const { class: _class, ...rest } = attrs
+  return rest
+})
 
 // ---------- visibility ----------
 const drawerVisible = computed({
@@ -172,6 +182,13 @@ const persistWidth = (width: number) => {
 
 // ---------- Custom drag-resize (visible handle, same as doc-content) ----------
 const drawerResizing = ref(false)
+
+const drawerClass = computed(() => [
+  'setting-drawer',
+  attrs.class,
+  { 'setting-drawer--resizing': drawerResizing.value },
+])
+
 let resizeStartX = 0
 let resizeStartWidth = 0
 

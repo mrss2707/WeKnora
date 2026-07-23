@@ -16,13 +16,13 @@ var listKnowledgeChunksTool = BaseTool{
 	description: `Retrieve full chunk content for a document or a single FAQ entry.
 
 ## Use After grep_chunks or knowledge_search:
-- **FAQ hit** (type faq): list_knowledge_chunks(faq_id="<chunk_id from search>") — reads that one FAQ entry with answers from metadata.
-- **Document hit**: list_knowledge_chunks(knowledge_id="<document id>") — pages through all chunks.
+- **FAQ hit** (type faq): list_knowledge_chunks(faq_id="cN") — reads that one FAQ chunk with answers from metadata.
+- **Document hit**: list_knowledge_chunks(knowledge_id="dN") — pages through all chunks.
 
 ## Parameters (provide exactly one id target):
-- faq_id (optional): FAQ entry ID from grep_chunks / knowledge_search.
-- chunk_id (optional): Single non-FAQ chunk ID (do not use for FAQ — use faq_id).
-- knowledge_id (optional): Document/knowledge ID to page through all chunks.
+- faq_id (optional): Short cN ID for an FAQ chunk from grep_chunks / knowledge_search.
+- chunk_id (optional): Short cN ID for a single non-FAQ chunk.
+- knowledge_id (optional): Short dN document ID to page through all chunks.
 - limit / offset: Only for knowledge_id paging (default limit 20, max 100).
 
 ## Output:
@@ -32,15 +32,15 @@ Full chunk content. FAQ entries include <faq> with <answer> from metadata.`,
   "properties": {
     "faq_id": {
       "type": "string",
-      "description": "FAQ entry ID (same as chunk_id). Use for FAQ hits instead of knowledge_id."
+      "description": "Short cN FAQ chunk ID. Use for FAQ hits instead of the parent dN document ID."
     },
     "chunk_id": {
       "type": "string",
-      "description": "Single chunk ID (alias of faq_id)"
+      "description": "Short cN ID for one non-FAQ chunk"
     },
     "knowledge_id": {
       "type": "string",
-      "description": "Document/knowledge ID to list all chunks"
+      "description": "Short dN document ID to list all chunks"
     },
     "limit": {
       "type": "integer",
@@ -132,6 +132,19 @@ func (t *ListKnowledgeChunksTool) Execute(ctx context.Context, args json.RawMess
 			Success: false,
 			Error:   fmt.Sprintf("Knowledge base %s is not accessible", knowledge.KnowledgeBaseID),
 		}, fmt.Errorf("knowledge base not in search targets")
+	}
+	allowed, err := searchTargetsAllowKnowledgeID(ctx, t.searchTargets, knowledge.ID, knowledge.KnowledgeBaseID, t.knowledgeService)
+	if err != nil {
+		return &types.ToolResult{
+			Success: false,
+			Error:   fmt.Sprintf("failed to validate knowledge scope: %v", err),
+		}, err
+	}
+	if !allowed {
+		return &types.ToolResult{
+			Success: false,
+			Error:   fmt.Sprintf("Knowledge %s is not within the current @mention scope", knowledge.ID),
+		}, fmt.Errorf("knowledge not in search target scope")
 	}
 
 	// Use the knowledge's actual tenant_id for chunk query (supports cross-tenant shared KB)
@@ -296,6 +309,19 @@ func (t *ListKnowledgeChunksTool) executeByChunkID(ctx context.Context, chunkID 
 			Error:   fmt.Sprintf("knowledge base %s is not accessible", chunk.KnowledgeBaseID),
 		}, fmt.Errorf("knowledge base not in search targets")
 	}
+	allowed, scopeErr := searchTargetsAllowKnowledgeID(ctx, t.searchTargets, chunk.KnowledgeID, chunk.KnowledgeBaseID, t.knowledgeService)
+	if scopeErr != nil {
+		return &types.ToolResult{
+			Success: false,
+			Error:   fmt.Sprintf("failed to validate chunk scope: %v", scopeErr),
+		}, scopeErr
+	}
+	if !allowed {
+		return &types.ToolResult{
+			Success: false,
+			Error:   fmt.Sprintf("chunk %s is not within the current @mention scope", chunk.ID),
+		}, fmt.Errorf("chunk not in search target scope")
+	}
 
 	chunks := []*types.Chunk{chunk}
 	if chunk.ImageInfo == "" {
@@ -386,7 +412,7 @@ func (t *ListKnowledgeChunksTool) buildOutput(
 	for _, c := range chunks {
 		if c.ChunkType == types.ChunkTypeFAQ {
 			writeFAQEntryXML(&b, c)
-			writeChunkImagesXML(&b, c)
+			writeChunkImagesMarkdown(&b, c)
 			continue
 		}
 
@@ -398,7 +424,7 @@ func (t *ListKnowledgeChunksTool) buildOutput(
 				c.ID, c.ChunkIndex, c.ChunkType)
 		}
 		fmt.Fprintf(&b, "<content>%s</content>\n", summarizeContent(c.Content))
-		writeChunkImagesXML(&b, c)
+		writeChunkImagesMarkdown(&b, c)
 		b.WriteString("</chunk>\n")
 	}
 
@@ -410,7 +436,7 @@ func (t *ListKnowledgeChunksTool) buildOutput(
 	return b.String()
 }
 
-func writeChunkImagesXML(b *strings.Builder, c *types.Chunk) {
+func writeChunkImagesMarkdown(b *strings.Builder, c *types.Chunk) {
 	if c == nil || c.ImageInfo == "" {
 		return
 	}
@@ -419,18 +445,10 @@ func writeChunkImagesXML(b *strings.Builder, c *types.Chunk) {
 		return
 	}
 	for _, img := range imageInfos {
-		if img.URL != "" {
-			fmt.Fprintf(b, "<image url=\"%s\">\n", img.URL)
-		} else {
-			b.WriteString("<image>\n")
+		if imageMarkdown := searchutil.BuildImageInfoMarkdownWithURL(img.URL, &img); imageMarkdown != "" {
+			b.WriteString(imageMarkdown)
+			b.WriteString("\n")
 		}
-		if img.Caption != "" {
-			fmt.Fprintf(b, "<image_caption>%s</image_caption>\n", img.Caption)
-		}
-		if img.OCRText != "" {
-			fmt.Fprintf(b, "<image_ocr>%s</image_ocr>\n", img.OCRText)
-		}
-		b.WriteString("</image>\n")
 	}
 }
 

@@ -14,7 +14,7 @@ type KnowledgeTag struct {
 	ID string `json:"id"                gorm:"type:varchar(36);primaryKey"`
 	// SeqID is an auto-increment integer ID for external API usage
 	SeqID int64 `json:"seq_id"            gorm:"type:bigint;uniqueIndex;autoIncrement"`
-	// Tenant ID
+	// Workspace ID
 	TenantID uint64 `json:"tenant_id"`
 	// Knowledge base ID that this tag belongs to
 	KnowledgeBaseID string `json:"knowledge_base_id" gorm:"type:varchar(36);index"`
@@ -63,4 +63,17 @@ type KnowledgeTagWithStats struct {
 type TagReferenceCounts struct {
 	KnowledgeCount int64
 	ChunkCount     int64
+}
+
+// KnowledgeTagRelation represents a many-to-many association between
+// a document knowledge entry and a tag in the knowledge_tag_relations table.
+type KnowledgeTagRelation struct {
+	KnowledgeID string    `gorm:"type:varchar(36);primaryKey"`
+	TagID       string    `gorm:"type:varchar(36);primaryKey"`
+	CreatedAt   time.Time `gorm:"autoCreateTime"`
+}
+
+// TableName overrides the default table name.
+func (KnowledgeTagRelation) TableName() string {
+	return "knowledge_tag_relations"
 }

@@ -14,11 +14,13 @@ import (
 	"sync"
 	"time"
 
+	agenttools "github.com/Tencent/WeKnora/internal/agent/tools"
 	filesvc "github.com/Tencent/WeKnora/internal/application/service/file"
 	"github.com/Tencent/WeKnora/internal/config"
 	apperrors "github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/event"
 	"github.com/Tencent/WeKnora/internal/logger"
+	mcppkg "github.com/Tencent/WeKnora/internal/mcp"
 	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/Tencent/WeKnora/internal/ratelimit"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -40,6 +42,9 @@ const (
 	// streamFlushInterval is how often buffered stream content is flushed to the IM platform.
 	// This prevents API rate-limiting while keeping perceived latency low.
 	streamFlushInterval = 300 * time.Millisecond
+	// agentCompleteWaitTimeout bounds how long IM waits for EventAgentComplete after
+	// the final answer stream finishes, preventing indefinite hangs.
+	agentCompleteWaitTimeout = 10 * time.Second
 )
 
 // imCitationTagRe matches inline citation tags produced by the agent pipeline.
@@ -72,8 +77,13 @@ func stripImageXMLTags(s string) string {
 	})
 }
 
-// storageSchemeRe matches provider:// URLs used by file storage backends.
-var storageSchemeRe = regexp.MustCompile(`\b(local|minio|s3|cos|tos|oss)://[^\s)\]>"]+`)
+// storageSchemeRe matches both legacy provider:// URLs and canonical
+// storage://<backend-id>/provider:// URLs.
+var storageSchemeRe = regexp.MustCompile(
+	`\b(?:resource://[0-9A-Za-z_-]+|` +
+		`(?:storage://[0-9A-Za-z_-]+/)?` +
+		`(?:local|minio|s3|cos|tos|oss|obs|ks3)://[^\s)\]>"]+)`,
+)
 
 // rewriteStorageURLs replaces all provider:// URLs in content with HTTP URLs
 // obtained from fileService.GetFileURL. URLs that are already HTTP or cannot
@@ -122,7 +132,7 @@ func rewriteStorageURLs(ctx context.Context, content string, resolver *imFileSer
 // incompleteURLSuffixRe matches a provider:// URL that reaches the end of the
 // string — it may continue in the next chunk.
 var incompleteURLSuffixRe = regexp.MustCompile(
-	`\b(?:local|minio|s3|cos|tos|oss)://[^\s)\]>"]*$`,
+	`\b(?:resource|storage|local|minio|s3|cos|tos|oss|obs|ks3)://[^\s)\]>"]*$`,
 )
 
 // findIncompleteStorageURL returns the byte offset of a potentially truncated
@@ -191,14 +201,20 @@ func holdbackCutoff(chunk string) int {
 	return cutoff
 }
 
+// formatIMOutboundAnswer strips thinking/tool blocks and applies IM content cleanup.
+func formatIMOutboundAnswer(ctx context.Context, raw string, tenant *types.Tenant, defaultFileSvc interfaces.FileService, storageResolvers ...interfaces.StorageBackendResolver) string {
+	return cleanIMContent(ctx, FormatIMDisplayContent(raw, StreamDisplayFinal), tenant, defaultFileSvc, storageResolvers...)
+}
+
 // cleanIMContent applies all IM-specific content transformations:
 //  1. Collapse <image> XML blocks back to plain markdown
 //  2. Strip <kb/> and <web/> citation tags
 //  3. Rewrite provider:// URLs to HTTP URLs (scheme-aware per tenant config)
-func cleanIMContent(ctx context.Context, content string, tenant *types.Tenant, defaultFileSvc interfaces.FileService) string {
+func cleanIMContent(ctx context.Context, content string, tenant *types.Tenant, defaultFileSvc interfaces.FileService, storageResolvers ...interfaces.StorageBackendResolver) string {
 	content = stripImageXMLTags(content)
 	content = stripIMCitationTags(content)
-	resolver := newIMFileServiceResolver(tenant, defaultFileSvc)
+	resolver := newIMFileServiceResolver(tenant, defaultFileSvc, storageResolvers...)
+	resolver.ctx = ctx
 	content = rewriteStorageURLs(ctx, content, resolver)
 	return content
 }
@@ -215,20 +231,31 @@ func imLocalStorageBaseDir() string {
 // for the lifetime of one cleanIMContent / outbound message (avoids re-creating SDK clients
 // for every URL in a long answer).
 type imFileServiceResolver struct {
-	tenant     *types.Tenant
-	defaultSvc interfaces.FileService
-	cache      map[string]interfaces.FileService
+	tenant          *types.Tenant
+	defaultSvc      interfaces.FileService
+	storageResolver interfaces.StorageBackendResolver
+	ctx             context.Context
+	cache           map[string]interfaces.FileService
 }
 
-func newIMFileServiceResolver(tenant *types.Tenant, defaultSvc interfaces.FileService) *imFileServiceResolver {
-	return &imFileServiceResolver{
+func newIMFileServiceResolver(tenant *types.Tenant, defaultSvc interfaces.FileService, storageResolvers ...interfaces.StorageBackendResolver) *imFileServiceResolver {
+	resolver := &imFileServiceResolver{
 		tenant:     tenant,
 		defaultSvc: defaultSvc,
+		ctx:        context.Background(),
 		cache:      make(map[string]interfaces.FileService),
 	}
+	if len(storageResolvers) > 0 {
+		resolver.storageResolver = storageResolvers[0]
+	}
+	return resolver
 }
 
 func (r *imFileServiceResolver) resolve(filePath string) interfaces.FileService {
+	if _, ok := types.ParseResourcePath(filePath); ok {
+		return r.defaultSvc
+	}
+	backendID, _, _ := types.ParseStorageBackendPath(filePath)
 	provider := types.ParseProviderScheme(filePath)
 	if provider == "" {
 		if r.tenant != nil && r.tenant.StorageEngineConfig != nil {
@@ -238,12 +265,21 @@ func (r *imFileServiceResolver) resolve(filePath string) interfaces.FileService 
 			return nil
 		}
 	}
-	if svc, ok := r.cache[provider]; ok {
+	cacheKey := backendID + ":" + provider
+	if svc, ok := r.cache[cacheKey]; ok {
 		return svc
+	}
+	if r.storageResolver != nil && r.tenant != nil {
+		svc, _, err := r.storageResolver.ResolveFileService(r.ctx, r.tenant, backendID, provider, imLocalStorageBaseDir())
+		if err == nil {
+			r.cache[cacheKey] = svc
+			return svc
+		}
+		logger.Warnf(r.ctx, "[IM] resolve storage backend failed: backend_id=%s provider=%s err=%v", backendID, provider, err)
 	}
 	svc := buildIMFileServiceForProvider(r.tenant, provider, r.defaultSvc)
 	if svc != nil {
-		r.cache[provider] = svc
+		r.cache[cacheKey] = svc
 	}
 	return svc
 }
@@ -352,6 +388,11 @@ type Service struct {
 	// modelService is used to obtain the chat model for generating smart notification replies.
 	modelService interfaces.ModelService
 
+	// oauthManager builds MCP OAuth authorization URLs so IM users can authorize
+	// OAuth-enabled MCP services out-of-band (IM cannot resolve the in-conversation
+	// prompt). May be nil, in which case a generic console hint is shown instead.
+	oauthManager *mcppkg.OAuthManager
+
 	// streamManager writes/reads QA events for distributed stop detection,
 	// consistent with the web StopSession mechanism. May be nil in Lite mode
 	// (but NewStreamManager always returns at least a memory implementation).
@@ -359,7 +400,8 @@ type Service struct {
 
 	// defaultFileSvc is the process-wide storage backend (STORAGE_TYPE / env).
 	// Used when tenant StorageEngineConfig cannot build a service for the URL scheme.
-	defaultFileSvc interfaces.FileService
+	defaultFileSvc  interfaces.FileService
+	storageResolver interfaces.StorageBackendResolver
 
 	// cmdRegistry holds all registered slash-commands.
 	cmdRegistry *CommandRegistry
@@ -459,11 +501,107 @@ func formatQuotedContext(quote *QuotedMessage) string {
 // knowledge bases be merged and resolved correctly, since the shared-KB code
 // gates on a non-empty UserID. Viewer is the least privilege sufficient to
 // retrieve shared KBs.
-func withIMIdentity(ctx context.Context, tenantID uint64) context.Context {
+func withIMIdentity(ctx context.Context, tenantID uint64, channelID string, msg *IncomingMessage) context.Context {
 	ctx = context.WithValue(ctx, types.TenantIDContextKey, tenantID)
 	ctx = context.WithValue(ctx, types.UserIDContextKey, fmt.Sprintf("system-%d", tenantID))
+	if msg != nil {
+		principalID := fmt.Sprintf("%d:%s:%s:%s", tenantID, channelID, msg.Platform, msg.UserID)
+		ctx = types.WithPrincipal(ctx, types.Principal{Type: types.PrincipalIMUser, ID: principalID})
+	}
 	ctx = context.WithValue(ctx, types.TenantRoleContextKey, types.TenantRoleViewer)
+	// IM bots have no live client that can complete an in-conversation MCP OAuth
+	// prompt, so mark the context non-interactive: the agent emits a one-shot
+	// authorization notice (surfaced in the reply) instead of blocking until the
+	// OAuth wait times out for every unauthorized service.
+	ctx = types.WithMCPOAuthNonInteractive(ctx)
 	return ctx
+}
+
+// imMCPAuthService identifies an OAuth-enabled MCP service that the IM user has
+// not authorized yet, collected during a turn so an authorization notice can be
+// appended to the reply.
+type imMCPAuthService struct {
+	ID   string
+	Name string
+}
+
+// mcpOAuthCallbackURL returns the absolute backend callback URL registered with
+// the authorization server, derived from APP_EXTERNAL_URL. Empty when unset.
+func mcpOAuthCallbackURL() string {
+	base := strings.TrimRight(strings.TrimSpace(os.Getenv("APP_EXTERNAL_URL")), "/")
+	if base == "" {
+		return ""
+	}
+	return base + "/api/v1/mcp-oauth/callback"
+}
+
+// buildIMMCPAuthNotice builds a user-facing authorization notice for the given
+// OAuth-enabled MCP services. When the OAuth manager and APP_EXTERNAL_URL are
+// available it generates a per-service authorization URL (StartAuthorization)
+// the user can open; otherwise it falls back to a console hint. Returns "" when
+// there is nothing to report. The user authorizes out-of-band, then re-sends
+// their message to use the service (IM cannot resolve the prompt inline).
+func (s *Service) buildIMMCPAuthNotice(ctx context.Context, services []imMCPAuthService) string {
+	// Deduplicate by service ID, preserving order.
+	seen := make(map[string]bool, len(services))
+	uniq := make([]imMCPAuthService, 0, len(services))
+	for _, svc := range services {
+		if svc.ID == "" || seen[svc.ID] {
+			continue
+		}
+		seen[svc.ID] = true
+		uniq = append(uniq, svc)
+	}
+	if len(uniq) == 0 {
+		return ""
+	}
+
+	tenantID, _ := types.TenantIDFromContext(ctx)
+	principal := types.MCPOAuthPrincipalFromContext(ctx)
+	redirectURI := mcpOAuthCallbackURL()
+	frontendRedirect := strings.TrimSpace(os.Getenv("APP_EXTERNAL_URL"))
+	if frontendRedirect == "" {
+		frontendRedirect = "/"
+	}
+
+	var lines []string
+	for _, svc := range uniq {
+		name := strings.TrimSpace(svc.Name)
+		if name == "" {
+			name = svc.ID
+		}
+		var authURL string
+		if s.oauthManager != nil && redirectURI != "" && tenantID != 0 && principal.Valid() {
+			url, err := s.oauthManager.StartAuthorizationForService(
+				ctx, tenantID, principal, svc.ID, redirectURI, frontendRedirect,
+			)
+			if err != nil {
+				logger.Warnf(ctx, "[IM] Failed to build MCP OAuth URL for service %s: %v", svc.ID, err)
+			} else {
+				authURL = url
+			}
+		}
+		if authURL != "" {
+			lines = append(lines, fmt.Sprintf("• %s：%s", name, authURL))
+		} else {
+			lines = append(lines, fmt.Sprintf("• %s（请在 WeKnora 管理后台完成 OAuth 授权）", name))
+		}
+	}
+
+	return "⚠️ 以下 MCP 服务需要授权后才能使用，请点击链接完成授权，然后重新发送你的消息：\n" +
+		strings.Join(lines, "\n")
+}
+
+// appendIMAuthNotice appends an authorization notice to an existing reply body,
+// separated by a blank line. When the body is empty the notice becomes the body.
+func appendIMAuthNotice(body, notice string) string {
+	if notice == "" {
+		return body
+	}
+	if strings.TrimSpace(body) == "" {
+		return notice
+	}
+	return body + "\n\n" + notice
 }
 
 func buildIMQARequest(
@@ -489,6 +627,138 @@ func buildIMQARequest(
 		UserMessageID:      userMessageID,
 		WebSearchEnabled:   webSearchEnabled,
 		QuotedContext:      quotedContext,
+	}
+}
+
+func buildIMLastRequestState(agentID string, customAgent *types.CustomAgent, kbIDs []string) *types.SessionLastRequestState {
+	state := &types.SessionLastRequestState{
+		AgentID:          agentID,
+		KnowledgeBaseIDs: append([]string(nil), kbIDs...),
+	}
+	if customAgent == nil {
+		return state
+	}
+	if state.AgentID == "" {
+		state.AgentID = customAgent.ID
+	}
+	state.AgentEnabled = customAgent.IsAgentMode()
+	state.ModelID = customAgent.Config.ModelID
+	state.WebSearchEnabled = customAgent.Config.WebSearchEnabled
+	if len(state.KnowledgeBaseIDs) == 0 && len(customAgent.Config.KnowledgeBases) > 0 {
+		state.KnowledgeBaseIDs = append([]string(nil), customAgent.Config.KnowledgeBases...)
+	}
+	return state
+}
+
+func createIMUserMessagePayload(sessionID, content, requestID string) *types.Message {
+	return &types.Message{
+		SessionID:   sessionID,
+		Role:        "user",
+		Content:     content,
+		RequestID:   requestID,
+		CreatedAt:   time.Now(),
+		IsCompleted: true,
+		Channel:     "im",
+	}
+}
+
+func createIMAssistantMessagePayload(sessionID, requestID string) *types.Message {
+	return &types.Message{
+		SessionID:   sessionID,
+		Role:        "assistant",
+		RequestID:   requestID,
+		CreatedAt:   time.Now(),
+		IsCompleted: false,
+		Channel:     "im",
+	}
+}
+
+func collectIMKnowledgeReferences(dst *[]*types.SearchResult, refs interface{}) {
+	switch v := refs.(type) {
+	case []*types.SearchResult:
+		*dst = append(*dst, v...)
+	case []interface{}:
+		for _, ref := range v {
+			if sr, ok := ref.(*types.SearchResult); ok {
+				*dst = append(*dst, sr)
+			}
+		}
+	}
+}
+
+func sanitizeIMAgentSteps(raw interface{}) types.AgentSteps {
+	switch steps := raw.(type) {
+	case []types.AgentStep:
+		return types.AgentSteps(agenttools.SanitizeAgentStepsForStorage(steps))
+	case types.AgentSteps:
+		return types.AgentSteps(agenttools.SanitizeAgentStepsForStorage([]types.AgentStep(steps)))
+	default:
+		return nil
+	}
+}
+
+func applyIMCompleteDataToMessage(msg *types.Message, data event.AgentCompleteData) {
+	if msg == nil {
+		return
+	}
+	if data.MessageID != "" && data.MessageID != msg.ID {
+		return
+	}
+	msg.IsCompleted = true
+	msg.AgentDurationMs = data.TotalDurationMs
+	if len(data.KnowledgeRefs) > 0 {
+		refs := make([]*types.SearchResult, 0, len(data.KnowledgeRefs))
+		collectIMKnowledgeReferences(&refs, data.KnowledgeRefs)
+		if len(refs) > 0 {
+			msg.KnowledgeReferences = types.References(refs)
+		}
+	}
+	if steps := sanitizeIMAgentSteps(data.AgentSteps); len(steps) > 0 {
+		msg.AgentSteps = steps
+	}
+}
+
+// waitForIMAgentComplete blocks until EventAgentComplete, ctx cancellation, or timeout.
+func waitForIMAgentComplete(ctx context.Context, completeDone <-chan struct{}, sessionID string) {
+	timer := time.NewTimer(agentCompleteWaitTimeout)
+	defer timer.Stop()
+	select {
+	case <-completeDone:
+	case <-ctx.Done():
+		logger.Warnf(ctx, "[IM] QA context ended before agent complete event: session=%s", sessionID)
+	case <-timer.C:
+		logger.Warnf(ctx, "[IM] Timed out waiting for agent complete event: session=%s", sessionID)
+	}
+}
+
+// pickIMStoredAnswer returns the best available answer text from IM stream buffers.
+func pickIMStoredAnswer(candidates ...string) string {
+	for _, s := range candidates {
+		if strings.TrimSpace(s) != "" {
+			return s
+		}
+	}
+	return ""
+}
+
+// mergeIMAgentAnswerBuffers copies optimistic/live answers into persistence buffers
+// when EventAgentFinalAnswer did not populate answerBuilder (e.g. cancel before complete).
+func mergeIMAgentAnswerBuffers(answerBuilder, answerOuter, agentLiveAnswer *strings.Builder, completeFinal string) {
+	if answerBuilder.Len() > 0 {
+		return
+	}
+	switch {
+	case agentLiveAnswer.Len() > 0:
+		live := agentLiveAnswer.String()
+		answerBuilder.WriteString(live)
+		if answerOuter.Len() == 0 {
+			answerOuter.WriteString(live)
+		}
+	case answerOuter.Len() > 0:
+		answerBuilder.WriteString(answerOuter.String())
+	case strings.TrimSpace(completeFinal) != "":
+		answerBuilder.WriteString(completeFinal)
+		answerOuter.WriteString(completeFinal)
 	}
 }
 
@@ -541,8 +811,10 @@ func NewService(
 	modelService interfaces.ModelService,
 	streamManager interfaces.StreamManager,
 	defaultFileSvc interfaces.FileService,
+	oauthManager *mcppkg.OAuthManager,
 	redisClient *redis.Client,
 	appCfg *config.Config,
+	storageResolver interfaces.StorageBackendResolver,
 ) *Service {
 	// Resolve IM configuration with defaults.
 	workers, maxQueue, maxPerUser, globalMaxWorkers, rlWindow, rlMax := resolveIMConfig(appCfg)
@@ -567,6 +839,8 @@ func NewService(
 		modelService:     modelService,
 		streamManager:    streamManager,
 		defaultFileSvc:   defaultFileSvc,
+		storageResolver:  storageResolver,
+		oauthManager:     oauthManager,
 		cmdRegistry:      registry,
 		channels:         make(map[string]*channelState),
 		adapterFactories: make(map[string]AdapterFactory),
@@ -720,6 +994,12 @@ func (s *Service) startChannelInternal(channel *IMChannel, factory AdapterFactor
 	}
 
 	s.mu.Lock()
+	// Idempotency: another goroutine may have started this channel while
+	// factory was running above (factory is called unlocked). Stop the old
+	// state before overwriting so its adapter / long connection doesn't leak.
+	if existing, ok := s.channels[channel.ID]; ok {
+		s.stopChannelLocked(channel.ID, existing)
+	}
 	s.channels[channel.ID] = &channelState{
 		Channel:      channel,
 		Adapter:      adapter,
@@ -823,6 +1103,31 @@ func (s *Service) wsLeaderRenewLoop(ctx context.Context, channelID string) {
 				s.StopChannel(channelID)
 				return
 			}
+			// Still the leader — verify the channel is still active. A
+			// delete/disable is served by whichever instance got the HTTP
+			// request; without this check the leader would keep the long
+			// connection open until process restart. The renew interval
+			// bounds the worst-case lag.
+			ch, err := s.GetChannelByID(channelID)
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				logger.Infof(context.Background(),
+					"[IM] Channel %s deleted; leader stepping down", channelID)
+				s.StopChannel(channelID)
+				return
+			}
+			if err != nil {
+				// Transient DB error — don't stop a possibly-healthy channel
+				// on a DB hiccup. Skip this round; the next renewal re-checks.
+				logger.Warnf(context.Background(),
+					"[IM] DB check failed for channel %s during leader renewal: %v (skipping this round)", channelID, err)
+				continue
+			}
+			if !ch.Enabled {
+				logger.Infof(context.Background(),
+					"[IM] Channel %s disabled; leader stepping down", channelID)
+				s.StopChannel(channelID)
+				return
+			}
 		case <-ctx.Done():
 			return
 		}
@@ -843,6 +1148,34 @@ func (s *Service) wsLeaderRetryLoop(channel *IMChannel) {
 				return
 			}
 			if s.tryAcquireWSLeader(channel.ID) {
+				// Re-check the DB before starting: the channel may have been
+				// deleted or disabled on another instance while we waited for
+				// leadership. The in-memory `channel` is a startup snapshot and
+				// won't reflect that, so without this guard we'd resurrect a
+				// stopped channel (and reopen its long connection).
+				fresh, err := s.GetChannelByID(channel.ID)
+				if errors.Is(err, gorm.ErrRecordNotFound) {
+					// Channel was actually deleted — give up for good.
+					s.releaseWSLeader(channel.ID)
+					logger.Infof(context.Background(),
+						"[IM] Channel %s deleted while waiting for leadership; aborting leader takeover", channel.ID)
+					return
+				}
+				if err != nil {
+					// Transient DB error — don't make a destructive decision.
+					// Release the lock for this round and retry on the next tick.
+					s.releaseWSLeader(channel.ID)
+					logger.Warnf(context.Background(),
+						"[IM] DB check failed for channel %s during leader takeover: %v (will retry)", channel.ID, err)
+					continue
+				}
+				if !fresh.Enabled {
+					s.releaseWSLeader(channel.ID)
+					logger.Infof(context.Background(),
+						"[IM] Channel %s disabled while waiting for leadership; aborting leader takeover", channel.ID)
+					return
+				}
+				channel = fresh // use latest config (credentials/mode may have changed)
 				logger.Infof(context.Background(),
 					"[IM] Acquired leadership for channel %s, starting adapter", channel.ID)
 				s.mu.RLock()
@@ -1122,7 +1455,7 @@ func (s *Service) HandleMessage(ctx context.Context, msg *IncomingMessage, chann
 		return fmt.Errorf("get tenant: %w", err)
 	}
 	sessionCtx := context.WithValue(ctx, types.TenantInfoContextKey, tenant)
-	sessionCtx = withIMIdentity(sessionCtx, tenantID)
+	sessionCtx = withIMIdentity(sessionCtx, tenantID, channelID, msg)
 
 	// 2. Resolve or create a WeKnora session
 	channelSession, err := s.resolveSession(sessionCtx, msg, tenantID, agentID, channelID, channel.SessionMode)
@@ -1189,8 +1522,14 @@ func (s *Service) HandleMessage(ctx context.Context, msg *IncomingMessage, chann
 		// Copy the session: the async title goroutine writes Title while the QA
 		// worker below shares the same *session.
 		sessionForTitle := *session
-		s.sessionService.GenerateTitleAsync(sessionCtx, &sessionForTitle, msg.Content, "", nil)
+		titleModelID := ""
+		if customAgent != nil && customAgent.Config.ModelID != "" {
+			titleModelID = customAgent.Config.ModelID
+		}
+		s.sessionService.GenerateTitleAsync(sessionCtx, &sessionForTitle, msg.Content, titleModelID, nil)
 	}
+
+	s.persistIMLastRequestState(sessionCtx, session.ID, agentID, customAgent, nil)
 
 	// 5. Enqueue the QA request into the bounded worker pool.
 	// The worker pool controls LLM concurrency and provides backpressure.
@@ -1240,6 +1579,13 @@ func (s *Service) HandleMessage(ctx context.Context, msg *IncomingMessage, chann
 	return nil
 }
 
+func (s *Service) persistIMLastRequestState(ctx context.Context, sessionID, agentID string, customAgent *types.CustomAgent, kbIDs []string) {
+	state := buildIMLastRequestState(agentID, customAgent, kbIDs)
+	if err := s.sessionService.UpdateSessionLastRequestState(logger.CloneContext(context.WithoutCancel(ctx)), sessionID, state); err != nil {
+		logger.Warnf(ctx, "[IM] persist last_request_state failed for session %s: %v", sessionID, err)
+	}
+}
+
 // executeQARequest is the worker handler that runs the QA pipeline for a queued request.
 // It is called by qaQueue workers and must not block indefinitely.
 func (s *Service) executeQARequest(req *qaRequest) {
@@ -1285,7 +1631,7 @@ func (s *Service) executeQARequest(req *qaRequest) {
 	}
 
 	reply := &ReplyMessage{
-		Content: cleanIMContent(ctx, answer, req.tenant, s.defaultFileSvc),
+		Content: formatIMOutboundAnswer(ctx, answer, req.tenant, s.defaultFileSvc, s.storageResolver),
 		IsFinal: true,
 	}
 	if err := req.adapter.SendReply(ctx, req.msg, reply); err != nil {
@@ -1413,16 +1759,17 @@ func (s *Service) handleCommand(
 	return nil
 }
 
-// sendStreamReply sends a complete content string via the streaming interface
-// (StartStream → SendStreamChunk → EndStream). This is used for command replies
-// when the output mode is set to "stream", so they visually match QA responses.
+// sendStreamReply sends a complete content string via the streaming interface.
 func (s *Service) sendStreamReply(ctx context.Context, msg *IncomingMessage, streamer StreamSender, content string) error {
 	streamID, err := streamer.StartStream(ctx, msg)
 	if err != nil {
 		return fmt.Errorf("start stream: %w", err)
 	}
-	if err := streamer.SendStreamChunk(ctx, msg, streamID, content); err != nil {
-		return fmt.Errorf("send stream chunk: %w", err)
+	if err := streamer.UpdateStreamContent(ctx, msg, streamID, content); err != nil {
+		return fmt.Errorf("update stream content: %w", err)
+	}
+	if err := streamer.FinalizeStream(ctx, msg, streamID, content); err != nil {
+		return fmt.Errorf("finalize stream: %w", err)
 	}
 	if err := streamer.EndStream(ctx, msg, streamID); err != nil {
 		return fmt.Errorf("end stream: %w", err)
@@ -1653,24 +2000,6 @@ func (s *Service) resolveThreadSession(ctx context.Context, msg *IncomingMessage
 // agent's reasoning process in real-time.
 // ─────────────────────────────────────────────────────────────────────
 
-// toolDisplayNames maps internal tool function names to user-friendly labels.
-var toolDisplayNames = map[string]string{
-	"thinking":              "深度思考",
-	"todo_write":            "制定计划",
-	"knowledge_search":      "知识库检索",
-	"grep_chunks":           "关键词搜索",
-	"list_knowledge_chunks": "查看文档分块",
-	"query_knowledge_graph": "查询知识图谱",
-	"get_document_info":     "获取文档信息",
-	"database_query":        "查询数据库",
-	"data_analysis":         "数据分析",
-	"data_schema":           "查看数据元信息",
-	"web_search":            "网络搜索",
-	"web_fetch":             "网页阅读",
-	"read_skill":            "读取技能",
-	"execute_skill_script":  "执行技能脚本",
-}
-
 // internalToolNames lists tools whose execution should NOT be displayed in IM
 // messages because they are internal reasoning aids (thinking, planning) rather
 // than user-facing actions.
@@ -1679,36 +2008,11 @@ var internalToolNames = map[string]bool{
 	"todo_write": true,
 }
 
-// friendlyToolName returns a human-readable name for a tool.
-func friendlyToolName(toolName string) string {
-	if display, ok := toolDisplayNames[toolName]; ok {
-		return display
-	}
-	return toolName
-}
-
 // isToolVisibleToUser returns true if the tool's execution progress should be
 // displayed to the IM user. Internal reasoning tools (thinking, planning) are
 // hidden.
 func isToolVisibleToUser(toolName string) bool {
 	return !internalToolNames[toolName]
-}
-
-// formatToolCallStart returns a plain-text line for a tool invocation (inside <think> block).
-func formatToolCallStart(toolName string) string {
-	return fmt.Sprintf("⏳ %s\n", friendlyToolName(toolName))
-}
-
-// formatToolCallResult returns a plain-text line for a tool result (inside <think> block).
-func formatToolCallResult(toolName string, success bool, output string) string {
-	friendly := friendlyToolName(toolName)
-	if success {
-		if summary := briefToolSummary(output); summary != "" {
-			return fmt.Sprintf("✅ %s · %s\n", friendly, summary)
-		}
-		return fmt.Sprintf("✅ %s\n", friendly)
-	}
-	return fmt.Sprintf("⚠️ %s 失败\n", friendly)
 }
 
 // briefToolSummary extracts a short human-readable summary from tool output.
@@ -1757,62 +2061,86 @@ func (s *Service) handleMessageStream(ctx context.Context, msg *IncomingMessage,
 	qaCtx, qaCancel := context.WithCancel(ctx)
 	defer qaCancel()
 
+	useAgent := customAgent != nil && customAgent.IsAgentMode()
 	eventBus := event.NewEventBus()
 
 	var (
-		bufMu          sync.Mutex
-		buf            strings.Builder // buffered content awaiting flush
-		answerBuilder  strings.Builder // full answer for DB persistence (includes <think>)
-		qaErr          error
-		done           = make(chan struct{})
-		closeOnce      sync.Once
-		thinkBlockOpen bool // whether we've opened a <think> block (agent pipeline)
-		answerStarted  bool // whether the final answer stream has begun
+		bufMu           sync.Mutex
+		reasoningInner  streamSection   // quick QA: model reasoning_content
+		agentInner      streamSection   // agent: retracted text + thoughts
+		agentLiveAnswer strings.Builder // agent: optimistic answer before tool retract
+		answerOuter     strings.Builder // final answer for display persistence
+		answerBuilder   strings.Builder // answer persisted to DB
+		qaErr           error
+		done            = make(chan struct{})
+		completeDone    = make(chan struct{})
+		closeOnce       sync.Once
+		completeOnce    sync.Once
+		agentDone       bool
+		assistantMsg    *types.Message
 
-		// seenToolCalls deduplicates EventAgentToolCall events.
-		// The engine emits tool calls twice: once during streaming (pending)
-		// and once at execution time. We only show the first occurrence.
 		seenToolCalls = make(map[string]bool)
+		agentToolIdx  = make(map[string]int)
+		pipelineIdx   = make(map[string]int)
 
-		// lastCharNewline tracks whether the most recently written character
-		// (across flush boundaries) was '\n'. This lets ensureNewlineBefore
-		// work correctly even after buf has been Reset by a flush.
-		lastCharNewline = true
-		streamedAny     bool // whether any user-visible content was written to buf
+		agentToolSteps    []IMToolStep
+		pipelineToolSteps []IMToolStep
+
+		agentCompleteFinalAnswer string
+		streamedAny              bool
+
+		// mcpAuthServices collects OAuth services that need out-of-band
+		// authorization (IM cannot resolve the in-conversation prompt).
+		mcpAuthServices []imMCPAuthService
+		mcpAuthSeen     = make(map[string]bool)
 	)
 	closeDone := func() { closeOnce.Do(func() { close(done) }) }
+	closeComplete := func() { completeOnce.Do(func() { close(completeDone) }) }
 
-	// bufWrite appends s to buf and updates lastCharNewline. Must hold bufMu.
-	bufWrite := func(s string) {
+	agentWrite := func(s string) {
 		if s == "" {
 			return
 		}
-		buf.WriteString(s)
-		lastCharNewline = s[len(s)-1] == '\n'
+		agentInner.write(s)
+		streamedAny = true
 	}
-
-	// ensureNewlineBefore guarantees a '\n' exists before the next write,
-	// even if the previous content was already flushed. Must hold bufMu.
-	ensureNewlineBefore := func() {
-		if !lastCharNewline {
-			buf.WriteByte('\n')
-			lastCharNewline = true
+	reasoningWrite := func(s string) {
+		if s == "" {
+			return
 		}
+		reasoningInner.write(s)
+		streamedAny = true
 	}
 
-	// ensureThinkOpen opens a <think> block if not already open.
-	// Used for agent pipeline to wrap thinking + tool calls. Must hold bufMu.
-	ensureThinkOpen := func() {
-		if !thinkBlockOpen {
-			thinkBlockOpen = true
-			bufWrite("<think>\n")
+	// retractAgentLiveAnswer moves the optimistic answer into the think block (Web: superseded preamble).
+	retractAgentLiveAnswer := func() {
+		if agentLiveAnswer.Len() == 0 {
+			return
+		}
+		if agentInner.text.Len() > 0 {
+			agentInner.ensureNewlineBefore()
+		}
+		agentInner.write(agentLiveAnswer.String())
+		agentLiveAnswer.Reset()
+	}
+
+	getStreamParts := func() IMStreamParts {
+		mode := IMStreamModeQuickQA
+		if useAgent {
+			mode = IMStreamModeAgent
+		}
+		return IMStreamParts{
+			Mode:              mode,
+			PipelineToolSteps: pipelineToolSteps,
+			ReasoningInner:    reasoningInner.text.String(),
+			AgentInner:        agentInner.text.String(),
+			AgentToolSteps:    agentToolSteps,
+			LiveAnswer:        agentLiveAnswer.String(),
+			Answer:            answerOuter.String(),
 		}
 	}
 
 	// Subscribe to answer chunks.
-	// Non-agent pipeline: content may contain <think>...</think> from the model — pass through as-is.
-	// Agent pipeline: we've already opened a <think> block via EventAgentThought/ToolCall,
-	// so we close it before streaming the answer.
 	eventBus.On(event.EventAgentFinalAnswer, func(_ context.Context, evt event.Event) error {
 		data, ok := evt.Data.(event.AgentFinalAnswerData)
 		if !ok {
@@ -1820,15 +2148,16 @@ func (s *Service) handleMessageStream(ctx context.Context, msg *IncomingMessage,
 		}
 
 		bufMu.Lock()
-		answerBuilder.WriteString(data.Content)
-
-		if thinkBlockOpen && !answerStarted {
-			answerStarted = true
-			bufWrite("\n</think>\n\n")
+		if useAgent && !agentDone {
+			if data.Content != "" {
+				agentLiveAnswer.WriteString(data.Content)
+				streamedAny = true
+			}
+		} else {
+			answerOuter.WriteString(data.Content)
+			answerBuilder.WriteString(data.Content)
+			streamedAny = true
 		}
-
-		bufWrite(data.Content)
-		streamedAny = true
 		bufMu.Unlock()
 
 		if data.Done {
@@ -1847,6 +2176,37 @@ func (s *Service) handleMessageStream(ctx context.Context, msg *IncomingMessage,
 		qaErr = fmt.Errorf("QA pipeline error: %s", data.Error)
 		bufMu.Unlock()
 		closeDone()
+		closeComplete()
+		return nil
+	})
+
+	eventBus.On(event.EventAgentReferences, func(_ context.Context, evt event.Event) error {
+		data, ok := evt.Data.(event.AgentReferencesData)
+		if !ok {
+			return nil
+		}
+		bufMu.Lock()
+		if assistantMsg != nil {
+			refs := []*types.SearchResult(assistantMsg.KnowledgeReferences)
+			collectIMKnowledgeReferences(&refs, data.References)
+			assistantMsg.KnowledgeReferences = types.References(refs)
+		}
+		bufMu.Unlock()
+		return nil
+	})
+
+	eventBus.On(event.EventAgentComplete, func(_ context.Context, evt event.Event) error {
+		data, ok := evt.Data.(event.AgentCompleteData)
+		if !ok {
+			return nil
+		}
+		bufMu.Lock()
+		agentDone = true
+		agentCompleteFinalAnswer = data.FinalAnswer
+		applyIMCompleteDataToMessage(assistantMsg, data)
+		mergeIMAgentAnswerBuffers(&answerBuilder, &answerOuter, &agentLiveAnswer, data.FinalAnswer)
+		bufMu.Unlock()
+		closeComplete()
 		return nil
 	})
 
@@ -1857,15 +2217,16 @@ func (s *Service) handleMessageStream(ctx context.Context, msg *IncomingMessage,
 			return nil
 		}
 		bufMu.Lock()
-		ensureThinkOpen()
-		bufWrite(data.Content)
+		if useAgent {
+			agentWrite(data.Content)
+		} else {
+			reasoningWrite(data.Content)
+		}
 		bufMu.Unlock()
 		return nil
 	})
 
-	// Subscribe to agent tool call events — write status line into <think> block.
-	// The engine may emit this event twice per tool call (once during streaming,
-	// once at execution), so we deduplicate by ToolCallID.
+	// Subscribe to agent tool call events — write status line into the think block.
 	eventBus.On(event.EventAgentToolCall, func(_ context.Context, evt event.Event) error {
 		data, ok := evt.Data.(event.AgentToolCallData)
 		if !ok {
@@ -1880,15 +2241,28 @@ func (s *Service) handleMessageStream(ctx context.Context, msg *IncomingMessage,
 			return nil
 		}
 		seenToolCalls[data.ToolCallID] = true
-		ensureThinkOpen()
-		ensureNewlineBefore()
-		bufWrite(formatToolCallStart(data.ToolName))
+		if !useAgent && IsRAGPipelineToolName(data.ToolName) {
+			upsertIMToolStep(&pipelineToolSteps, pipelineIdx, data.ToolCallID, func(step *IMToolStep) {
+				step.ToolName = data.ToolName
+				step.Pending = true
+				step.Arguments = data.Arguments
+			})
+			streamedAny = true
+		} else if useAgent {
+			retractAgentLiveAnswer()
+			upsertIMToolStep(&agentToolSteps, agentToolIdx, data.ToolCallID, func(step *IMToolStep) {
+				step.ToolName = data.ToolName
+				step.Pending = true
+				step.Arguments = data.Arguments
+			})
+			streamedAny = true
+		}
 		bufMu.Unlock()
 		logger.Debugf(ctx, "[IM] Tool call streamed to IM: tool=%s id=%s", data.ToolName, data.ToolCallID)
 		return nil
 	})
 
-	// Subscribe to agent tool result events — write result line into <think> block
+	// Subscribe to agent tool result events
 	eventBus.On(event.EventAgentToolResult, func(_ context.Context, evt event.Event) error {
 		data, ok := evt.Data.(event.AgentToolResultData)
 		if !ok {
@@ -1898,34 +2272,59 @@ func (s *Service) handleMessageStream(ctx context.Context, msg *IncomingMessage,
 			return nil
 		}
 		bufMu.Lock()
-		ensureNewlineBefore()
-		bufWrite(formatToolCallResult(data.ToolName, data.Success, data.Output))
+		if !useAgent && IsRAGPipelineToolName(data.ToolName) {
+			upsertIMToolStep(&pipelineToolSteps, pipelineIdx, data.ToolCallID, func(step *IMToolStep) {
+				step.ToolName = data.ToolName
+				step.Pending = false
+				step.Success = data.Success
+				step.Data = data.Data
+				step.Output = data.Output
+			})
+			streamedAny = true
+		} else if useAgent {
+			upsertIMToolStep(&agentToolSteps, agentToolIdx, data.ToolCallID, func(step *IMToolStep) {
+				step.ToolName = data.ToolName
+				step.Pending = false
+				step.Success = data.Success
+				step.Data = data.Data
+				step.Output = data.Output
+			})
+			streamedAny = true
+		}
 		bufMu.Unlock()
 		logger.Debugf(ctx, "[IM] Tool result streamed to IM: tool=%s success=%v duration=%dms",
 			data.ToolName, data.Success, data.Duration)
 		return nil
 	})
 
-	// Determine whether to use agent mode
-	useAgent := customAgent != nil && customAgent.IsAgentMode()
+	// An OAuth-enabled MCP service the IM user has not authorized yet. IM cannot
+	// resolve the in-conversation prompt, so collect the service name and append
+	// an authorization notice to the final reply (deduped per service).
+	eventBus.On(event.EventMCPOAuthRequired, func(_ context.Context, evt event.Event) error {
+		data, ok := evt.Data.(event.MCPOAuthRequiredData)
+		if !ok {
+			return nil
+		}
+		bufMu.Lock()
+		if !mcpAuthSeen[data.ServiceID] {
+			mcpAuthSeen[data.ServiceID] = true
+			mcpAuthServices = append(mcpAuthServices, imMCPAuthService{ID: data.ServiceID, Name: data.ServiceName})
+		}
+		bufMu.Unlock()
+		return nil
+	})
+
+	// Determine whether to use agent mode (already set above for event handlers).
 	requestID := uuid.New().String()
 
 	// Create user message
-	userMsg, err := s.messageService.CreateMessage(qaCtx, &types.Message{
-		SessionID: session.ID, Role: "user", Content: msg.Content,
-		RequestID: requestID, CreatedAt: time.Now(), IsCompleted: true,
-		Channel: "im",
-	})
+	userMsg, err := s.messageService.CreateMessage(qaCtx, createIMUserMessagePayload(session.ID, msg.Content, requestID))
 	if err != nil {
 		return fmt.Errorf("create user message: %w", err)
 	}
 
 	// Create placeholder assistant message
-	assistantMsg, err := s.messageService.CreateMessage(qaCtx, &types.Message{
-		SessionID: session.ID, Role: "assistant",
-		RequestID: requestID, CreatedAt: time.Now(), IsCompleted: false,
-		Channel: "im",
-	})
+	assistantMsg, err = s.messageService.CreateMessage(qaCtx, createIMAssistantMessagePayload(session.ID, requestID))
 	if err != nil {
 		return fmt.Errorf("create assistant message: %w", err)
 	}
@@ -1962,6 +2361,7 @@ func (s *Service) handleMessageStream(ctx context.Context, msg *IncomingMessage,
 			qaErr = fmt.Errorf("QA execution error: %w", err)
 			bufMu.Unlock()
 			closeDone()
+			closeComplete()
 		}
 	}()
 
@@ -1971,31 +2371,24 @@ func (s *Service) handleMessageStream(ctx context.Context, msg *IncomingMessage,
 	ticker := time.NewTicker(streamFlushInterval)
 	defer ticker.Stop()
 
-	var holdback string // text held back from the previous flush
-
-	flush := func(final bool) {
+	flush := func() {
 		bufMu.Lock()
-		chunk := holdback + buf.String()
-		buf.Reset()
+		parts := getStreamParts()
+		agentRunning := useAgent && !agentDone
 		bufMu.Unlock()
-		holdback = ""
 
-		if chunk == "" {
+		displaySource := FormatIMIntermediateFromParts(parts, agentRunning)
+		if displaySource == "" {
 			return
 		}
 
-		// On non-final flushes, check for incomplete patterns at the tail.
-		if !final {
-			if cut := holdbackCutoff(chunk); cut < len(chunk) {
-				holdback = chunk[cut:]
-				chunk = chunk[:cut]
-			}
+		if cut := holdbackCutoff(displaySource); cut < len(displaySource) {
+			displaySource = displaySource[:cut]
 		}
 
-		if chunk != "" {
-			if err := streamer.SendStreamChunk(ctx, msg, streamID, cleanIMContent(ctx, chunk, tenant, s.defaultFileSvc)); err != nil {
-				logger.Warnf(ctx, "[IM] SendStreamChunk failed: %v", err)
-			}
+		display := cleanIMContent(ctx, displaySource, tenant, s.defaultFileSvc, s.storageResolver)
+		if err := streamer.UpdateStreamContent(ctx, msg, streamID, display); err != nil {
+			logger.Warnf(ctx, "[IM] UpdateStreamContent failed: %v", err)
 		}
 	}
 
@@ -2003,7 +2396,7 @@ loop:
 	for {
 		select {
 		case <-ticker.C:
-			flush(false)
+			flush()
 		case <-done:
 			break loop
 		case <-qaCtx.Done():
@@ -2011,29 +2404,45 @@ loop:
 		}
 	}
 
-	// Final flush of any remaining content (including holdback).
-	flush(true)
+	if useAgent {
+		waitForIMAgentComplete(qaCtx, completeDone, session.ID)
+	}
 
-	// If no user-visible content was streamed (e.g., the entire response was
-	// in <think> blocks, or the QA pipeline errored), send a fallback message
-	// as the last chunk so the Feishu card doesn't end up empty.
 	bufMu.Lock()
-	answer := answerBuilder.String()
+	parts := getStreamParts()
+	resolvedAnswer := pickIMStoredAnswer(
+		answerBuilder.String(),
+		answerOuter.String(),
+		agentLiveAnswer.String(),
+		agentCompleteFinalAnswer,
+	)
+	if parts.Answer == "" {
+		parts.Answer = resolvedAnswer
+	}
+	answer := resolvedAnswer
 	finalErr := qaErr
-	noVisibleContent := !streamedAny
+	noVisibleContent := !streamedAny && strings.TrimSpace(resolvedAnswer) == ""
+	authServices := append([]imMCPAuthService(nil), mcpAuthServices...)
 	bufMu.Unlock()
 
-	if noVisibleContent {
+	finalDisplay := cleanIMContent(ctx, FormatIMFinalFromParts(parts), tenant, s.defaultFileSvc, s.storageResolver)
+	if noVisibleContent || finalDisplay == "" {
 		fallback := "抱歉，我暂时无法回答这个问题。"
 		if finalErr != nil {
 			fallback = "抱歉，处理您的问题时出现了异常，请稍后再试。"
 		}
-		if err := streamer.SendStreamChunk(ctx, msg, streamID, fallback); err != nil {
-			logger.Warnf(ctx, "[IM] SendStreamChunk fallback failed: %v", err)
-		}
+		finalDisplay = fallback
 		if answer == "" {
 			answer = fallback
 		}
+	}
+	if notice := s.buildIMMCPAuthNotice(ctx, authServices); notice != "" {
+		finalDisplay = appendIMAuthNotice(finalDisplay, notice)
+		answer = appendIMAuthNotice(answer, notice)
+	}
+
+	if err := streamer.FinalizeStream(ctx, msg, streamID, finalDisplay); err != nil {
+		logger.Warnf(ctx, "[IM] FinalizeStream failed: %v", err)
 	}
 
 	// End the stream
@@ -2063,7 +2472,7 @@ func (s *Service) fallbackNonStream(ctx context.Context, msg *IncomingMessage, s
 		answer = "抱歉，处理您的问题时出现了异常，请稍后再试。"
 	}
 
-	return adapter.SendReply(ctx, msg, &ReplyMessage{Content: cleanIMContent(ctx, answer, tenant, s.defaultFileSvc), IsFinal: true})
+	return adapter.SendReply(ctx, msg, &ReplyMessage{Content: formatIMOutboundAnswer(ctx, answer, tenant, s.defaultFileSvc, s.storageResolver), IsFinal: true})
 }
 
 // runQA executes the WeKnora QA pipeline and returns the full answer text.
@@ -2079,9 +2488,14 @@ func (s *Service) runQA(ctx context.Context, session *types.Session, query strin
 	var answerMu sync.Mutex
 	var answerBuilder strings.Builder
 	var qaErr error
+	var mcpAuthServices []imMCPAuthService
+	mcpAuthSeen := make(map[string]bool)
 	done := make(chan struct{})
+	completeDone := make(chan struct{})
 	var closeOnce sync.Once
+	var completeOnce sync.Once
 	closeDone := func() { closeOnce.Do(func() { close(done) }) }
+	closeComplete := func() { completeOnce.Do(func() { close(completeDone) }) }
 
 	eventBus.On(event.EventAgentFinalAnswer, func(ctx context.Context, evt event.Event) error {
 		data, ok := evt.Data.(event.AgentFinalAnswerData)
@@ -2107,6 +2521,23 @@ func (s *Service) runQA(ctx context.Context, session *types.Session, query strin
 		qaErr = fmt.Errorf("QA pipeline error: %s", data.Error)
 		answerMu.Unlock()
 		closeDone()
+		closeComplete()
+		return nil
+	})
+
+	// Collect OAuth services that need out-of-band authorization (IM cannot
+	// resolve the in-conversation prompt); appended to the answer below.
+	eventBus.On(event.EventMCPOAuthRequired, func(_ context.Context, evt event.Event) error {
+		data, ok := evt.Data.(event.MCPOAuthRequiredData)
+		if !ok {
+			return nil
+		}
+		answerMu.Lock()
+		if !mcpAuthSeen[data.ServiceID] {
+			mcpAuthSeen[data.ServiceID] = true
+			mcpAuthServices = append(mcpAuthServices, imMCPAuthService{ID: data.ServiceID, Name: data.ServiceName})
+		}
+		answerMu.Unlock()
 		return nil
 	})
 
@@ -2117,31 +2548,44 @@ func (s *Service) runQA(ctx context.Context, session *types.Session, query strin
 	requestID := uuid.New().String()
 
 	// Create user message so it appears in conversation history
-	userMsg, err := s.messageService.CreateMessage(ctx, &types.Message{
-		SessionID:   session.ID,
-		Role:        "user",
-		Content:     query,
-		RequestID:   requestID,
-		CreatedAt:   time.Now(),
-		IsCompleted: true,
-		Channel:     "im",
-	})
+	userMsg, err := s.messageService.CreateMessage(ctx, createIMUserMessagePayload(session.ID, query, requestID))
 	if err != nil {
 		return "", fmt.Errorf("create user message: %w", err)
 	}
 
 	// Create a placeholder assistant message
-	assistantMsg, err := s.messageService.CreateMessage(ctx, &types.Message{
-		SessionID:   session.ID,
-		Role:        "assistant",
-		RequestID:   requestID,
-		CreatedAt:   time.Now(),
-		IsCompleted: false,
-		Channel:     "im",
-	})
+	assistantMsg, err := s.messageService.CreateMessage(ctx, createIMAssistantMessagePayload(session.ID, requestID))
 	if err != nil {
 		return "", fmt.Errorf("create assistant message: %w", err)
 	}
+
+	eventBus.On(event.EventAgentReferences, func(ctx context.Context, evt event.Event) error {
+		data, ok := evt.Data.(event.AgentReferencesData)
+		if !ok {
+			return nil
+		}
+		answerMu.Lock()
+		refs := []*types.SearchResult(assistantMsg.KnowledgeReferences)
+		collectIMKnowledgeReferences(&refs, data.References)
+		assistantMsg.KnowledgeReferences = types.References(refs)
+		answerMu.Unlock()
+		return nil
+	})
+
+	eventBus.On(event.EventAgentComplete, func(ctx context.Context, evt event.Event) error {
+		data, ok := evt.Data.(event.AgentCompleteData)
+		if !ok {
+			return nil
+		}
+		answerMu.Lock()
+		applyIMCompleteDataToMessage(assistantMsg, data)
+		if answerBuilder.Len() == 0 && strings.TrimSpace(data.FinalAnswer) != "" {
+			answerBuilder.WriteString(data.FinalAnswer)
+		}
+		answerMu.Unlock()
+		closeComplete()
+		return nil
+	})
 
 	// Register inflight mapping for cross-instance /stop via StreamManager.
 	if raw, ok := s.inflight.Load(userKey); ok {
@@ -2173,12 +2617,16 @@ func (s *Service) runQA(ctx context.Context, session *types.Session, query strin
 			qaErr = fmt.Errorf("QA execution error: %w", err)
 			answerMu.Unlock()
 			closeDone()
+			closeComplete()
 		}
 	}()
 
 	// Wait for completion or cancellation (e.g., /stop)
 	select {
 	case <-done:
+		if useAgent {
+			waitForIMAgentComplete(ctx, completeDone, session.ID)
+		}
 	case <-ctx.Done():
 		// Mark assistant message as completed to avoid dangling incomplete records
 		assistantMsg.Content = "抱歉，回答已被取消。"
@@ -2193,6 +2641,7 @@ func (s *Service) runQA(ctx context.Context, session *types.Session, query strin
 	answerMu.Lock()
 	answer := answerBuilder.String()
 	qaError := qaErr
+	authServices := append([]imMCPAuthService(nil), mcpAuthServices...)
 	answerMu.Unlock()
 
 	if answer == "" && qaError != nil {
@@ -2200,6 +2649,9 @@ func (s *Service) runQA(ctx context.Context, session *types.Session, query strin
 	}
 	if answer == "" {
 		answer = "抱歉，我暂时无法回答这个问题。"
+	}
+	if notice := s.buildIMMCPAuthNotice(ctx, authServices); notice != "" {
+		answer = appendIMAuthNotice(answer, notice)
 	}
 
 	// Update assistant message with the full answer (including citation tags for web rendering).
@@ -2287,6 +2739,23 @@ func (s *Service) CreateChannel(channel *IMChannel) error {
 			logger.Warnf(context.Background(), "[IM] Created channel %s but failed to start: %v", channel.ID, err)
 		}
 	}
+	return nil
+}
+
+// SetChannelAgentID validates and assigns a new agent for an existing channel.
+func (s *Service) SetChannelAgentID(ctx context.Context, channel *IMChannel, agentID string) error {
+	agentID = strings.TrimSpace(agentID)
+	if agentID == "" {
+		return fmt.Errorf("agent_id is required")
+	}
+	agent, err := s.agentService.GetAgentByID(ctx, agentID)
+	if err != nil {
+		return err
+	}
+	if agent == nil || agent.TenantID != channel.TenantID {
+		return fmt.Errorf("agent not found")
+	}
+	channel.AgentID = agentID
 	return nil
 }
 
@@ -2450,7 +2919,7 @@ func (s *Service) processFileToKnowledgeBase(ctx context.Context, msg *IncomingM
 	tenant, err := s.tenantService.GetTenantByID(ctx, tenantID)
 	if err != nil {
 		logger.Errorf(ctx, "[IM] Failed to get tenant %d for file processing: %v", tenantID, err)
-		s.sendFileResult(ctx, adapter, msg, msg.FileName, false, "获取租户信息失败", channel)
+		s.sendFileResult(ctx, adapter, msg, msg.FileName, false, "获取空间信息失败", channel)
 		return
 	}
 	kbCtx := context.WithValue(ctx, types.TenantIDContextKey, tenantID)
@@ -2489,7 +2958,7 @@ func (s *Service) processFileToKnowledgeBase(ctx context.Context, msg *IncomingM
 	fh := newInMemoryFileHeader(fileName, content)
 
 	// Create knowledge entry via the knowledge service
-	knowledge, err := s.knowledgeService.CreateKnowledgeFromFile(kbCtx, kbID, fh, nil, nil, "", "", imPlatformToChannel(channel.Platform), nil)
+	knowledge, err := s.knowledgeService.CreateKnowledgeFromFile(kbCtx, kbID, fh, nil, nil, "", nil, imPlatformToChannel(channel.Platform), nil)
 	if err != nil {
 		errMsg := err.Error()
 		// Check for duplicate file
@@ -2595,9 +3064,9 @@ func (s *Service) streamSmartReply(ctx context.Context, chatModel chat.Chat, str
 
 	// Flush loop with batching (same pattern as handleMessageStream)
 	var (
-		bufMu sync.Mutex
-		buf   strings.Builder
-		done  = make(chan struct{})
+		bufMu     sync.Mutex
+		streamRaw strings.Builder
+		done      = make(chan struct{})
 	)
 
 	go func() {
@@ -2605,7 +3074,7 @@ func (s *Service) streamSmartReply(ctx context.Context, chatModel chat.Chat, str
 		for resp := range streamCh {
 			if resp.Content != "" {
 				bufMu.Lock()
-				buf.WriteString(resp.Content)
+				streamRaw.WriteString(resp.Content)
 				bufMu.Unlock()
 			}
 		}
@@ -2614,16 +3083,16 @@ func (s *Service) streamSmartReply(ctx context.Context, chatModel chat.Chat, str
 	ticker := time.NewTicker(streamFlushInterval)
 	defer ticker.Stop()
 
-	flush := func() {
+	pushStream := func(phase StreamDisplayPhase) {
 		bufMu.Lock()
-		chunk := buf.String()
-		buf.Reset()
+		raw := streamRaw.String()
 		bufMu.Unlock()
-
-		if chunk != "" {
-			if err := streamer.SendStreamChunk(ctx, msg, streamID, chunk); err != nil {
-				logger.Warnf(ctx, "[IM] SendStreamChunk failed for smart reply: %v", err)
-			}
+		if raw == "" {
+			return
+		}
+		display := FormatIMDisplayContent(raw, phase)
+		if err := streamer.UpdateStreamContent(ctx, msg, streamID, display); err != nil {
+			logger.Warnf(ctx, "[IM] UpdateStreamContent failed for smart reply: %v", err)
 		}
 	}
 
@@ -2631,7 +3100,7 @@ loop:
 	for {
 		select {
 		case <-ticker.C:
-			flush()
+			pushStream(StreamDisplayIntermediate)
 		case <-done:
 			break loop
 		case <-timeoutCtx.Done():
@@ -2639,8 +3108,16 @@ loop:
 		}
 	}
 
-	// Final flush
-	flush()
+	bufMu.Lock()
+	finalRaw := streamRaw.String()
+	bufMu.Unlock()
+	finalDisplay := FormatIMDisplayContent(finalRaw, StreamDisplayFinal)
+	if finalDisplay == "" {
+		finalDisplay = finalRaw
+	}
+	if err := streamer.FinalizeStream(ctx, msg, streamID, finalDisplay); err != nil {
+		logger.Warnf(ctx, "[IM] FinalizeStream failed for smart reply: %v", err)
+	}
 
 	// End the stream
 	if err := streamer.EndStream(ctx, msg, streamID); err != nil {

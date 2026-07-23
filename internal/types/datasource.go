@@ -3,6 +3,7 @@ package types
 import (
 	"encoding/json"
 	"log"
+	"strings"
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/utils"
@@ -13,7 +14,10 @@ import (
 // Data source types and constants
 const (
 	// Connector types
-	ConnectorTypeFeishu      = "feishu"
+	ConnectorTypeFeishu = "feishu"
+	// ConnectorTypeLark is Feishu's international edition (open.larksuite.com).
+	// It shares the Feishu connector; only the API host and tenant differ.
+	ConnectorTypeLark        = "lark"
 	ConnectorTypeNotion      = "notion"
 	ConnectorTypeConfluence  = "confluence"
 	ConnectorTypeYuque       = "yuque"
@@ -53,7 +57,7 @@ type DataSource struct {
 	// Unique identifier
 	ID string `json:"id" gorm:"type:varchar(36);primaryKey"`
 
-	// Tenant ID for multi-tenancy
+	// Workspace ID for multi-workspace isolation
 	TenantID uint64 `json:"tenant_id" gorm:"index"`
 
 	// Target knowledge base ID
@@ -136,7 +140,7 @@ type SyncLog struct {
 	// Reference to the data source
 	DataSourceID string `json:"data_source_id" gorm:"index"`
 
-	// Tenant ID
+	// Workspace ID
 	TenantID uint64 `json:"tenant_id" gorm:"index"`
 
 	// Sync status: running, success, partial, failed, canceled
@@ -221,6 +225,41 @@ type DataSourceConfig struct {
 // whether to run live-connector validation.
 func (d DataSourceConfig) HasCredentials() bool {
 	return len(d.Credentials) > 0
+}
+
+// HasConfiguredCredentials reports whether user-facing secret credentials are
+// stored. RSS feed URLs are non-secret configuration (settings); only
+// auth_headers count as credentials for that connector.
+func (d DataSourceConfig) HasConfiguredCredentials(connectorType string) bool {
+	if len(d.Credentials) == 0 {
+		return false
+	}
+	switch connectorType {
+	case ConnectorTypeRSS:
+		raw, ok := d.Credentials["auth_headers"]
+		if !ok {
+			return false
+		}
+		s, ok := raw.(string)
+		return ok && strings.TrimSpace(s) != ""
+	default:
+		return len(d.Credentials) > 0
+	}
+}
+
+// StripNonSecretCredentials removes non-secret values mistakenly stored in the
+// credentials map before persistence.
+func (d *DataSourceConfig) StripNonSecretCredentials(connectorType string) {
+	if d == nil || d.Credentials == nil {
+		return
+	}
+	switch connectorType {
+	case ConnectorTypeRSS:
+		delete(d.Credentials, "feed_urls")
+		if len(d.Credentials) == 0 {
+			d.Credentials = nil
+		}
+	}
 }
 
 // Resource represents a syncable resource (document, folder, space) from external system
@@ -319,11 +358,58 @@ type SyncResult struct {
 	// Items that failed
 	Failed int `json:"failed"`
 
-	// Detailed error messages
-	Errors []string `json:"errors,omitempty"`
+	// Per-item failure samples (capped), shown in the sync-log UI.
+	Errors []SyncItemError `json:"errors,omitempty"`
 
 	// Updated cursor for next incremental sync
 	NextCursor *SyncCursor `json:"next_cursor,omitempty"`
+}
+
+// SyncItemError is one user-facing failure sample. It carries a stable i18n
+// Code (+ interpolation Params) so the frontend localises it to the viewer's
+// language, plus a Message fallback for clients without the key. The raw API
+// status/body/log_id is never stored here — that stays in the server logs.
+type SyncItemError struct {
+	// Title is the document title (user content, not translated).
+	Title string `json:"title,omitempty"`
+	// Code is a stable key the frontend maps to a localized string, e.g.
+	// "feishu_rate_limited" → datasource.syncError.feishu_rate_limited.
+	Code string `json:"code,omitempty"`
+	// Params are interpolation values for the localized string, e.g. {"code":"1663"}.
+	Params map[string]string `json:"params,omitempty"`
+	// Message is a human fallback used when the client has no i18n key for Code.
+	Message string `json:"message,omitempty"`
+}
+
+// Display renders the sample as a single plain string for server-side use
+// (logs, fatal-error detail). The localised UI string is built on the frontend
+// from Code/Params; this is only a non-localised fallback.
+func (e SyncItemError) Display() string {
+	switch {
+	case e.Title != "" && e.Message != "":
+		return e.Title + ": " + e.Message
+	case e.Message != "":
+		return e.Message
+	default:
+		return e.Title
+	}
+}
+
+// UnmarshalJSON keeps old sync logs readable: historically each error was a
+// plain JSON string, so a bare string decodes into Message.
+func (e *SyncItemError) UnmarshalJSON(b []byte) error {
+	var s string
+	if err := json.Unmarshal(b, &s); err == nil {
+		e.Message = s
+		return nil
+	}
+	type alias SyncItemError
+	var a alias
+	if err := json.Unmarshal(b, &a); err != nil {
+		return err
+	}
+	*e = SyncItemError(a)
+	return nil
 }
 
 // DataSourceSyncPayload represents the asynq task payload for data source sync
@@ -333,7 +419,7 @@ type DataSourceSyncPayload struct {
 	// Data source ID to sync
 	DataSourceID string `json:"data_source_id"`
 
-	// Tenant ID
+	// Workspace ID
 	TenantID uint64 `json:"tenant_id"`
 
 	// Sync log ID (for tracking)

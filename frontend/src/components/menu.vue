@@ -49,7 +49,7 @@
             </div>
         </t-tooltip>
 
-        <!-- 租户选择器：仅在用户可切换租户时显示 -->
+        <!-- 空间选择器：仅在用户可切换空间时显示 -->
         <TenantSelector v-if="canAccessAllTenants && !uiStore.sidebarCollapsed" />
 
         <!-- 折叠时右侧拖拽展开手柄 -->
@@ -100,8 +100,16 @@
                 </t-tooltip>
             </div>
 
-            <!-- 历史会话：OpenAI 式「渠道文件夹 + 聊天列表」，各来源独立分页 -->
+            <!-- 历史会话：按来源筛选后统一按日期分组展示 -->
             <div class="submenu" v-if="!uiStore.sidebarCollapsed">
+                <!-- Stable, always-mounted source filter: reserving its row here
+                     (instead of embedding it in the first date group, which
+                     appears/disappears while a bucket loads) prevents the
+                     top-right control from jumping when switching session type. -->
+                <div v-if="showSessionSourceFilter && !batchMode" class="session-list-scope-header">
+                    <SessionSourceFilter inline :emphasized="sessionScopeFilterPinned" :sources="sessionSourceOptions"
+                        :current="activeSessionBucketKey" @select="switchSessionBucket" />
+                </div>
                 <template v-if="sessionListBooting && !hasAnySession">
                     <div v-for="n in 4" :key="'skel-' + n" class="submenu_item_p session-chat-row">
                         <div class="session-list-row session-list-row--flat">
@@ -111,88 +119,28 @@
                     </div>
                 </template>
 
-                <!-- 其他来源（IM / 网页嵌入）：置顶一行入口，默认收起 -->
-                <div v-if="visibleChannelBuckets.length" class="session-channels-section">
-                    <div class="timeline_header timeline_header--collapsible session-list-row session-list-row--flat"
-                        role="button" tabindex="0" @click="toggleChannelsSection"
-                        @keydown.enter.prevent="toggleChannelsSection" @keydown.space.prevent="toggleChannelsSection">
-                        <span class="session-list-row__body">
-                            <span class="session-header-text">
-                                <span class="timeline_header-label">{{ t('menu.otherSources') }}</span>
-                                <t-icon class="timeline_header-chevron"
-                                    :name="channelsSectionCollapsed ? 'chevron-right' : 'chevron-down'" size="10px" />
-                            </span>
-                        </span>
-                    </div>
-                    <template v-if="!channelsSectionCollapsed">
-                        <template v-for="bucket in visibleChannelBuckets" :key="bucket.key">
-                            <div class="session-folder-header session-list-row session-list-row--flat" role="button"
-                                tabindex="0" @click="toggleSessionGroup(bucket.key)"
-                                @keydown.enter.prevent="toggleSessionGroup(bucket.key)"
-                                @keydown.space.prevent="toggleSessionGroup(bucket.key)">
-                                <span class="session-list-row__body">
-                                    <span class="session-header-text">
-                                        <span class="session-folder-entry">
-                                            <img v-if="bucket.platform && platformLogo(bucket.platform)"
-                                                :src="platformLogo(bucket.platform)" :alt="bucket.platform"
-                                                class="session-channel-inline-icon" />
-                                            <t-icon v-else name="internet" class="session-channel-inline-icon"
-                                                size="12px" />
-                                            <span class="session-folder-label">{{ bucket.label }}</span>
-                                        </span>
-                                        <t-icon class="session-group-chevron"
-                                            :name="isSessionGroupCollapsed(bucket.key) ? 'chevron-right' : 'chevron-down'"
-                                            size="12px" />
-                                    </span>
-                                </span>
+                <div v-else class="session-filtered-list">
+                    <template
+                        v-if="activeBucket?.loading && !activeBucket.loaded && filteredGroupedSessions.length === 0">
+                        <div v-for="n in 4" :key="'bucket-skel-' + n" class="submenu_item_p session-chat-row">
+                            <div class="session-list-row session-list-row--flat">
+                                <t-skeleton animation="gradient" class="session-list-row__body"
+                                    :row-col="[{ width: '100%', height: '14px' }]" />
                             </div>
-                            <template v-if="!isSessionGroupCollapsed(bucket.key)">
-                                <div v-if="bucket.loading && bucket.items.length === 0" class="session-folder-loading">
-                                    <div class="session-list-row session-list-row--flat">
-                                        <span class="session-list-row__body">
-                                            <t-loading size="small" />
-                                        </span>
-                                    </div>
-                                </div>
-                                <div v-for="subitem in bucket.items" :key="subitem.id"
-                                    class="submenu_item_p session-chat-row session-folder-item"
-                                    :class="{
-                                        'session-chat-row--active': !batchMode && subitem.path === currentSecondpath,
-                                        'session-chat-row--selected': batchMode && batchSelectedIds.includes(subitem.id),
-                                    }">
-                                    <div class="session-list-row session-list-row--flat">
-                                        <div class="session-list-row__body">
-                                            <SessionSidebarRow :item="subitem" :batch-mode="batchMode"
-                                                :active-path="currentSecondpath" :selected-ids="batchSelectedIds"
-                                                :menu-options="buildSessionMenuOptions(subitem)"
-                                                @navigate="gotopage(subitem.path)"
-                                                @toggle-select="toggleBatchSelect(subitem.id)"
-                                                @menu-click="handleSessionMenuClick($event, subitem)"
-                                                @hover-in="mouseenteBotDownr(subitem.id)"
-                                                @hover-out="mouseleaveBotDown" />
-                                        </div>
-                                    </div>
-                                </div>
-                            </template>
-                        </template>
+                        </div>
                     </template>
-                </div>
-
-                <!-- 网页对话：按日期分组，直接展示 -->
-                <div class="session-web-list">
-                    <template v-if="webBucket?.loaded && chatGroupedSessions.length === 0">
+                    <template v-else-if="activeBucket?.loaded && filteredGroupedSessions.length === 0">
                         <div class="submenu_empty">{{ t('menu.noSessions') }}</div>
                     </template>
                     <template v-else>
-                        <template v-for="group in chatGroupedSessions" :key="group.key">
+                        <template v-for="group in filteredGroupedSessions" :key="group.key">
                             <div v-if="group.label" class="timeline_header session-list-row session-list-row--flat">
                                 <span class="session-list-row__body">
                                     <span class="timeline_header-label">{{ group.label }}</span>
                                 </span>
                             </div>
                             <div v-for="subitem in group.items" :key="subitem.id"
-                                class="submenu_item_p session-chat-row"
-                                :class="{
+                                class="submenu_item_p session-chat-row" :class="{
                                     'session-chat-row--active': !batchMode && subitem.path === currentSecondpath,
                                     'session-chat-row--selected': batchMode && batchSelectedIds.includes(subitem.id),
                                 }">
@@ -204,12 +152,13 @@
                                             @navigate="gotopage(subitem.path)"
                                             @toggle-select="toggleBatchSelect(subitem.id)"
                                             @menu-click="handleSessionMenuClick($event, subitem)"
+                                            @rename-submit="renameSessionTitle(subitem, $event.title)"
                                             @hover-in="mouseenteBotDownr(subitem.id)" @hover-out="mouseleaveBotDown" />
                                     </div>
                                 </div>
                             </div>
                         </template>
-                        <div v-if="webBucket?.loading && chatGroupedSessions.length > 0"
+                        <div v-if="activeBucket?.loading && filteredGroupedSessions.length > 0"
                             class="session-list-loading session-list-row session-list-row--flat">
                             <span class="session-list-row__body">
                                 <t-loading size="small" />
@@ -218,27 +167,26 @@
                     </template>
                 </div>
             </div>
-
-            <!-- 批量管理底部操作条 -->
-            <div v-if="batchMode && !uiStore.sidebarCollapsed" class="batch-inline-footer">
-                <div class="batch-footer-left">
-                    <t-checkbox :checked="isAllBatchSelected" :indeterminate="isBatchIndeterminate"
-                        @change="toggleBatchSelectAll">
-                        {{ t('batchManage.selectAll') }}
-                    </t-checkbox>
-                </div>
-                <div class="batch-footer-right">
-                    <t-button size="small" variant="text" @click="exitBatchMode">
-                        {{ t('batchManage.cancel') }}
-                    </t-button>
-                    <t-button size="small" theme="danger" variant="base" :disabled="batchSelectedIds.length === 0"
-                        :loading="batchDeleting" @click="handleInlineBatchDelete">
-                        {{ t('batchManage.delete') }}{{ batchSelectedIds.length > 0 ? `(${batchDisplayCount})` : '' }}
-                    </t-button>
-                </div>
-            </div>
         </div>
 
+        <!-- 批量管理底部操作条：固定在侧栏底部、用户头像上方 -->
+        <div v-if="batchMode && !uiStore.sidebarCollapsed" class="batch-inline-footer">
+            <div class="batch-footer-left">
+                <t-checkbox :checked="isAllBatchSelected" :indeterminate="isBatchIndeterminate"
+                    @change="toggleBatchSelectAll">
+                    {{ t('batchManage.selectAll') }}
+                </t-checkbox>
+            </div>
+            <div class="batch-footer-right">
+                <t-button size="small" variant="text" @click="exitBatchMode">
+                    {{ t('batchManage.cancel') }}
+                </t-button>
+                <t-button size="small" theme="danger" variant="base" :disabled="batchSelectedIds.length === 0"
+                    :loading="batchDeleting" @click="handleInlineBatchDelete">
+                    {{ t('batchManage.delete') }}{{ batchSelectedIds.length > 0 ? `(${batchDisplayCount})` : '' }}
+                </t-button>
+            </div>
+        </div>
 
         <!-- 下半部分：用户菜单 -->
         <div class="menu_bottom">
@@ -252,10 +200,19 @@
 import { storeToRefs } from 'pinia';
 import { onMounted, onUnmounted, watch, computed, ref, h, nextTick } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
-import { getSessionsList, delSession, batchDelSessions, deleteAllSessions, clearSessionMessages, pinSession, unpinSession } from "@/api/chat/index";
+import { getSessionsList, batchDelSessions, deleteAllSessions, getSession } from "@/api/chat/index";
 import { useChatResourcesStore } from '@/stores/chatResources';
 import { listAllIMChannels } from '@/api/agent/index';
 import SessionSidebarRow from './SessionSidebarRow.vue';
+import {
+    clearSession,
+    removeSession,
+    renameSession,
+    SESSION_MUTATION_EVENT,
+    setSessionPinned,
+    type SessionMutationDetail,
+} from './sessionMutations';
+import SessionSourceFilter from './SessionSourceFilter.vue';
 import {
     SIDEBAR_BUCKET_PAGE_SIZE,
     applyBucketCountProbe,
@@ -277,8 +234,16 @@ import {
     classifyDateBucket,
     configuredPlatforms,
     groupSessionsByDate,
+    originGroupKey,
+    resolveSessionOrigin,
     type DateBucketKey,
 } from './sessionGrouping';
+import {
+    DEFAULT_SESSION_BUCKET_KEY,
+    buildSessionSourceOptions,
+    findSessionBucketKey,
+    shouldShowSessionSourceFilter,
+} from './sessionSidebarSourceFilter';
 import { logout as logoutApi } from '@/api/auth';
 import { useMenuStore } from '@/stores/menu';
 import { useAuthStore } from '@/stores/auth';
@@ -296,20 +261,24 @@ const chatResources = useChatResourcesStore();
 // visually consistent with the channels admin view.
 import wecomLogo from '@/assets/img/im/wecom.svg';
 import feishuLogo from '@/assets/img/im/feishu.svg';
+import larkLogo from '@/assets/img/im/lark.svg';
 import slackLogo from '@/assets/img/im/slack.svg';
 import telegramLogo from '@/assets/img/im/telegram.svg';
 import dingtalkLogo from '@/assets/img/im/dingtalk.svg';
 import mattermostLogo from '@/assets/img/im/mattermost.svg';
 import wechatLogo from '@/assets/img/im/wechat.svg';
+import qqbotLogo from '@/assets/img/im/qqbot.png';
 
 const PLATFORM_LOGO: Record<string, string> = {
     wecom: wecomLogo,
     feishu: feishuLogo,
+    lark: larkLogo,
     slack: slackLogo,
     telegram: telegramLogo,
     dingtalk: dingtalkLogo,
     mattermost: mattermostLogo,
     wechat: wechatLogo,
+    qqbot: qqbotLogo,
 };
 
 const platformLogo = (p: string): string => (p ? PLATFORM_LOGO[p] || '' : '');
@@ -338,46 +307,31 @@ const currentSecondpath = ref('');
 const scrollContainer = ref<HTMLElement | null>(null);
 const imPlatforms = ref<string[]>([]);
 const embedChannelNames = ref<Record<string, string>>({});
-// 分组折叠：其他来源整块 + 各来源文件夹默认收起；日期标题仅作分隔，不折叠。
-const channelsSectionCollapsed = ref(true);
-const collapsedSessionGroups = ref<Set<string>>(new Set());
-const channelBucketKeys = (keys: string[] = bucketOrder.value) =>
-    keys.filter((key) => isChannelBucketKey(key));
-const applyDefaultChannelCollapse = () => {
-    collapsedSessionGroups.value = new Set(channelBucketKeys());
-};
-const isSessionGroupCollapsed = (key: string) => collapsedSessionGroups.value.has(key);
-const toggleChannelsSection = async () => {
-    channelsSectionCollapsed.value = !channelsSectionCollapsed.value;
-    await refreshSessionListScrollability();
-};
-const ensureChannelBucketLoaded = async (key: string) => {
-    if (!isChannelBucketKey(key)) return;
-    const bucket = sessionBuckets.value[key];
-    if (!bucket || bucket.loaded || bucket.loading) return;
-    await loadBucketPage(key, 1);
-};
-
-const toggleSessionGroup = async (key: string) => {
-    const wasCollapsed = collapsedSessionGroups.value.has(key);
-    const next = new Set(collapsedSessionGroups.value);
-    if (next.has(key)) next.delete(key);
-    else next.add(key);
-    collapsedSessionGroups.value = next;
-    const expanded = wasCollapsed && !next.has(key);
-    if (expanded && isChannelBucketKey(key)) {
-        await ensureChannelBucketLoaded(key);
-        await ensureBucketFillsViewport(key);
-    }
-    await refreshSessionListScrollability();
-};
+const activeSessionBucketKey = ref(DEFAULT_SESSION_BUCKET_KEY);
 const sessionListCanScroll = ref(false);
-const webBucket = computed(() => sessionBuckets.value.web);
 const visibleChannelBuckets = computed(() =>
     bucketOrder.value
         .map((key) => sessionBuckets.value[key])
         .filter((bucket): bucket is SidebarSessionBucket => !!bucket && isChannelBucket(bucket) && bucketVisible(bucket)),
 );
+const showSessionSourceFilter = computed(() =>
+    shouldShowSessionSourceFilter(visibleChannelBuckets.value.length),
+);
+const sessionScopeFilterPinned = computed(() =>
+    activeSessionBucketKey.value !== DEFAULT_SESSION_BUCKET_KEY,
+);
+const sessionSourceOptions = computed(() =>
+    buildSessionSourceOptions(
+        t('menu.myChats'),
+        visibleChannelBuckets.value.map((bucket) => ({
+            key: bucket.key,
+            label: bucket.label,
+            platform: bucket.platform,
+        })),
+        (platform) => platformLogo(platform),
+    ),
+);
+const activeBucket = computed(() => sessionBuckets.value[activeSessionBucketKey.value]);
 const hasAnySession = computed(() =>
     Object.values(sessionBuckets.value).some((bucket) => bucket.items.length > 0),
 );
@@ -409,7 +363,7 @@ const batchDisplayCount = computed(() =>
     isAllBatchSelected.value ? total.value : batchSelectedIds.value.length
 )
 
-// 是否可以访问所有租户
+// 是否可以访问所有空间
 const canAccessAllTenants = computed(() => authStore.canAccessAllTenants);
 
 // 是否处于知识库详情页（不包括全局聊天）
@@ -499,6 +453,7 @@ const currentKbInfo = ref<any>(null)
 // 进行中的置顶/取消置顶请求，避免重复点击
 const pinningIds = ref<Set<string>>(new Set())
 
+// 「聊天」区内按日期分组（当前筛选来源）
 const dateBucketLabels = computed<Record<DateBucketKey, string>>(() => ({
     pinned: t('time.pinned'),
     today: t('time.today'),
@@ -509,13 +464,15 @@ const dateBucketLabels = computed<Record<DateBucketKey, string>>(() => ({
     earlier: t('time.earlier'),
 }));
 
-// 「聊天」区内按日期分组（仅 web 会话）
-const chatGroupedSessions = computed(() => {
-    const web = sessionBuckets.value.web;
-    if (!web?.items.length) return [];
-
+const filteredGroupedSessions = computed(() => {
+    const bucket = activeBucket.value;
+    if (!bucket?.items.length) return [];
     return groupSessionsByDate(
-        web.items,
+        bucket.items.map((item) => ({
+            ...item,
+            path: `chat/${item.id}`,
+            title: item.title || '',
+        })),
         dateBucketLabels.value,
         (session) => classifyDateBucket(session.updated_at || session.created_at),
     );
@@ -649,7 +606,7 @@ const buildSessionMenuOptions = (item: any) => {
         options.push({
             content: t('menu.unpin'),
             value: 'unpin',
-            prefixIcon: () => h(TIcon, { name: 'pin', size: '16px' }),
+            prefixIcon: () => h(TIcon, { name: 'pin-filled', size: '16px' }),
         });
     } else {
         options.push({
@@ -659,6 +616,7 @@ const buildSessionMenuOptions = (item: any) => {
         });
     }
     options.push(
+        { content: t('menu.renameSession'), value: 'rename', prefixIcon: () => h(TIcon, { name: 'edit-1', size: '16px' }) },
         { content: t('menu.clearMessages'), value: 'clearMessages', prefixIcon: () => h(TIcon, { name: 'clear', size: '16px' }) },
         { content: t('menu.batchManage'), value: 'batchManage', prefixIcon: () => h(TIcon, { name: 'queue', size: '16px' }) },
         { content: t('upload.deleteRecord'), value: 'delete', theme: 'error', prefixIcon: () => h(TIcon, { name: 'delete', size: '16px' }) },
@@ -681,21 +639,20 @@ const updateSessionInBuckets = (
     syncMenuStoreFromBuckets();
 };
 
+const renameSessionTitle = async (item: any, title: string) => {
+    try {
+        await renameSession(item.id, title, item.description || '');
+        MessagePlugin.success(t('menu.renameSessionSuccess'));
+    } catch {
+        MessagePlugin.error(t('menu.renameSessionFailed'));
+    }
+};
+
 const togglePin = (item: any, pin: boolean) => {
     if (pinningIds.value.has(item.id)) return;
     pinningIds.value.add(item.id);
 
-    const call = pin ? pinSession(item.id) : unpinSession(item.id);
-    call.then((res: any) => {
-        if (res && res.success) {
-            updateSessionInBuckets(item.id, {
-                is_pinned: pin,
-                pinned_at: pin ? new Date().toISOString() : null,
-            });
-        } else {
-            MessagePlugin.error(pin ? t('menu.pinFailed') : t('menu.unpinFailed'));
-        }
-    }).catch(() => {
+    setSessionPinned(item.id, pin).catch(() => {
         MessagePlugin.error(pin ? t('menu.pinFailed') : t('menu.unpinFailed'));
     }).finally(() => {
         pinningIds.value.delete(item.id);
@@ -703,33 +660,15 @@ const togglePin = (item: any, pin: boolean) => {
 };
 
 const clearMessages = (item: any) => {
-    clearSessionMessages(item.id).then((res: any) => {
-        if (res && res.success) {
-            MessagePlugin.success(t('menu.clearMessagesSuccess'));
-            if (item.id === route.params.chatid) {
-                window.dispatchEvent(new CustomEvent('session-messages-cleared', { detail: { sessionId: item.id } }));
-            }
-        } else {
-            MessagePlugin.error(t('menu.clearMessagesFailed'));
-        }
+    clearSession(item.id).then(() => {
+        MessagePlugin.success(t('menu.clearMessagesSuccess'));
     }).catch(() => {
         MessagePlugin.error(t('menu.clearMessagesFailed'));
     });
 };
 
 const delCard = (item: any) => {
-    delSession(item.id).then((res: any) => {
-        if (res && (res as any).success) {
-            sessionBuckets.value = removeSessionFromBuckets(sessionBuckets.value, item.id);
-            syncMenuStoreFromBuckets();
-
-            if (item.id == route.params.chatid) {
-                router.push('/platform/creatChat');
-            }
-        } else {
-            MessagePlugin.error(t('chat.deleteSessionFailed'));
-        }
-    })
+    removeSession(item.id).catch(() => MessagePlugin.error(t('chat.deleteSessionFailed')))
 }
 
 
@@ -752,6 +691,7 @@ const mapSessionRow = (item: any) => ({
     pinned_at: item.pinned_at || null,
     im_platform: item.im_platform || '',
     description: item.description || '',
+    user_id: item.user_id || '',
 });
 
 const syncMenuStoreFromBuckets = () => {
@@ -772,6 +712,7 @@ const menuChildToSessionRow = (item: Record<string, unknown>): SessionForGroupin
         updated_at: typeof item.updated_at === 'string' ? item.updated_at : undefined,
         im_platform: typeof item.im_platform === 'string' ? item.im_platform : '',
         description: typeof item.description === 'string' ? item.description : '',
+        user_id: typeof item.user_id === 'string' ? item.user_id : '',
     };
 };
 
@@ -804,7 +745,9 @@ const rebuildBucketDefinitions = () => buildBucketDefinitions(
         web: t('menu.myChats'),
         imPlatform: (platform) => t(`agentEditor.im.${platform}`),
         embedChannel: (name) => name,
+        api: t('menu.apiChats'),
     },
+    { includeAdminChannelBuckets: authStore.hasRole('admin') },
 );
 
 /** 首屏轻量探测各渠道是否有会话（page_size=1 只取 total），避免展示空文件夹 */
@@ -864,6 +807,59 @@ const loadBucketPage = async (key: string, page?: number, token?: number) => {
     }
 };
 
+const switchSessionBucket = async (key: string) => {
+    if (key === activeSessionBucketKey.value) return;
+    activeSessionBucketKey.value = key;
+    const bucket = sessionBuckets.value[key];
+    if (bucket && !bucket.loaded && !bucket.loading) {
+        await loadBucketPage(key, 1);
+    }
+    await ensureBucketFillsViewport(key);
+    await refreshSessionListScrollability();
+};
+
+const syncActiveBucketFromChat = async (sessionId: string | undefined) => {
+    if (!sessionId) return;
+
+    let bucketKey = findSessionBucketKey(sessionBuckets.value, sessionId);
+    if (!bucketKey) {
+        const chatMenu = (menuArr.value as unknown as MenuItem[]).find((item) => item.path === 'creatChat');
+        const fromStore = (chatMenu?.children as Record<string, unknown>[] | undefined)
+            ?.find((item) => item.id === sessionId);
+        if (fromStore) {
+            bucketKey = originGroupKey(resolveSessionOrigin(menuChildToSessionRow(fromStore)));
+        }
+    }
+    // On a hard refresh only the web bucket is loaded, so a session opened from
+    // any other folder (IM, embed, or the admin-only API folder) isn't in any
+    // bucket or the menu store. Fetch its detail and classify its origin folder
+    // so the sidebar stays in sync with the chat pane instead of snapping back
+    // to "my chats". Only switch when that folder is actually present.
+    if (!bucketKey) {
+        try {
+            const res: any = await getSession(sessionId);
+            const candidate = originGroupKey(resolveSessionOrigin({
+                id: sessionId,
+                im_platform: res?.data?.im_platform || '',
+                description: res?.data?.description || '',
+                user_id: res?.data?.user_id || '',
+            }));
+            if (sessionBuckets.value[candidate]) {
+                bucketKey = candidate;
+            }
+        } catch {
+            // Fall through: leave the default bucket active on lookup failure.
+        }
+    }
+    if (!bucketKey || bucketKey === activeSessionBucketKey.value) return;
+
+    activeSessionBucketKey.value = bucketKey;
+    const bucket = sessionBuckets.value[bucketKey];
+    if (bucket && !bucket.loaded && !bucket.loading) {
+        await loadBucketPage(bucketKey, 1);
+    }
+};
+
 const initSessionBuckets = async () => {
     const token = ++bucketRequestToken;
     sessionListBooting.value = true;
@@ -885,7 +881,6 @@ const initSessionBuckets = async () => {
 
     if (token === bucketRequestToken) {
         sessionListBooting.value = false;
-        applyDefaultChannelCollapse();
         syncMenuStoreFromBuckets();
         await ensureBucketFillsViewport('web');
         await refreshSessionListScrollability();
@@ -896,23 +891,24 @@ const getMessageList = async () => {
     await initSessionBuckets();
 };
 
-// 滚动到底时仅为「聊天」区加载下一页 web 会话
+// 滚动到底时为当前筛选来源加载下一页
 const checkScrollBottom = async () => {
     const container = scrollContainer.value;
-    const web = sessionBuckets.value.web;
-    if (!container || !web || !bucketHasMore(web) || web.loading) return;
+    const key = activeSessionBucketKey.value;
+    const bucket = sessionBuckets.value[key];
+    if (!container || !bucket || !bucketHasMore(bucket) || bucket.loading) return;
 
     const { scrollTop, scrollHeight, clientHeight } = container;
     const hasOverflow = scrollHeight > clientHeight + 1;
     if (!hasOverflow) {
-        await ensureBucketFillsViewport('web');
+        await ensureBucketFillsViewport(key);
         return;
     }
 
     const isNearBottom = scrollHeight - (scrollTop + clientHeight) < 100;
     if (!isNearBottom) return;
 
-    await loadBucketPage('web');
+    await loadBucketPage(key);
 };
 
 const handleScroll = debounce(checkScrollBottom, 200);
@@ -951,10 +947,22 @@ const loadSessionOriginMeta = async () => {
     }
 };
 
-const handleSessionTitleUpdated = (event: Event) => {
-    const detail = (event as CustomEvent<{ sessionId?: string; title?: string }>).detail;
-    if (!detail?.sessionId || !detail.title) return;
-    updateSessionInBuckets(detail.sessionId, { title: detail.title, isNoTitle: false });
+const handleSessionMutation = (event: Event) => {
+    const detail = (event as CustomEvent<SessionMutationDetail>).detail;
+    if (!detail?.sessionId) return;
+    if (detail.patch) {
+        updateSessionInBuckets(detail.sessionId, {
+            ...detail.patch,
+            ...(detail.patch.title ? { isNoTitle: false } : {}),
+        });
+    }
+    if (detail.removed) {
+        sessionBuckets.value = removeSessionFromBuckets(sessionBuckets.value, detail.sessionId);
+        syncMenuStoreFromBuckets();
+        if (detail.sessionId === route.params.chatid) {
+            router.push('/platform/creatChat');
+        }
+    }
 };
 
 onMounted(async () => {
@@ -964,7 +972,7 @@ onMounted(async () => {
         currentSecondpath.value = `chat/${route.params.chatid}`;
     }
 
-    window.addEventListener('session-title-updated', handleSessionTitleUpdated);
+    window.addEventListener(SESSION_MUTATION_EVENT, handleSessionMutation);
 
     isLiteEdition.value = authStore.isLiteMode
     getSystemInfo().then(res => {
@@ -981,6 +989,7 @@ onMounted(async () => {
     const initialChatId = route.params.chatid as string | undefined;
     if (initialChatId) {
         ensureSessionInSidebar(initialChatId);
+        await syncActiveBucketFromChat(initialChatId);
     }
     // 若组织列表未加载则拉取一次，用于侧栏「待审批」角标
     if (orgStore.organizations.length === 0) {
@@ -989,7 +998,7 @@ onMounted(async () => {
 });
 
 onUnmounted(() => {
-    window.removeEventListener('session-title-updated', handleSessionTitleUpdated);
+    window.removeEventListener(SESSION_MUTATION_EVENT, handleSessionMutation);
 });
 
 watch([() => route.name, () => route.params], (newvalue, oldvalue) => {
@@ -1006,6 +1015,7 @@ watch([() => route.name, () => route.params], (newvalue, oldvalue) => {
     const newChatId = (newvalue[1] as any)?.chatid as string | undefined;
     if (nameStr === 'chat' && newChatId) {
         ensureSessionInSidebar(newChatId);
+        void syncActiveBucketFromChat(newChatId);
     }
 
     // 路由变化时更新图标状态和知识库信息（不涉及对话列表）
@@ -1464,6 +1474,7 @@ const onDragHandleMouseDown = (e: MouseEvent) => {
     }
 
     .submenu {
+        position: relative;
         font-family: var(--app-font-family);
         font-size: 14px;
         font-style: normal;
@@ -1499,40 +1510,6 @@ const onDragHandleMouseDown = (e: MouseEvent) => {
         opacity: 1;
     }
 
-    .session-channels-section {
-        margin-bottom: 2px;
-
-        .session-folder-header {
-            font-size: 12px;
-            line-height: 20px;
-        }
-
-        // 与置顶会话一致：图标内联在标题前，间距 4px
-        .session-folder-entry {
-            display: inline-flex;
-            align-items: center;
-            min-width: 0;
-            flex: 1 1 auto;
-            overflow: hidden;
-        }
-
-        .session-channel-inline-icon {
-            flex-shrink: 0;
-            width: 12px;
-            height: 12px;
-            margin-right: 4px;
-            object-fit: contain;
-            filter: grayscale(1);
-            opacity: 0.55;
-        }
-
-        :deep(.session-channel-inline-icon.t-icon) {
-            color: var(--td-text-color-secondary);
-            opacity: 0.75;
-        }
-    }
-
-    // 标题 + 折叠箭头紧挨排列，箭头 hover 时才出现
     // 列表行统一栅格：左缘 inset-x + 图标槽 18px + 间距 8px → 文案列与主菜单文字对齐
     .session-list-row {
         display: flex;
@@ -1565,71 +1542,6 @@ const onDragHandleMouseDown = (e: MouseEvent) => {
         gap: 0;
     }
 
-    // 渠道文件夹内会话：与文件夹标题文字列对齐
-    .session-list-row--nested {
-        padding-left: var(--sidebar-text-inset);
-        gap: 0;
-    }
-
-    .session-header-text {
-        display: inline-flex;
-        align-items: center;
-        gap: 3px;
-        min-width: 0;
-    }
-
-    .session-group-chevron {
-        flex: 0 0 auto;
-        color: var(--td-text-color-placeholder);
-        opacity: 0;
-        transition: opacity 0.15s ease;
-    }
-
-    .session-folder-header {
-        padding-top: 2px;
-        padding-bottom: 2px;
-        border-radius: 6px;
-        cursor: pointer;
-        color: var(--td-text-color-primary);
-        font-size: 13px;
-        line-height: 20px;
-        user-select: none;
-        outline: none;
-
-        &:hover,
-        &:focus-visible {
-            background: var(--td-bg-color-container-hover);
-
-            .session-group-chevron {
-                opacity: 1;
-            }
-        }
-    }
-
-    .session-folder-icon {
-        width: var(--sidebar-channel-icon);
-        height: var(--sidebar-channel-icon);
-        object-fit: contain;
-        flex-shrink: 0;
-    }
-
-    .session-folder-label {
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-    }
-
-    .session-folder-loading {
-        display: flex;
-        align-items: center;
-        padding: 4px 0;
-        color: var(--td-text-color-placeholder);
-
-        .session-list-row {
-            width: 100%;
-        }
-    }
-
     .session-list-loading {
         display: flex;
         align-items: center;
@@ -1653,25 +1565,32 @@ const onDragHandleMouseDown = (e: MouseEvent) => {
         white-space: nowrap;
     }
 
-    .timeline_header--collapsible {
-        cursor: pointer;
-        outline: none;
+    // Stable filter control: always mounted and absolutely pinned to the list's
+    // top-right so it visually sits on the first row (e.g. beside "近30天") and
+    // never jumps when switching session type reloads a bucket. It overlays the
+    // empty right side of the first header row, so it needs no reserved height.
+    .session-list-scope-header {
+        position: absolute;
+        top: 4px;
+        right: 10px;
+        z-index: 2;
+        display: flex;
+        justify-content: flex-end;
+        max-width: calc(100% - var(--sidebar-inset-x) - 10px);
 
-        &:hover,
-        &:focus-visible {
-            color: var(--td-text-color-secondary);
+        :deep(.session-source-filter--inline) {
+            flex: 0 1 auto;
+            min-width: 0;
+            max-width: 100%;
+            opacity: 0;
+            transition: opacity 0.15s ease;
         }
     }
 
-    .timeline_header-chevron {
-        flex: 0 0 auto;
-        color: inherit;
-        opacity: 0.55;
-        transition: opacity 0.15s ease;
-    }
-
-    .timeline_header--collapsible:hover .timeline_header-chevron,
-    .timeline_header--collapsible:focus-visible .timeline_header-chevron {
+    .submenu:hover .session-list-scope-header :deep(.session-source-filter--inline),
+    .session-list-scope-header:hover :deep(.session-source-filter--inline),
+    .session-list-scope-header:focus-within :deep(.session-source-filter--inline),
+    .session-list-scope-header :deep(.session-source-filter--inline.session-source-filter--emphasized) {
         opacity: 1;
     }
 
@@ -1785,9 +1704,6 @@ const onDragHandleMouseDown = (e: MouseEvent) => {
 }
 
 .batch-inline-footer {
-    position: sticky;
-    bottom: 0;
-    z-index: 2;
     flex-shrink: 0;
     display: flex;
     align-items: center;

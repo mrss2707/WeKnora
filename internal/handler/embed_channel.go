@@ -26,11 +26,14 @@ import (
 
 // EmbedChannelHandler manages web embed channel CRUD and public embed endpoints.
 type EmbedChannelHandler struct {
-	embedSvc       interfaces.EmbedChannelService
-	sessionService interfaces.SessionService
-	sessionHandler *session.Handler
-	messageHandler *MessageHandler
-	redis          *redis.Client
+	embedSvc          interfaces.EmbedChannelService
+	sessionService    interfaces.SessionService
+	sessionHandler    *session.Handler
+	messageHandler    *MessageHandler
+	suggestionHandler *MessageSuggestionHandler
+	mcpOAuthHandler   *MCPOAuthHandler
+	mcpServiceHandler *MCPServiceHandler
+	redis             *redis.Client
 }
 
 func NewEmbedChannelHandler(
@@ -38,14 +41,20 @@ func NewEmbedChannelHandler(
 	sessionService interfaces.SessionService,
 	sessionHandler *session.Handler,
 	messageHandler *MessageHandler,
+	suggestionHandler *MessageSuggestionHandler,
+	mcpOAuthHandler *MCPOAuthHandler,
+	mcpServiceHandler *MCPServiceHandler,
 	redisClient *redis.Client,
 ) *EmbedChannelHandler {
 	return &EmbedChannelHandler{
-		embedSvc:       embedSvc,
-		sessionService: sessionService,
-		sessionHandler: sessionHandler,
-		messageHandler: messageHandler,
-		redis:          redisClient,
+		embedSvc:          embedSvc,
+		sessionService:    sessionService,
+		sessionHandler:    sessionHandler,
+		messageHandler:    messageHandler,
+		suggestionHandler: suggestionHandler,
+		mcpOAuthHandler:   mcpOAuthHandler,
+		mcpServiceHandler: mcpServiceHandler,
+		redis:             redisClient,
 	}
 }
 
@@ -62,11 +71,11 @@ type embedChannelRequest struct {
 	ShowSuggestedQuestions *bool    `json:"show_suggested_questions"`
 	WidgetPosition         string   `json:"widget_position"`
 	AllowWebSearch         *bool    `json:"allow_web_search"`
-	AllowMemory            *bool    `json:"allow_memory"`
 	AllowFileUpload        *bool    `json:"allow_file_upload"`
 	DefaultLocale          *string  `json:"default_locale"`
 	WebhookURL             *string  `json:"webhook_url"`
 	WebhookSecret          *string  `json:"webhook_secret"`
+	AgentID                *string  `json:"agent_id"`
 }
 
 // isProductionMode reports whether the server runs in a hardened (release) mode.
@@ -142,10 +151,6 @@ func (h *EmbedChannelHandler) CreateEmbedChannel(c *gin.Context) {
 	if req.AllowWebSearch != nil {
 		allowWebSearch = *req.AllowWebSearch
 	}
-	allowMemory := false
-	if req.AllowMemory != nil {
-		allowMemory = *req.AllowMemory
-	}
 	allowFileUpload := false
 	if req.AllowFileUpload != nil {
 		allowFileUpload = *req.AllowFileUpload
@@ -163,7 +168,6 @@ func (h *EmbedChannelHandler) CreateEmbedChannel(c *gin.Context) {
 		ShowSuggestedQuestions: showSuggested,
 		WidgetPosition:         req.WidgetPosition,
 		AllowWebSearch:         allowWebSearch,
-		AllowMemory:            allowMemory,
 		AllowFileUpload:        allowFileUpload,
 		DefaultLocale:          types.NormalizeEmbedDefaultLocale(stringOrEmpty(req.DefaultLocale)),
 	})
@@ -242,7 +246,10 @@ func (h *EmbedChannelHandler) UpdateEmbedChannel(c *gin.Context) {
 		HeaderTitleMode:    req.HeaderTitleMode,
 		WidgetPosition:     req.WidgetPosition,
 	}
-	ch, err := h.embedSvc.Update(c.Request.Context(), tenantID, channelID, update, req.Enabled, req.ShowSuggestedQuestions, req.AllowWebSearch, req.AllowMemory, req.AllowFileUpload, req.DefaultLocale, req.WebhookURL, req.WebhookSecret)
+	if req.AgentID != nil {
+		update.AgentID = strings.TrimSpace(*req.AgentID)
+	}
+	ch, err := h.embedSvc.Update(c.Request.Context(), tenantID, channelID, update, req.Enabled, req.ShowSuggestedQuestions, req.AllowWebSearch, req.AllowFileUpload, req.DefaultLocale, req.WebhookURL, req.WebhookSecret)
 	if err != nil {
 		writeEmbedMgmtError(c, err)
 		return
@@ -418,6 +425,12 @@ func (h *EmbedChannelHandler) CreateEmbedSession(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create session"})
 		return
 	}
+	ownerID := types.EmbedSessionPrincipal(tenantID, ch.ID, created.ID).StorageID()
+	if err := h.sessionService.SetSessionOwnerID(ctx, tenantID, created.ID, ownerID); err != nil {
+		logger.Warnf(ctx, "failed to assign embed session owner for %s: %v", created.ID, err)
+	} else {
+		created.UserID = ownerID
+	}
 	// Hand back a signed handle bound to this session; the widget must echo it
 	// (X-Embed-Session header) on every subsequent load/chat call.
 	sig := service.SignEmbedSessionHandle(ch, created.ID)
@@ -444,6 +457,100 @@ func (h *EmbedChannelHandler) EmbedStopSession(c *gin.Context) {
 		return
 	}
 	h.sessionHandler.StopSession(c)
+}
+
+func (h *EmbedChannelHandler) EmbedEnsureMessageSuggestions(c *gin.Context) {
+	if err := h.ensureEmbedSession(c); err != nil {
+		return
+	}
+	ch, _ := middleware.EmbedChannelFromContext(c.Request.Context())
+	if ch == nil || !ch.ShowSuggestedQuestions || h.suggestionHandler == nil {
+		c.JSON(http.StatusOK, gin.H{"success": true, "data": gin.H{
+			"status": "suppressed", "suppression_reason": "channel_disabled", "questions": []any{},
+		}})
+		return
+	}
+	h.suggestionHandler.Ensure(c)
+}
+
+func (h *EmbedChannelHandler) EmbedGetMessageSuggestions(c *gin.Context) {
+	if err := h.ensureEmbedSession(c); err != nil {
+		return
+	}
+	ch, _ := middleware.EmbedChannelFromContext(c.Request.Context())
+	if ch == nil || !ch.ShowSuggestedQuestions || h.suggestionHandler == nil {
+		c.JSON(http.StatusOK, gin.H{"success": true, "data": gin.H{
+			"status": "suppressed", "suppression_reason": "channel_disabled", "questions": []any{},
+		}})
+		return
+	}
+	h.suggestionHandler.Get(c)
+}
+
+func (h *EmbedChannelHandler) EmbedRecordSuggestionEvent(c *gin.Context) {
+	if err := h.ensureEmbedSession(c); err != nil {
+		return
+	}
+	if h.suggestionHandler == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "suggestion service unavailable"})
+		return
+	}
+	h.suggestionHandler.RecordEvent(c)
+}
+
+func (h *EmbedChannelHandler) EmbedResolveMCPOAuth(c *gin.Context) {
+	if err := h.ensureEmbedSession(c); err != nil {
+		return
+	}
+	if h.mcpOAuthHandler == nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "oauth handler unavailable"})
+		return
+	}
+	h.mcpOAuthHandler.ResolveMCPOAuth(c)
+}
+
+func (h *EmbedChannelHandler) EmbedCancelMCPOAuth(c *gin.Context) {
+	if err := h.ensureEmbedSession(c); err != nil {
+		return
+	}
+	if h.mcpOAuthHandler == nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "oauth handler unavailable"})
+		return
+	}
+	h.mcpOAuthHandler.CancelMCPOAuth(c)
+}
+
+func (h *EmbedChannelHandler) EmbedMCPOAuthAuthorizeURL(c *gin.Context) {
+	if err := h.ensureEmbedSession(c); err != nil {
+		return
+	}
+	if h.mcpOAuthHandler == nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "oauth handler unavailable"})
+		return
+	}
+	h.mcpOAuthHandler.AuthorizeURL(c)
+}
+
+func (h *EmbedChannelHandler) EmbedMCPOAuthStatus(c *gin.Context) {
+	if err := h.ensureEmbedSession(c); err != nil {
+		return
+	}
+	if h.mcpOAuthHandler == nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "oauth handler unavailable"})
+		return
+	}
+	h.mcpOAuthHandler.Status(c)
+}
+
+func (h *EmbedChannelHandler) EmbedResolveToolApproval(c *gin.Context) {
+	if err := h.ensureEmbedSession(c); err != nil {
+		return
+	}
+	if h.mcpServiceHandler == nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "tool approval handler unavailable"})
+		return
+	}
+	h.mcpServiceHandler.ResolveToolApproval(c)
 }
 
 type embedWebhookEventRequest struct {
@@ -531,7 +638,7 @@ func (h *EmbedChannelHandler) ensureEmbedSession(c *gin.Context) error {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "session_id is required"})
 		return apperrors.NewBadRequestError("session_id is required")
 	}
-	sess, err := h.sessionService.GetSession(c.Request.Context(), sessionID)
+	sess, err := h.sessionService.GetSessionByID(c.Request.Context(), ch.TenantID, sessionID)
 	if err != nil || sess == nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "session not found"})
 		return apperrors.NewNotFoundError("session not found")
@@ -541,6 +648,12 @@ func (h *EmbedChannelHandler) ensureEmbedSession(c *gin.Context) error {
 		c.JSON(http.StatusForbidden, gin.H{"error": "session not allowed for this embed channel"})
 		return apperrors.NewForbiddenError("session not allowed")
 	}
+	ownerID := types.EmbedSessionPrincipal(ch.TenantID, ch.ID, sessionID).StorageID()
+	if strings.TrimSpace(sess.UserID) == "" {
+		if err := h.sessionService.SetSessionOwnerID(c.Request.Context(), ch.TenantID, sessionID, ownerID); err != nil {
+			logger.Warnf(c.Request.Context(), "failed to backfill embed session owner for %s: %v", sessionID, err)
+		}
+	}
 	// Require the signed handle minted at creation. This is the per-visitor
 	// authorization secret: knowing the session id alone (e.g. from a leaked
 	// access log) is insufficient without the matching signature.
@@ -549,6 +662,17 @@ func (h *EmbedChannelHandler) ensureEmbedSession(c *gin.Context) error {
 		c.JSON(http.StatusForbidden, gin.H{"error": "session signature invalid"})
 		return apperrors.NewForbiddenError("session signature invalid")
 	}
+	principal := types.EmbedSessionPrincipal(ch.TenantID, ch.ID, sessionID)
+	ctx := c.Request.Context()
+	if visitorID := strings.TrimSpace(c.GetHeader(types.EmbedVisitorHeader)); visitorID != "" {
+		if err := types.ValidateEmbedVisitorID(visitorID); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid embed visitor id"})
+			return apperrors.NewBadRequestError("invalid embed visitor id")
+		}
+		ctx = types.WithEmbedVisitorID(ctx, visitorID)
+	}
+	c.Set(types.PrincipalContextKey.String(), principal)
+	c.Request = c.Request.WithContext(types.WithPrincipal(ctx, principal))
 	return nil
 }
 
@@ -580,11 +704,10 @@ func patchEmbedChatPayload(body io.Reader, ch *types.EmbedChannel, agentMode boo
 	}
 	// Channel allow_web_search only exposes the visitor toggle; the client must opt in.
 	payload["web_search_enabled"] = ch.AllowWebSearch && clientWebSearch
-	// Embed memory UI is disabled for now; always off regardless of channel flag.
-	payload["enable_memory"] = false
 	if !ch.AllowFileUpload {
 		delete(payload, "images")
 		delete(payload, "attachment_uploads")
+		delete(payload, "attachment_ids")
 	}
 	payload["mcp_service_ids"] = []string{}
 	if agentMode {
@@ -599,6 +722,22 @@ func patchEmbedChatPayload(body io.Reader, ch *types.EmbedChannel, agentMode boo
 	return patched, nil
 }
 
+// GetEmbedChannel returns a single embed channel for management, including the
+// publish token so admins can copy deploy snippets at any time.
+func (h *EmbedChannelHandler) GetEmbedChannel(c *gin.Context) {
+	channelID := strings.TrimSpace(c.Param("channel_id"))
+	tenantID := c.GetUint64(types.TenantIDContextKey.String())
+	ch, err := h.embedSvc.GetOwnedChannel(c.Request.Context(), tenantID, channelID)
+	if err != nil {
+		writeEmbedMgmtError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data":    embedChannelResponse(ch, ch.PublishToken),
+	})
+}
+
 // GetEmbedChannelStats returns lightweight usage stats for an embed channel.
 func (h *EmbedChannelHandler) GetEmbedChannelStats(c *gin.Context) {
 	channelID := strings.TrimSpace(c.Param("channel_id"))
@@ -610,7 +749,7 @@ func (h *EmbedChannelHandler) GetEmbedChannelStats(c *gin.Context) {
 		return
 	}
 
-	result, err := h.sessionService.ListSessions(ctx, &types.SessionListQuery{
+	result, err := h.sessionService.CountSessionsBySource(ctx, &types.SessionListQuery{
 		TenantID: tenantID,
 		Source:   "embed:" + channelID,
 		Page:     1,
@@ -620,10 +759,7 @@ func (h *EmbedChannelHandler) GetEmbedChannelStats(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-	total := int64(0)
-	if result != nil {
-		total = result.Total
-	}
+	total := result
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"data": gin.H{
@@ -649,7 +785,6 @@ func embedChannelResponse(ch *types.EmbedChannel, publishToken string) gin.H {
 		"show_suggested_questions": ch.ShowSuggestedQuestions,
 		"widget_position":          ch.WidgetPosition,
 		"allow_web_search":         ch.AllowWebSearch,
-		"allow_memory":             ch.AllowMemory,
 		"allow_file_upload":        ch.AllowFileUpload,
 		"default_locale":           ch.DefaultLocale,
 		"webhook_url":              ch.WebhookURL,

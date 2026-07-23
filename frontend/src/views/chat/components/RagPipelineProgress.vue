@@ -1,14 +1,15 @@
 <template>
-  <div v-if="visible" class="rag-pipeline-progress">
+  <div v-if="visible" ref="rootElement" class="rag-pipeline-progress">
     <div v-if="showPrePipelineWait" class="tree-children">
       <div class="tree-child tree-child-last streaming-loading-node">
         <div class="tree-branch" />
         <div class="tree-child-content">
-          <div class="loading-indicator">
-            <div class="loading-typing">
-              <span />
-              <span />
-              <span />
+          <div class="action-card action-pending">
+            <div class="action-header no-results">
+              <div class="action-title">
+                <t-icon class="action-title-icon" name="lightbulb" />
+                <span class="action-name">{{ t('chat.thinkingAlt') }}</span>
+              </div>
             </div>
           </div>
         </div>
@@ -18,16 +19,26 @@
     <div v-else-if="!showCollapsedRoot" class="tree-children">
       <div v-for="(step, index) in steps" :key="step.id" class="tree-child" :class="{
         'tree-child-last':
-          !showActivityIndicator
-          && !showDoneRow
-          && !hasReferences
+          !showDoneRow
+          && !showThinkingStep
           && index === steps.length - 1,
       }">
         <div class="tree-branch" />
         <div class="tree-child-content">
           <div class="tool-event">
-            <div class="action-card">
-              <div class="action-header no-results">
+            <div
+              class="action-card"
+              :class="{ 'has-reference-trigger': step.canOpenReferences }"
+              :role="step.canOpenReferences ? 'button' : undefined"
+              :tabindex="step.canOpenReferences ? 0 : undefined"
+              @click="handleStepClick(step)"
+              @keydown.enter="handleStepClick(step)"
+              @keydown.space.prevent="handleStepClick(step)"
+            >
+              <div
+                class="action-header"
+                :class="{ 'no-results': !step.canOpenReferences }"
+              >
                 <div class="action-title">
                   <t-icon class="action-title-icon" :name="step.iconName" />
                   <span class="action-name" :class="{ 'is-running': step.pending }">{{ step.title }}</span>
@@ -41,26 +52,27 @@
         </div>
       </div>
 
-      <div v-if="hasReferences" class="tree-child rag-ref-step"
-        :class="{ 'tree-child-last': !showDoneRow && !showActivityIndicator }">
+      <div v-if="showThinkingStep" class="tree-child rag-thinking-step"
+        :class="{ 'tree-child-last': !showDoneRow }">
         <div class="tree-branch" />
         <div class="tree-child-content">
           <div class="tool-event">
-            <div class="action-card">
-              <div class="action-header" @click="toggleReferences">
+            <div class="action-card" :class="{ 'action-pending': thinkingPending }">
+              <div class="action-header" :class="{ 'no-results': !thinkingContent }" @click="toggleThinking">
                 <div class="action-title">
-                  <t-icon class="action-title-icon" name="file-search" />
-                  <span class="action-name">{{ referencesHeaderText }}</span>
+                  <t-icon class="action-title-icon" name="lightbulb" />
+                  <span class="action-name">{{ t('agent.think') }}</span>
                 </div>
               </div>
-              <DocInfo v-show="refsExpanded" :session="session" :embedded-mode="embeddedMode" timeline-mode
-                content-only />
+              <div v-if="thinkingContent && thinkingExpanded" class="thinking-detail-content">
+                {{ thinkingContent }}
+              </div>
             </div>
           </div>
         </div>
       </div>
 
-      <div v-if="showDoneRow" class="tree-child agent-step-done" :class="{ 'tree-child-last': !showActivityIndicator }">
+      <div v-if="showDoneRow" class="tree-child agent-step-done tree-child-last">
         <div class="tree-branch" />
         <div class="tree-child-content">
           <div class="tool-event">
@@ -75,43 +87,54 @@
           </div>
         </div>
       </div>
-
-      <div v-if="showActivityIndicator" class="tree-child tree-child-last streaming-loading-node">
-        <div class="tree-branch" />
-        <div class="tree-child-content">
-          <div class="loading-indicator">
-            <div class="loading-typing">
-              <span />
-              <span />
-              <span />
-            </div>
-          </div>
-        </div>
-      </div>
     </div>
 
     <div v-else class="tree-container">
       <div class="tool-event">
-        <div class="action-card tree-root" @click="toggleExpanded">
-          <div class="action-header">
-            <div class="action-title">
-              <span class="action-name tree-root-summary" v-html="collapsedSummaryHtml" />
-              <div class="action-show-icon">
-                <t-icon :name="showExpandedTimeline ? 'chevron-down' : 'chevron-right'" />
-              </div>
-            </div>
+        <div class="action-card tree-root">
+          <div class="tree-root-toolbar">
+            <button
+              type="button"
+              class="tree-root-expand"
+              :aria-expanded="showExpandedTimeline"
+              :aria-label="collapsedStatusText"
+              @click="toggleExpanded"
+            >
+              <span class="tree-root-status">{{ collapsedStatusText }}</span>
+              <span
+                v-if="referenceSummaryText"
+                class="tree-root-reference"
+              >
+                {{ referenceSummaryText }}
+              </span>
+              <t-icon
+                class="tree-root-expand__icon"
+                :name="showExpandedTimeline ? 'chevron-down' : 'chevron-right'"
+              />
+            </button>
           </div>
         </div>
       </div>
 
       <div v-if="showExpandedTimeline" class="tree-children tree-children-expanded">
         <div v-for="(step, index) in steps" :key="step.id" class="tree-child"
-          :class="{ 'tree-child-last': index === steps.length - 1 && !hasReferences && !showDoneRow }">
+          :class="{ 'tree-child-last': index === steps.length - 1 && !showDoneRow && !showThinkingStep }">
           <div class="tree-branch" />
           <div class="tree-child-content">
             <div class="tool-event">
-              <div class="action-card">
-                <div class="action-header no-results">
+              <div
+                class="action-card"
+                :class="{ 'has-reference-trigger': step.canOpenReferences }"
+                :role="step.canOpenReferences ? 'button' : undefined"
+                :tabindex="step.canOpenReferences ? 0 : undefined"
+                @click="handleStepClick(step)"
+                @keydown.enter="handleStepClick(step)"
+                @keydown.space.prevent="handleStepClick(step)"
+              >
+                <div
+                  class="action-header"
+                  :class="{ 'no-results': !step.canOpenReferences }"
+                >
                   <div class="action-title">
                     <t-icon class="action-title-icon" :name="step.iconName" />
                     <span class="action-name" :class="{ 'is-running': step.pending }">{{ step.title }}</span>
@@ -125,19 +148,20 @@
           </div>
         </div>
 
-        <div v-if="hasReferences" class="tree-child rag-ref-step" :class="{ 'tree-child-last': !showDoneRow }">
+        <div v-if="showThinkingStep" class="tree-child rag-thinking-step" :class="{ 'tree-child-last': !showDoneRow }">
           <div class="tree-branch" />
           <div class="tree-child-content">
             <div class="tool-event">
-              <div class="action-card">
-                <div class="action-header" @click="toggleReferences">
+              <div class="action-card" :class="{ 'action-pending': thinkingPending }">
+                <div class="action-header" :class="{ 'no-results': !thinkingContent }" @click="toggleThinking">
                   <div class="action-title">
-                    <t-icon class="action-title-icon" name="file-search" />
-                    <span class="action-name">{{ referencesHeaderText }}</span>
+                    <t-icon class="action-title-icon" name="lightbulb" />
+                    <span class="action-name">{{ t('agent.think') }}</span>
                   </div>
                 </div>
-                <DocInfo v-show="refsExpanded" :session="session" :embedded-mode="embeddedMode" timeline-mode
-                  content-only />
+                <div v-if="thinkingContent && thinkingExpanded" class="thinking-detail-content">
+                  {{ thinkingContent }}
+                </div>
               </div>
             </div>
           </div>
@@ -164,18 +188,22 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import DocInfo from './docInfo.vue'
 import { getAgentToolIconName } from '@/utils/agent-tool-icons'
 import {
   getKnowledgeSearchSummaryHtml,
   getRagPipelineStepTitle,
+  getRetrievalSearchSource,
 } from '@/utils/agent-tool-display'
-import { RAG_PIPELINE_TOOL_NAMES } from '@/utils/rag-pipeline-history'
+import { getAttachmentParsingSummaryHtml } from '@/utils/attachmentParsingDisplay'
+import { RAG_TIMELINE_TOOL_NAMES } from '@/utils/rag-pipeline-history'
+import { useChatReferencesDrawer } from '@/composables/useChatReferencesDrawer'
+import { buildReferenceSections } from '@/utils/referenceSources'
 
 const props = defineProps<{
   session?: {
+    id?: string | number
     agentEventStream?: Array<Record<string, unknown>>
     content?: string
     knowledge_references?: Array<{ chunk_type?: string; knowledge_id?: string; knowledge_title?: string }>
@@ -185,8 +213,27 @@ const props = defineProps<{
 }>()
 
 const { t } = useI18n()
+const referencesDrawer = useChatReferencesDrawer()
 const userExpanded = ref(false)
-const refsExpanded = ref(false)
+const thinkingExpanded = ref(true)
+const rootElement = ref<HTMLElement | null>(null)
+
+const thinkingContent = computed(() => {
+  const stream = props.session?.agentEventStream
+  if (!Array.isArray(stream)) return ''
+  return stream
+    .filter((event) => event.type === 'thinking')
+    .map((event) => String(event.content || ''))
+    .join('')
+})
+
+const hasThinking = computed(() => thinkingContent.value.trim().length > 0)
+
+const hasThinkingEvent = computed(() => {
+  const stream = props.session?.agentEventStream
+  if (!Array.isArray(stream)) return false
+  return stream.some((event) => event.type === 'thinking')
+})
 
 const hasAnswer = computed(() => {
   const sessionContent = props.session?.content
@@ -205,6 +252,8 @@ const hasReferences = computed(
   () => (props.session?.knowledge_references?.length ?? 0) > 0,
 )
 
+const referenceSections = computed(() => buildReferenceSections(props.session?.knowledge_references))
+
 const steps = computed(() => {
   const stream = props.session?.agentEventStream
   if (!stream?.length) return []
@@ -214,7 +263,7 @@ const steps = computed(() => {
       return (
         event.type === 'tool_call' &&
         typeof event.tool_name === 'string' &&
-        RAG_PIPELINE_TOOL_NAMES.has(event.tool_name)
+        RAG_TIMELINE_TOOL_NAMES.has(event.tool_name)
       )
     })
     .map((event) => {
@@ -226,15 +275,22 @@ const steps = computed(() => {
           : null
 
       const isSearchTool = toolName === 'knowledge_search' || toolName === 'search_knowledge'
-      const summaryHtml =
-        !pending && isSearchTool && toolData
-          ? getKnowledgeSearchSummaryHtml(t, toolData)
-          : ''
+      const isAttachmentTool = toolName === 'attachment_parsing' || toolName === 'image_analysis'
+      const searchSource = isSearchTool
+        ? getRetrievalSearchSource(event.arguments, toolData)
+        : undefined
+      let summaryHtml = ''
+      if (!pending && isSearchTool && toolData) {
+        summaryHtml = getKnowledgeSearchSummaryHtml(t, toolData)
+      } else if (!pending && isAttachmentTool) {
+        summaryHtml = getAttachmentParsingSummaryHtml(t, event)
+      }
+      const canOpenReferences = !pending && isSearchTool && hasReferences.value
 
       return {
         id: String(event.tool_call_id || `${toolName}-${event.timestamp || 0}`),
         pending,
-        iconName: getAgentToolIconName(toolName),
+        iconName: getAgentToolIconName(toolName, searchSource),
         title: getRagPipelineStepTitle(t, {
           tool_name: toolName,
           pending,
@@ -243,6 +299,7 @@ const steps = computed(() => {
           tool_data: toolData,
         }),
         summaryHtml,
+        canOpenReferences,
       }
     })
 })
@@ -252,7 +309,9 @@ const allStepsDone = computed(
 )
 
 const showCollapsedRoot = computed(
-  () => (hasAnswer.value || Boolean(props.session?.is_completed)) && steps.value.length > 0,
+  () =>
+    (hasAnswer.value || Boolean(props.session?.is_completed)) &&
+    (steps.value.length > 0 || hasThinking.value),
 )
 
 const showExpandedTimeline = computed(() => {
@@ -260,38 +319,54 @@ const showExpandedTimeline = computed(() => {
   return userExpanded.value
 })
 
-const showDoneRow = computed(() => allStepsDone.value)
+const showDoneRow = computed(() => {
+  const turnDone = hasAnswer.value || Boolean(props.session?.is_completed)
+  if (!turnDone) return false
+  if (steps.value.length > 0 && !allStepsDone.value) return false
+  return true
+})
 
-const showPrePipelineWait = computed(
-  () => !hasAnswer.value && !props.session?.is_completed && steps.value.length === 0,
-)
-
-// Trailing dots on the timeline axis while pipeline steps are running or waiting for the answer.
-const showActivityIndicator = computed(
-  () => steps.value.length > 0 && !hasAnswer.value && !props.session?.is_completed,
-)
-
-const visible = computed(() => steps.value.length > 0 || showPrePipelineWait.value)
-
-const referenceDocCount = computed(() => {
-  const refs = props.session?.knowledge_references ?? []
-  const keys = new Set<string>()
-  for (const item of refs) {
-    if (item.chunk_type === 'web_search') continue
-    keys.add(item.knowledge_id || item.knowledge_title || 'doc')
+const showPrePipelineWait = computed(() => {
+  if (hasAnswer.value || props.session?.is_completed || steps.value.length > 0 || hasThinking.value) {
+    return false
   }
-  return keys.size
+  return true
 })
 
-const referenceWebCount = computed(() => {
-  const refs = props.session?.knowledge_references ?? []
-  return refs.filter((item) => item.chunk_type === 'web_search').length
+// Only show the thinking row once the backend actually streams thinking events.
+// Do not pre-empt during the model phase — that flashes "思考" even when thinking is disabled.
+const showThinkingStep = computed(() => hasThinkingEvent.value)
+
+const thinkingPending = computed(
+  () =>
+    showThinkingStep.value &&
+    !hasThinking.value &&
+    !hasAnswer.value &&
+    !props.session?.is_completed,
+)
+
+const isThinkingStreaming = computed(
+  () =>
+    showThinkingStep.value &&
+    thinkingExpanded.value &&
+    !hasAnswer.value &&
+    !props.session?.is_completed,
+)
+
+const visible = computed(
+  () => steps.value.length > 0 || showPrePipelineWait.value || showThinkingStep.value,
+)
+
+const collapsedStatusText = computed(() => {
+  if (steps.value.length === 0) {
+    return hasThinking.value ? t('agentStream.toolStatus.thinkingDone') : ''
+  }
+  return t('agentStream.ragPipeline.searchDone')
 })
 
-const referencesHeaderText = computed(() => {
-  const docCount = referenceDocCount.value
-  const webCount = referenceWebCount.value
-  const total = props.session?.knowledge_references?.length ?? 0
+const referenceSummaryText = computed(() => {
+  const docCount = referenceSections.value.find((section) => section.id === 'documents')?.items.length ?? 0
+  const webCount = referenceSections.value.find((section) => section.id === 'web')?.items.length ?? 0
 
   if (docCount > 0 && webCount > 0) {
     return t('chat.referencesDocAndWebCount', { docCount, webCount })
@@ -299,45 +374,69 @@ const referencesHeaderText = computed(() => {
   if (docCount > 0) {
     return t('chat.referencesDocCount', { count: docCount })
   }
-  return t('chat.referencesTitle', { count: total })
-})
-
-const collapsedSummaryHtml = computed(() => {
-  const parts: string[] = [t('agentStream.ragPipeline.searchDone')]
-  const docCount = referenceDocCount.value
-  const webCount = referenceWebCount.value
-
-  if (docCount > 0 && webCount > 0) {
-    parts.push(
-      t('agentStream.ragPipeline.referencedDocAndWeb', {
-        docCount: `<strong>${docCount}</strong>`,
-        webCount: `<strong>${webCount}</strong>`,
-      }),
-    )
-  } else if (docCount > 0) {
-    parts.push(
-      t('agentStream.ragPipeline.referencedDocs', {
-        count: `<strong>${docCount}</strong>`,
-      }),
-    )
-  } else if (webCount > 0) {
-    parts.push(
-      t('agentStream.ragPipeline.referencedWebs', {
-        count: `<strong>${webCount}</strong>`,
-      }),
-    )
+  if (webCount > 0) {
+    return t('chat.referencesWebCount', { count: webCount })
   }
 
-  return parts.join(t('agent.stepSummarySeparator'))
+  return ''
 })
+
+function toggleReferencesDrawer() {
+  const refs = props.session?.knowledge_references
+  if (!referencesDrawer || !refs?.length) return
+  referencesDrawer.toggle({
+    references: refs,
+    highlight: null,
+    messageId: props.session?.id ? String(props.session.id) : '',
+    sourceKey: `rag:${props.session?.id || refs.map((item) => item.knowledge_id || item.knowledge_title).join('|')}`,
+  })
+}
+
+function handleStepClick(step: { canOpenReferences?: boolean }) {
+  if (!step.canOpenReferences) return
+  toggleReferencesDrawer()
+}
 
 function toggleExpanded() {
   userExpanded.value = !userExpanded.value
 }
 
-function toggleReferences() {
-  refsExpanded.value = !refsExpanded.value
+function toggleThinking() {
+  if (!showThinkingStep.value || !thinkingContent.value) return
+  thinkingExpanded.value = !thinkingExpanded.value
 }
+
+function scrollThinkingDetailToBottom() {
+  nextTick(() => {
+    if (!rootElement.value) return
+    rootElement.value.querySelectorAll('.thinking-detail-content').forEach((el) => {
+      const htmlEl = el as HTMLElement
+      htmlEl.scrollTop = htmlEl.scrollHeight
+    })
+  })
+}
+
+watch(thinkingPending, (pending) => {
+  if (pending) {
+    thinkingExpanded.value = true
+  }
+})
+
+watch(hasAnswer, (answered) => {
+  if (answered && hasThinking.value) {
+    thinkingExpanded.value = false
+  }
+})
+
+watch(thinkingContent, () => {
+  if (!isThinkingStreaming.value) return
+  scrollThinkingDetailToBottom()
+})
+
+watch(thinkingExpanded, (expanded) => {
+  if (!expanded || !isThinkingStreaming.value) return
+  scrollThinkingDetailToBottom()
+})
 </script>
 
 <style scoped lang="less">
@@ -353,46 +452,73 @@ function toggleReferences() {
 }
 
 .tree-container {
-  margin: 0 0 16px;
+  margin: 0 0 8px;
   position: relative;
 }
 
 .tree-root {
-  cursor: pointer;
-  color: var(--td-text-color-secondary);
   margin-bottom: 0;
 
-  .action-header {
+  .tree-root-toolbar {
     display: flex;
     align-items: center;
-    min-height: 24px;
-    padding: 0;
-  }
-
-  .action-title {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    flex: 0 1 auto;
+    justify-content: flex-start;
+    width: 100%;
     min-width: 0;
   }
 
-  .tree-root-summary {
-    font-size: 14px;
-    line-height: 1.55;
+  .tree-root-expand {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    border-radius: 4px;
+    background: transparent;
     color: var(--td-text-color-secondary);
+    font-size: 14px;
+    line-height: 22px;
+    cursor: pointer;
+    flex: 0 1 auto;
+    min-width: 0;
+    max-width: 100%;
 
-    :deep(strong) {
-      font-weight: 600;
+    &:hover {
+      background: transparent;
       color: var(--td-text-color-primary);
     }
   }
 
-  .action-show-icon {
-    color: var(--td-text-color-placeholder);
-    font-size: 14px;
-    flex-shrink: 0;
+  .tree-root-status,
+  .tree-root-reference {
+    flex: 0 1 auto;
+    min-width: 0;
+    white-space: nowrap;
   }
+
+  .tree-root-reference {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+
+    &::before {
+      content: '';
+      width: 3px;
+      height: 3px;
+      border-radius: 50%;
+      background: currentColor;
+      opacity: 0.65;
+      flex-shrink: 0;
+    }
+  }
+
+  .tree-root-expand__icon {
+    flex-shrink: 0;
+    font-size: 14px;
+    color: currentColor;
+  }
+
 }
 
 .tree-children {
@@ -435,38 +561,23 @@ function toggleReferences() {
   }
 }
 
-.rag-ref-step {
-  .action-header {
-    width: 100%;
-    gap: 8px;
-  }
-
-  .action-title {
-    gap: 12px;
-  }
-
-  .action-show-icon {
-    color: var(--td-text-color-placeholder);
-    font-size: 14px;
-    flex-shrink: 0;
-  }
-
-  :deep(.refer-timeline.refer) {
-    margin-top: 4px;
-    padding-left: 0;
-  }
-
-  :deep(.refer-timeline .doc-group-chunks) {
-    padding-left: 18px;
-  }
-}
-
 .tool-event {
   .action-card {
     position: relative;
     background: transparent;
     border: 0;
     box-shadow: none;
+
+    &.has-reference-trigger {
+      cursor: pointer;
+
+      &:hover {
+        .action-name,
+        .results-summary-text {
+          color: var(--td-text-color-primary);
+        }
+      }
+    }
   }
 
   .action-header {
@@ -512,7 +623,7 @@ function toggleReferences() {
     font-weight: 400;
     color: var(--td-text-color-secondary);
     word-break: break-word;
-    max-width: min(680px, 100%);
+    max-width: min(820px, 100%);
   }
 }
 
@@ -528,6 +639,37 @@ function toggleReferences() {
     :deep(strong) {
       color: var(--td-text-color-secondary);
       font-weight: 500;
+    }
+  }
+}
+
+.rag-thinking-step {
+  .thinking-detail-content {
+    margin-top: 4px;
+    padding: 0;
+    font-size: var(--agent-step-summary-size);
+    font-weight: 400;
+    color: var(--td-text-color-placeholder);
+    line-height: 1.55;
+    white-space: pre-wrap;
+    word-break: break-word;
+    max-height: 200px;
+    overflow-y: auto;
+  }
+
+  .action-pending .action-name {
+    color: var(--td-text-color-secondary);
+  }
+}
+
+@media (max-width: 640px) {
+  .tree-root {
+    .tree-root-toolbar {
+      gap: 8px;
+    }
+
+    .tree-root-expand {
+      max-width: 100%;
     }
   }
 }

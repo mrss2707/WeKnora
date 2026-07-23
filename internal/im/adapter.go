@@ -11,13 +11,18 @@ import (
 type Platform string
 
 const (
-	PlatformWeCom      Platform = "wecom"
-	PlatformFeishu     Platform = "feishu"
+	PlatformWeCom  Platform = "wecom"
+	PlatformFeishu Platform = "feishu"
+	// PlatformLark is Feishu's international edition (open.larksuite.com).
+	// It shares the Feishu adapter; only the API host and tenant differ.
+	PlatformLark       Platform = "lark"
 	PlatformSlack      Platform = "slack"
 	PlatformTelegram   Platform = "telegram"
 	PlatformDingtalk   Platform = "dingtalk"
 	PlatformMattermost Platform = "mattermost"
 	PlatformWeChat     Platform = "wechat"
+	PlatformQQBot      Platform = "qqbot"
+	PlatformYunzhijia  Platform = "yunzhijia"
 )
 
 // SessionMode determines how IM sessions are resolved.
@@ -66,7 +71,7 @@ type IncomingMessage struct {
 	// ThreadID is the platform-specific thread identifier.
 	// - Slack: thread_ts (top-level message uses its own timestamp)
 	// - Mattermost: root_id, or post_id if top-level
-	// - Feishu: root_id, or message_id if top-level
+	// - Feishu/Lark: root_id, or message_id if top-level
 	// - Telegram: message_thread_id (Forum Topics only)
 	// Empty for platforms without thread support (WeCom, DingTalk).
 	// In thread mode, top-level messages use their own ID as ThreadID,
@@ -146,8 +151,12 @@ type StreamSender interface {
 	// Returns a platform-specific stream ID for subsequent chunk/end calls.
 	StartStream(ctx context.Context, incoming *IncomingMessage) (string, error)
 
-	// SendStreamChunk appends a content chunk to an ongoing stream.
-	SendStreamChunk(ctx context.Context, incoming *IncomingMessage, streamID string, content string) error
+	// UpdateStreamContent replaces the user-visible stream text with fullContent so far.
+	// Platforms with replace semantics (WeCom, Telegram edit, etc.) show this as the entire message.
+	UpdateStreamContent(ctx context.Context, incoming *IncomingMessage, streamID string, fullContent string) error
+
+	// FinalizeStream performs the final replace with answer-only content (thinking/tools stripped).
+	FinalizeStream(ctx context.Context, incoming *IncomingMessage, streamID string, finalContent string) error
 
 	// EndStream finalizes a streaming reply.
 	EndStream(ctx context.Context, incoming *IncomingMessage, streamID string) error

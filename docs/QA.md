@@ -205,12 +205,12 @@ Wiki 模式允许 Agent 根据原始文档自动生成并维护一套结构化�
 
 ## 11. 升级到 0.6.0 后，原本能做的操作变成了「权限不足」？
 
-0.6.0 引入了租户内 RBAC（角色矩阵 + 资源归属），所有写入接口都会按角色 + `creator_id` 鉴权。常见现象：
+0.6.0 引入了空间内 RBAC（角色矩阵 + 资源归属），所有写入接口都会按角色 + `creator_id` 鉴权。常见现象：
 
 - **看得到但点不动**：你大概率是该资源的 `Viewer` 或非创建者的 `Contributor`，UI 已经把写操作隐藏/置灰。检查 **用户菜单 → 当前工作区** 角色徽章。
-- **共享空间里的 KB / Agent**：他人共享给你的 KB 默认按 `Viewer` 看待；要写需要在源租户里被授予 `Admin+`。
-- **API Key 调用**：`X-API-Key` 合成虚拟用户固定为所属租户的 `Admin`（仅删除租户需 `Owner`），脚本一般无需迁移。
-- **跨租户超管**：要 `User.CanAccessAllTenants=true` 且 `enable_cross_tenant_access=true`，并通过 `X-Tenant-ID` 切租户。
+- **共享空间里的 KB / Agent**：他人共享给你的 KB 默认按 `Viewer` 看待；要写需要在源空间里被授予 `Admin+`。
+- **API Key 调用**：`X-API-Key` 合成虚拟用户固定为所属空间的 `Admin`（仅删除空间需 `Owner`），脚本一般无需迁移。
+- **跨空间超管**：要 `User.CanAccessAllTenants=true` 且 `enable_cross_tenant_access=true`，并通过 `X-Tenant-ID` 切空间。
 
 如需临时回退到「仅审计、不拦截」灰度窗口，可在配置里设置 `tenant.enable_rbac=false`（或环境变量 `WEKNORA_TENANT_ENABLE_RBAC=false`）。完整的角色矩阵和归属链请见 [`docs/RBAC说明.md`](./RBAC说明.md)。
 
@@ -219,7 +219,7 @@ Wiki 模式允许 Agent 根据原始文档自动生成并维护一套结构化�
 升级到 0.6.0 后系统会记住「最后活跃工作区」并在登录后自动恢复。若仍未恢复，通常是：
 
 1. 浏览器清理了 LocalStorage / 切换了浏览器；
-2. 你最后访问的那个工作区已经把你移除（`/leave` 或被管理员剔除）— 系统会回退到默认租户；
+2. 你最后访问的那个工作区已经把你移除（`/leave` 或被管理员剔除）— 系统会回退到默认空间；
 3. JWT 中携带了 `tenant_id` 但已无效 — 退出重登录即可。
 
 ## 13. 如何让多人协作时正确分配权限？
@@ -229,9 +229,9 @@ Wiki 模式允许 Agent 根据原始文档自动生成并维护一套结构化�
 - 只读用户 → `Viewer`
 - 普通成员（上传文档、维护「自己」的 KB / Agent）→ `Contributor`
 - 运维人员（管理共享模型、向量库、解析器等基础设施）→ `Admin`
-- 租户所有者（拥有删除租户权限，每租户唯一）→ `Owner`
+- 空间所有者（拥有删除空间权限，每空间唯一）→ `Owner`
 
-如果你希望开启「invite-only」（不允许自助注册到本租户），可在租户设置里打开邀请制，并通过「邀请」入口签发邀请码或链接。
+如果你希望开启「invite-only」（不允许自助注册到本空间），可在空间设置里打开邀请制，并通过「邀请」入口签发邀请码或链接。
 
 ## 14. 文档解析卡在「处理中」/ 解析追踪时间线打不开怎么办？
 
@@ -258,7 +258,7 @@ Wiki 模式允许 Agent 根据原始文档自动生成并维护一套结构化�
 
 ## 17. 系统管理员（System Admin）与平台设置怎么用？
 
-0.6.1 引入了系统管理员与统一平台设置面板（含平台审计日志），与租户内 RBAC 区分：系统管理员管理的是「平台级」配置，而非单个租户内的资源。首次启用需通过系统管理员 bootstrap 流程晋升首个管理员；撤销管理员权限有安全防护（避免误撤导致无人可管）。相关迁移为 `000053_system_admin_and_settings`。
+0.6.1 引入了系统管理员与统一平台设置面板（含平台审计日志），与空间内 RBAC 区分：系统管理员管理的是「平台级」配置，而非单个空间内的资源。首次启用需通过系统管理员 bootstrap 流程晋升首个管理员；撤销管理员权限有安全防护（避免误撤导致无人可管）。相关迁移为 `000053_system_admin_and_settings`。
 
 ## 18. 上传时如何自定义解析配置（process_config）？
 
@@ -283,6 +283,84 @@ Wiki 模式允许 Agent 根据原始文档自动生成并维护一套结构化�
 ## 20. pgvector 检索变慢或刚升级后需要做什么？
 
 0.6.2 新增迁移 `000059_embeddings_hnsw_1024`，为 **1024 维** embedding（如 bge-m3）在 PostgreSQL pgvector 上创建 HNSW 索引。服务启动会自动执行迁移；若你使用其他维度，该索引可能不适用，需按自身 embedding 维度另行调优。升级后首次大批量入库期间索引构建可能占用额外 I/O，属正常现象。
+
+## 21. 如何在网站嵌入 WeKnora 智能体（Embed Widget）？
+
+0.6.3 起支持**嵌入渠道**：在 **集成中心** 或 Agent 编辑器中创建 embed 渠道，绑定自定义 Agent，获取渠道 ID 与发布 Token（`em_…`），将 `weknora-widget.js` 嵌入外部网页即可提供访客问答。
+
+- **域名白名单**：必须在渠道配置中填写允许加载 Widget 的 Origin，否则 exchange 会返回 403。
+- **安全模式（推荐）**：生产环境不要把 `em_…` 写在页面 HTML 里；由业务后端提供 `token-endpoint`，用发布 Token 调 `POST /api/v1/embed/:id/exchange` 换取短时令牌 `ems_…`（约 30 分钟有效）。详见 [`docs/embed-secure-mode.md`](./embed-secure-mode.md) 与 [`docs/embed-subdomain.md`](./embed-subdomain.md)。
+- **限流**：渠道可配置每分钟 / 每日请求上限；超限返回 429。
+- **子域部署**：若 embed 页面与 API 不同子域，参考 `docs/embed-subdomain.md` 配置 CORS 与 Nginx。
+
+## 22. 文档如何设置多个标签？
+
+0.6.3 将文档标签从单选升级为**多标签**（迁移 `000063_knowledge_multi_tags`）。在知识库列表可为文档打多个标签，侧边栏支持按标签筛选；**标签管理**抽屉可批量维护标签。API 上传 / 更新知识时传 `tag_ids` 数组（取代旧的单 `tag_id`）。
+
+## 23. 如何批量重新解析文档？
+
+在知识库文档列表框选多篇文档后，使用批量操作栏的 **重新解析**；也可调用 `POST /knowledge/batch-reparse`，body 可含 `ids` 与可选 `process_config`。任务异步入队，UI 会在入队后刷新状态。单篇仍可用 `POST /knowledge/:id/reparse`。
+
+## 24. RSS 数据源如何配置？
+
+0.6.3 新增 **RSS / Atom** 连接器。在知识库 **设置 → 数据源** 中选择 RSS，填写 Feed URL 与同步策略即可全量 / 增量拉取正文入库。若部分条目失败，同步日志会展示 partial failure 详情；编辑数据源保存配置**不会**自动触发同步，需手动点同步。
+
+## 25. MCP 远程服务如何配置 OAuth2？
+
+0.6.3 支持 MCP 服务的 **OAuth2 授权**（迁移 `000062_mcp_oauth`）。在 **设置 → MCP** 添加 HTTP 类型服务并选择 OAuth2，按向导完成授权回调；另支持自定义 HTTP Header 与 JSON **代码导入**快速粘贴配置。授权 Token 加密存储，过期后需在 UI 重新授权。
+
+## 26. Embedding 维度如何覆盖？
+
+在 **设置 → 模型** 编辑 Embedding 模型时可填写 **dimensions** 覆盖值（如 1024、1536）。0.6.3 修复了部分提供商请求未携带 `dimensions` 的问题（#1654）。若向量库索引维度与模型不一致，检索可能异常，请保持 KB 绑定向量库与模型维度一致。
+
+## 27. Agent 提示「模型未就绪」无法对话？
+
+0.6.3 在 Agent 选择器引入**模型就绪校验**：绑定的 LLM / Embedding / Rerank / VLM 缺失或配置无效时会阻断对话并给出修复指引。可在模型卡片打开 **调试抽屉** 先测试连通性；确认 KB 与 Agent 引用的模型均存在且可用。
+
+## 28. 如何创建并限制权限范围 API Key？
+
+0.7.0 引入**权限范围 API Key 与 Principal 模型**（迁移 `000064_principal_model`、`000065_tenant_api_keys`）。API Key 不再等同于某个人类用户，而是独立的 Principal，携带显式角色与能力（capability）授权：
+
+- 在 **设置 → API 集成**（Owner 可见）中创建 Key，可勾选能力（如 `manage_kbs` 覆盖 KB 全生命周期、`manage_storage_backends` 等），并可限制到指定知识库。
+- Key 的 `last_used_at` 按节流更新，避免高频写库。
+- 路由级守卫会拒绝越权访问；管理类接口对 API Key Principal 默认拒绝，请为集成使用具备对应能力的 Key，而非全权 Key。
+- MCP OAuth 与嵌入会话按 Principal 隔离，不同集成之间互不串号。
+
+### 如何用一个 API Key 自动化管理多个空间？
+
+SystemAdmin 可在 **系统管理 → 平台 API Key** 创建 `scope_type=platform` 的 Key。平台 Key 不绑定单一空间：调用普通空间 API 时必须携带 `X-Tenant-ID`，并继续受原有 capability 和知识库范围守卫约束；调用开放的系统控制面接口则需要对应的 `system_*` capability。平台 Key 不支持 `full_access`，也不能创建、轮换或吊销其他平台 Key。
+
+## 29. 一个空间如何绑定多个对象存储实例？
+
+0.7.0 支持**多实例存储后端**（迁移 `000068_storage_backends`）。一个空间可注册多个存储实例（`local` / `minio` / `cos` / `tos` / `s3` / `oss` / `ks3` / `obs`），不同知识库绑定到不同实例，空间维度还有一个默认实例：
+
+- 在 **设置 → 存储后端** 创建/测试/设为默认（需 Admin+；API Key 需 `manage_storage_backends` 能力）。
+- 未显式绑定的新知识库使用空间默认实例；响应中的 `access_key_id` / `secret_access_key` 会被掩码，更新时提交掩码占位符不会覆盖库中真实凭据。
+- 若创建知识库时提示存储引擎不可用，请确认目标 provider 在 `STORAGE_ALLOW_LIST` 允许范围内。详见 [`docs/api/storage-backend.md`](./api/storage-backend.md)。
+
+## 30. 后台解析/入库任务积压或需要排查失败任务怎么办？
+
+0.7.0 新增系统管理员的**运行时任务队列面板**与 **Worker 池治理**。文档处理从单一聚合池改为分阶段独立池（core / 后处理 / enrichment / maintenance）+ 弹性共享池，Wiki 独立治理：
+
+- 在 **系统设置 → 运行时队列** 查看队列深度、按模型并发统计、失败任务详情，并可手动重试。
+- 可通过 `WEKNORA_ASYNQ_*_CONCURRENCY` 与 `asynq.*_concurrency` 系统设置调整各池并发（需重启服务）；`model.max_concurrency` 用于约束单模型后台并发。
+- 详见 [`docs/worker-pool-governance.md`](./worker-pool-governance.md)。注意：Worker 并发只是调度预算，仍受模型配额、DocReader 容量、向量库与数据库连接数限制。
+
+## 31. 对话中如何临时上传图片/文档做一次性问答？
+
+0.7.0 支持**会话级临时附件**（迁移 `000070_temporary_documents`）。在对话输入区上传图片或文档，系统异步解析后仅用于当前会话的问答，不会写入知识库。图片与附件共享一个合并数量上限；附件内容会在多轮对话中保留。
+
+## 32. 如何接入 QQBot / Lark（飞书国际版）？
+
+0.7.0 新增 **QQBot** 平台集成，并支持飞书国际版 **Lark**（区域感知路由）。在 **设置 → IM 集成** 添加对应渠道并填写凭据即可；飞书回复通过 reply-message 接口发送，回复会落在原消息线程内。
+
+## 33. 如何为 Redis 启用 TLS？
+
+0.7.0 支持 Redis 的 **TLS 连接**（#1930）。按环境变量启用 TLS 后，启动日志会打印 TLS 配置状态便于确认。若连接失败，请核对证书/CA 配置与 Redis 服务端是否要求 TLS。
+
+## 34. 升级到 0.7.0 后 `weknora` CLI 命令找不到或行为变化？
+
+0.7.0 随附 **CLI v0.10**（Agent 优先，破坏性变更）：新增 `model` / `message` / `config` / `skills` 命令组，`doc reparse` / `doc update`，`kb config` / `kb config set`；`session continue` 更名为 `session resume`，新增 `session tool-approval`；提供 agent-first 的 chat 与 `session ask` 输出模式，并强化了 SSE 可靠性与类型化错误。详见 [`cli/CHANGELOG.md`](../cli/CHANGELOG.md)。
 
 ## P.S.
 如果以上方式未解决问题，请在issue中描述您的问题，并提供必要的日志信息辅助我们进行问题排查

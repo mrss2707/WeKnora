@@ -43,20 +43,20 @@ Do not use when:
 - Can check document processing status (parse_status)
 
 ## IDs
-- knowledge_ids: regular documents knowledges
-- faq_ids: individual FAQ entries. Returns the standard question and answers, not the container title.`,
+- knowledge_ids: regular documents, using the short dN IDs from retrieval results
+- faq_ids: individual FAQ entries, using the short cN chunk IDs. Returns the standard question and answers, not the container title.`,
 	schema: json.RawMessage(`{
   "type": "object",
   "properties": {
     "knowledge_ids": {
       "type": "array",
       "items": { "type": "string" },
-      "description": "Document/knowledge IDs for regular documents"
+      "description": "Short dN document IDs for regular documents"
     },
     "faq_ids": {
       "type": "array",
       "items": { "type": "string" },
-      "description": "FAQ entry IDs (= chunk_id from grep_chunks). Use instead of knowledge_ids for a single FAQ Q&A."
+      "description": "Short cN FAQ chunk IDs from retrieval results. Use instead of knowledge_ids for a single FAQ Q&A."
     }
   }
 }`),
@@ -144,6 +144,17 @@ func (t *GetDocumentInfoTool) Execute(ctx context.Context, args json.RawMessage)
 				mu.Unlock()
 				return
 			}
+			allowed, scopeErr := searchTargetsAllowKnowledgeID(ctx, t.searchTargets, chunk.KnowledgeID, chunk.KnowledgeBaseID, t.knowledgeService)
+			if scopeErr != nil || !allowed {
+				mu.Lock()
+				if scopeErr != nil {
+					results["faq:"+id] = &docInfo{err: fmt.Errorf("failed to validate FAQ scope: %v", scopeErr)}
+				} else {
+					results["faq:"+id] = &docInfo{err: fmt.Errorf("FAQ entry %s is not within the current @mention scope", id)}
+				}
+				mu.Unlock()
+				return
+			}
 			var meta *types.FAQChunkMetadata
 			if chunk.ChunkType == types.ChunkTypeFAQ {
 				meta, _ = chunk.FAQMetadata()
@@ -175,6 +186,17 @@ func (t *GetDocumentInfoTool) Execute(ctx context.Context, args json.RawMessage)
 				mu.Lock()
 				results[id] = &docInfo{
 					err: fmt.Errorf("knowledge base %s is not accessible", knowledge.KnowledgeBaseID),
+				}
+				mu.Unlock()
+				return
+			}
+			allowed, scopeErr := searchTargetsAllowKnowledgeID(ctx, t.searchTargets, knowledge.ID, knowledge.KnowledgeBaseID, t.knowledgeService)
+			if scopeErr != nil || !allowed {
+				mu.Lock()
+				if scopeErr != nil {
+					results[id] = &docInfo{err: fmt.Errorf("failed to validate document scope: %v", scopeErr)}
+				} else {
+					results[id] = &docInfo{err: fmt.Errorf("document %s is not within the current @mention scope", knowledge.ID)}
 				}
 				mu.Unlock()
 				return
