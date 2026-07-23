@@ -111,3 +111,47 @@ extract:
 tenant:
   # Enable cross-tenant access (can be enabled for intranet environments)
   enable_cross_tenant_access: false
+
+# ---------------------------------------------------------------------------
+# Memory V2 configuration
+# ---------------------------------------------------------------------------
+# Uncomment fields to override defaults.
+# memory_v2:
+#   enabled: true                           # Enable Memory V2 (default: true)
+#   max_search_results: 20                  # Max results per hybrid search
+#   min_score_threshold: 0.4                # Minimum similarity score (0..1)
+#   hnsw_m: 16                              # HNSW index M parameter (pgvector)
+#   hnsw_ef_construction: 200               # HNSW ef_construction (pgvector)
+#   hnsw_ef_search: 100                     # HNSW ef_search (pgvector)
+#   semantic_dedup:
+#     exact_threshold: 0.97                 # Fingerprint exact-match threshold
+#     near_threshold: 0.93                  # Near-duplicate cosine threshold
+#     max_merges: 3                         # Max merges per save
+#     merge_max_chars: 2000                 # Max merged content length
+#   recency_boost:
+#     enabled: true                         # Boost recent memories in scoring
+#     short_term_multiplier: 1.15           # Multiplier for memories < window
+#     short_term_window: "1h"               # Short-term window duration
+#     long_term_factor: 0.05                # Long-term decay factor
+#     long_term_half_life: 30               # Half-life in days
+#   token_budget:
+#     max_total_tokens: 2000                # Max tokens in retrieve context
+#     truncate_threshold: 1500              # Truncate mode threshold
+#     summary_threshold: 2500               # Summary mode threshold
+#     max_per_memory: 300                   # Max tokens per memory
+#   dreamer:
+#     enabled: true                         # Enable dreamer consolidation
+#     interval: "1h"                        # Dreamer run interval
+#     model_id: ""                          # LLM model for dreamer (empty = auto)
+#     max_actions: 5                        # Max actions per dreamer pass
+#     token_budget: 4000                    # Token budget for dreamer prompt
+#     dry_run: false                        # Dry-run mode (log only)
+#   cache_warmer:
+#     enabled: false                        # Enable query cache warming
+#     top_queries_n: 100                    # Top N queries to warm
+#     refresh_interval: "30m"               # Cache refresh interval
+#   lint_on_write:
+#     enabled: true                         # Enable lint checks on save
+#     stale_threshold_days: 90              # Stale memory threshold
+#     contradiction_threshold: 0.85         # Contradiction cosine threshold
+#     near_duplicate_threshold: 0.90        # Near-duplicate cosine threshold

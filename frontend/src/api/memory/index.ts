@@ -42,6 +42,7 @@ export interface AgentMemory {
 
 export interface CreateMemoryRequest {
   kb_id: string
+  user_id?: string
   content: string
   memory_type?: string
   importance?: number

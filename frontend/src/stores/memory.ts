@@ -7,6 +7,7 @@ import {
   triggerDream,
   updateMemory,
   deleteMemory,
+  createMemory,
 } from '@/api/memory/index'
 import type {
   AgentMemory,
@@ -18,6 +19,7 @@ import type {
   DreamResult,
   TimelineEvent,
   TimelineEventType,
+  SaveMemoryResult,
 } from '@/api/memory/index'
 
 export interface MemoryFilterState {
@@ -210,6 +212,25 @@ export const useMemoryStore = defineStore('memory', {
       } finally {
         this.dreamerLoading = false
       }
+    },
+
+    async createMemory(
+      kbId: string,
+      content: string,
+      opts: { userId?: string; memoryType?: string; importance?: number; tags?: string[]; sessionId?: string } = {},
+    ) {
+      const result = await createMemory({
+        kb_id: kbId,
+        user_id: opts.userId,
+        content,
+        memory_type: opts.memoryType,
+        importance: opts.importance,
+        tags: opts.tags,
+        session_id: opts.sessionId,
+      })
+      // Reload the memory list to reflect the new memory.
+      await this.loadMemories(kbId)
+      return result.data?.data as SaveMemoryResult
     },
 
     // -----------------------------------------------------------------------
