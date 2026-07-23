@@ -463,7 +463,7 @@ func TestMemoryV2Integration_HealthCheck(t *testing.T) {
 		svc := newIntegrationService(repo)
 
 		// Health check on an empty KB should return no critical issues
-		issues, err := svc.AssessHealth(ctx, "tenant-health-empty-1")
+		issues, err := svc.AssessHealth(ctx, "tenant-health-empty-1", "")
 		require.NoError(t, err, "AssessHealth should not error on empty KB")
 		// Empty KB returns nil issues (health checker returns nil when no memories found)
 		if issues != nil {
@@ -489,7 +489,7 @@ func TestMemoryV2Integration_HealthCheck(t *testing.T) {
 		require.NoError(t, err)
 
 		svc := newIntegrationService(repo)
-		issues, err := svc.AssessHealth(ctx, "tenant-health-full-1")
+		issues, err := svc.AssessHealth(ctx, "tenant-health-full-1", "")
 		require.NoError(t, err)
 
 		// A healthy memory with tags and hub score should not trigger orphan issues
@@ -519,7 +519,7 @@ func TestMemoryV2Integration_HealthCheck(t *testing.T) {
 		require.NoError(t, err)
 
 		svc := newIntegrationService(repo)
-		issues, err := svc.AssessHealth(ctx, "tenant-health-orphan-1")
+		issues, err := svc.AssessHealth(ctx, "tenant-health-orphan-1", "")
 		require.NoError(t, err)
 		require.NotNil(t, issues)
 
@@ -554,7 +554,7 @@ func TestMemoryV2Integration_HealthCheck(t *testing.T) {
 		}
 
 		svc := newIntegrationService(repo)
-		issues, err := svc.AssessHealth(ctx, "tenant-health-crit-1")
+		issues, err := svc.AssessHealth(ctx, "tenant-health-crit-1", "")
 		require.NoError(t, err)
 
 		// Health report should not contain critical issues for a well-formed KB

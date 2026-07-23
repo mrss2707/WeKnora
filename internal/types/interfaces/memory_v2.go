@@ -63,7 +63,7 @@ type MemoryServiceV2 interface {
 	ConsolidateDream(ctx context.Context, tenantID string) (*types.DreamResult, error)
 
 	// AssessHealth runs all 6 health checks.
-	AssessHealth(ctx context.Context, tenantID string) ([]*types.MemoryHealthIssue, error)
+	AssessHealth(ctx context.Context, tenantID, kbID string) ([]*types.MemoryHealthIssue, error)
 
 	// StartWorkers launches background workers.
 	StartWorkers(ctx context.Context)

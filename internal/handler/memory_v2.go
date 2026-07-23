@@ -514,7 +514,7 @@ func (h *MemoryV2Handler) GetHealthReport(c *gin.Context) {
 		return
 	}
 
-	issues, err := h.memorySvc.AssessHealth(ctx, tenantID)
+	issues, err := h.memorySvc.AssessHealth(ctx, tenantID, strings.TrimSpace(c.Query("kb_id")))
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{
 			"tenant_id": tenantID,

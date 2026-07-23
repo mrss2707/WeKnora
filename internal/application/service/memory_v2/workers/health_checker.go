@@ -53,8 +53,8 @@ func (h *HealthChecker) Run(ctx context.Context) {
 
 // AssessHealth runs all 6 health checks and returns the issues.
 // This is the public entry point called from the HTTP handler.
-func (h *HealthChecker) AssessHealth(ctx context.Context, tenantID string) (*types.HealthReport, error) {
-	issues := h.runAllChecks(ctx, tenantID)
+func (h *HealthChecker) AssessHealth(ctx context.Context, tenantID, kbID string) (*types.HealthReport, error) {
+	issues := h.runAllChecks(ctx, tenantID, kbID)
 
 	report := &types.HealthReport{
 		TenantID:    tenantID,
@@ -75,7 +75,7 @@ func (h *HealthChecker) AssessHealth(ctx context.Context, tenantID string) (*typ
 func (h *HealthChecker) runChecks(ctx context.Context) {
 	logger.Infof(ctx, "health-checker: starting daily health check")
 
-	issues := h.runAllChecks(ctx, "")
+	issues := h.runAllChecks(ctx, "", "")
 
 	total := len(issues)
 	bySeverity := make(map[string]int)
@@ -95,12 +95,13 @@ func (h *HealthChecker) runChecks(ctx context.Context) {
 }
 
 // runAllChecks executes all 6 health check rules.
-func (h *HealthChecker) runAllChecks(ctx context.Context, tenantID string) []*types.MemoryHealthIssue {
+func (h *HealthChecker) runAllChecks(ctx context.Context, tenantID, kbID string) []*types.MemoryHealthIssue {
 	var allIssues []*types.MemoryHealthIssue
 
 	// Fetch memories
 	filter := &types.MemoryFilter{
 		TenantID: tenantID,
+		KbID:     kbID,
 		Limit:    1000,
 	}
 	results, _, err := h.repo.Search(ctx, filter)

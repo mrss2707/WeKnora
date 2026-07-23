@@ -171,7 +171,7 @@ func TestHealthChecker_Orphans_Detected(t *testing.T) {
 	}
 	hc := newTestHealthChecker(repo)
 
-	report, err := hc.AssessHealth(context.Background(), "tenant-1")
+	report, err := hc.AssessHealth(context.Background(), "tenant-1", "")
 	require.NoError(t, err)
 	require.Len(t, report.Issues, 1)
 	assert.Equal(t, "orphan", report.Issues[0].Type)
@@ -191,7 +191,7 @@ func TestHealthChecker_Orphans_WithTagsNotOrphan(t *testing.T) {
 	}
 	hc := newTestHealthChecker(repo)
 
-	report, err := hc.AssessHealth(context.Background(), "tenant-1")
+	report, err := hc.AssessHealth(context.Background(), "tenant-1", "")
 	require.NoError(t, err)
 	assert.Empty(t, report.Issues, "memory with tags should not be an orphan")
 }
@@ -206,7 +206,7 @@ func TestHealthChecker_Orphans_WithHubScoreNotOrphan(t *testing.T) {
 	}
 	hc := newTestHealthChecker(repo)
 
-	report, err := hc.AssessHealth(context.Background(), "tenant-1")
+	report, err := hc.AssessHealth(context.Background(), "tenant-1", "")
 	require.NoError(t, err)
 	assert.Empty(t, report.Issues, "memory with hub_score != 0 should not be an orphan")
 }
@@ -222,7 +222,7 @@ func TestHealthChecker_Orphans_MixedMemories(t *testing.T) {
 	}
 	hc := newTestHealthChecker(repo)
 
-	report, err := hc.AssessHealth(context.Background(), "tenant-1")
+	report, err := hc.AssessHealth(context.Background(), "tenant-1", "")
 	require.NoError(t, err)
 	require.Len(t, report.Issues, 1)
 	assert.Equal(t, "orphan-1", report.Issues[0].MemoryID, "only the orphan should be flagged")
@@ -247,7 +247,7 @@ func TestHealthChecker_StaleFacts_Detected(t *testing.T) {
 	}
 	hc := newTestHealthChecker(repo)
 
-	report, err := hc.AssessHealth(context.Background(), "tenant-1")
+	report, err := hc.AssessHealth(context.Background(), "tenant-1", "")
 	require.NoError(t, err)
 	require.Len(t, report.Issues, 1)
 	assert.Equal(t, "stale", report.Issues[0].Type)
@@ -270,7 +270,7 @@ func TestHealthChecker_StaleFacts_RecentMemoryNotStale(t *testing.T) {
 	}
 	hc := newTestHealthChecker(repo)
 
-	report, err := hc.AssessHealth(context.Background(), "tenant-1")
+	report, err := hc.AssessHealth(context.Background(), "tenant-1", "")
 	require.NoError(t, err)
 	assert.Empty(t, report.Issues, "recent memory should not be stale")
 }
@@ -289,7 +289,7 @@ func TestHealthChecker_StaleFacts_HighImportanceNotStale(t *testing.T) {
 	}
 	hc := newTestHealthChecker(repo)
 
-	report, err := hc.AssessHealth(context.Background(), "tenant-1")
+	report, err := hc.AssessHealth(context.Background(), "tenant-1", "")
 	require.NoError(t, err)
 	assert.Empty(t, report.Issues, "old memory with high importance should not be stale")
 }
@@ -311,7 +311,7 @@ func TestHealthChecker_StaleFacts_BoundaryExactly180Days(t *testing.T) {
 	}
 	hc := newTestHealthChecker(repo)
 
-	report, err := hc.AssessHealth(context.Background(), "tenant-1")
+	report, err := hc.AssessHealth(context.Background(), "tenant-1", "")
 	require.NoError(t, err)
 	assert.Empty(t, report.Issues, "exactly 180 days should NOT trigger stale (strictly >)")
 }
@@ -330,7 +330,7 @@ func TestHealthChecker_StaleFacts_AllowPruningSuggestion(t *testing.T) {
 	}
 	hc := newTestHealthChecker(repo)
 
-	report, err := hc.AssessHealth(context.Background(), "tenant-1")
+	report, err := hc.AssessHealth(context.Background(), "tenant-1", "")
 	require.NoError(t, err)
 	require.Len(t, report.Issues, 1)
 	assert.Contains(t, report.Issues[0].Description, "300 days")
@@ -356,7 +356,7 @@ func TestHealthChecker_Contradictions_Detected(t *testing.T) {
 	}
 	hc := newTestHealthChecker(repo)
 
-	report, err := hc.AssessHealth(context.Background(), "tenant-1")
+	report, err := hc.AssessHealth(context.Background(), "tenant-1", "")
 	require.NoError(t, err)
 	require.Len(t, report.Issues, 1)
 	assert.Equal(t, "contradiction", report.Issues[0].Type)
@@ -377,7 +377,7 @@ func TestHealthChecker_Contradictions_BothSameNegationNoIssue(t *testing.T) {
 	}
 	hc := newTestHealthChecker(repo)
 
-	report, err := hc.AssessHealth(context.Background(), "tenant-1")
+	report, err := hc.AssessHealth(context.Background(), "tenant-1", "")
 	require.NoError(t, err)
 	assert.Empty(t, report.Issues, "both memories with negation should not contradict")
 }
@@ -393,7 +393,7 @@ func TestHealthChecker_Contradictions_NeitherHasNegation(t *testing.T) {
 	}
 	hc := newTestHealthChecker(repo)
 
-	report, err := hc.AssessHealth(context.Background(), "tenant-1")
+	report, err := hc.AssessHealth(context.Background(), "tenant-1", "")
 	require.NoError(t, err)
 	assert.Empty(t, report.Issues, "no negation in either memory should not trigger contradiction")
 }
@@ -410,7 +410,7 @@ func TestHealthChecker_Contradictions_DifferentTenantsNotCompared(t *testing.T) 
 	}
 	hc := newTestHealthChecker(repo)
 
-	report, err := hc.AssessHealth(context.Background(), "tenant-1")
+	report, err := hc.AssessHealth(context.Background(), "tenant-1", "")
 	require.NoError(t, err)
 	// The contradiction check filters by TenantID before comparing negations.
 	// mem-a(tenant-1) vs mem-b(tenant-2): a.TenantID != b.TenantID → continue
@@ -433,7 +433,7 @@ func TestHealthChecker_Duplications_Detected(t *testing.T) {
 	}
 	hc := newTestHealthChecker(repo)
 
-	report, err := hc.AssessHealth(context.Background(), "tenant-1")
+	report, err := hc.AssessHealth(context.Background(), "tenant-1", "")
 	require.NoError(t, err)
 	require.Len(t, report.Issues, 1)
 	assert.Equal(t, "duplication", report.Issues[0].Type)
@@ -454,7 +454,7 @@ func TestHealthChecker_Duplications_DifferentPrefixNotDuplicate(t *testing.T) {
 	}
 	hc := newTestHealthChecker(repo)
 
-	report, err := hc.AssessHealth(context.Background(), "tenant-1")
+	report, err := hc.AssessHealth(context.Background(), "tenant-1", "")
 	require.NoError(t, err)
 	assert.Empty(t, report.Issues, "different first 20 chars should not be duplicates")
 }
@@ -470,7 +470,7 @@ func TestHealthChecker_Duplications_ShortContentSkipped(t *testing.T) {
 	}
 	hc := newTestHealthChecker(repo)
 
-	report, err := hc.AssessHealth(context.Background(), "tenant-1")
+	report, err := hc.AssessHealth(context.Background(), "tenant-1", "")
 	require.NoError(t, err)
 	assert.Empty(t, report.Issues, "short content (<20 chars) should be skipped")
 }
@@ -487,7 +487,7 @@ func TestHealthChecker_Duplications_ThreeWithSamePrefix(t *testing.T) {
 	}
 	hc := newTestHealthChecker(repo)
 
-	report, err := hc.AssessHealth(context.Background(), "tenant-1")
+	report, err := hc.AssessHealth(context.Background(), "tenant-1", "")
 	require.NoError(t, err)
 	// mem-a is the first, so mem-b and mem-c are flagged as duplicates of mem-a
 	require.Len(t, report.Issues, 2)
@@ -521,7 +521,7 @@ func TestHealthChecker_GraphFragmentation_HighRatioDetected(t *testing.T) {
 	}
 	hc := newTestHealthChecker(repo)
 
-	report, err := hc.AssessHealth(context.Background(), "tenant-1")
+	report, err := hc.AssessHealth(context.Background(), "tenant-1", "")
 	require.NoError(t, err)
 	// Only graph_fragmentation should fire (66.6% > 30%)
 	require.Len(t, report.Issues, 1)
@@ -549,7 +549,7 @@ func TestHealthChecker_GraphFragmentation_BelowThresholdNoIssue(t *testing.T) {
 	}
 	hc := newTestHealthChecker(repo)
 
-	report, err := hc.AssessHealth(context.Background(), "tenant-1")
+	report, err := hc.AssessHealth(context.Background(), "tenant-1", "")
 	require.NoError(t, err)
 	assert.Empty(t, report.Issues, "25% fragmentation should not trigger")
 }
@@ -573,7 +573,7 @@ func TestHealthChecker_GraphFragmentation_Exactly30Percent(t *testing.T) {
 	}
 	hc := newTestHealthChecker(repo)
 
-	report, err := hc.AssessHealth(context.Background(), "tenant-1")
+	report, err := hc.AssessHealth(context.Background(), "tenant-1", "")
 	require.NoError(t, err)
 	assert.Empty(t, report.Issues, "exactly 30% should NOT trigger (strictly >)")
 }
@@ -590,7 +590,7 @@ func TestHealthChecker_GraphFragmentation_ImportanceBoundary(t *testing.T) {
 	}
 	hc := newTestHealthChecker(repo)
 
-	report, err := hc.AssessHealth(context.Background(), "tenant-1")
+	report, err := hc.AssessHealth(context.Background(), "tenant-1", "")
 	require.NoError(t, err)
 	assert.Empty(t, report.Issues, "importance=2 with hub_score=0 should not be isolated")
 }
@@ -615,7 +615,7 @@ func TestHealthChecker_VerdictConsistency_WipOldDetected(t *testing.T) {
 	}
 	hc := newTestHealthChecker(repo)
 
-	report, err := hc.AssessHealth(context.Background(), "tenant-1")
+	report, err := hc.AssessHealth(context.Background(), "tenant-1", "")
 	require.NoError(t, err)
 	require.Len(t, report.Issues, 1)
 	assert.Equal(t, "verdict_consistency", report.Issues[0].Type)
@@ -639,7 +639,7 @@ func TestHealthChecker_VerdictConsistency_WipRecentNoIssue(t *testing.T) {
 	}
 	hc := newTestHealthChecker(repo)
 
-	report, err := hc.AssessHealth(context.Background(), "tenant-1")
+	report, err := hc.AssessHealth(context.Background(), "tenant-1", "")
 	require.NoError(t, err)
 	assert.Empty(t, report.Issues, "recently updated WIP should not be flagged")
 }
@@ -658,7 +658,7 @@ func TestHealthChecker_VerdictConsistency_NonWipNotFlagged(t *testing.T) {
 	}
 	hc := newTestHealthChecker(repo)
 
-	report, err := hc.AssessHealth(context.Background(), "tenant-1")
+	report, err := hc.AssessHealth(context.Background(), "tenant-1", "")
 	require.NoError(t, err)
 	assert.Empty(t, report.Issues, "non-WIP memories should not be flagged")
 }
@@ -678,7 +678,7 @@ func TestHealthChecker_VerdictConsistency_Exactly30Days(t *testing.T) {
 	}
 	hc := newTestHealthChecker(repo)
 
-	report, err := hc.AssessHealth(context.Background(), "tenant-1")
+	report, err := hc.AssessHealth(context.Background(), "tenant-1", "")
 	require.NoError(t, err)
 	assert.Empty(t, report.Issues, "exactly 30 days should NOT trigger (strictly >)")
 }
@@ -703,7 +703,7 @@ func TestHealthChecker_AssessHealth_ReportStructure(t *testing.T) {
 	}
 	hc := newTestHealthChecker(repo)
 
-	report, err := hc.AssessHealth(context.Background(), "tenant-1")
+	report, err := hc.AssessHealth(context.Background(), "tenant-1", "")
 	require.NoError(t, err)
 
 	assert.Equal(t, "tenant-1", report.TenantID)
@@ -743,7 +743,7 @@ func TestHealthChecker_AssessHealth_ReportMultipleSeverities(t *testing.T) {
 	}
 	hc := newTestHealthChecker(repo)
 
-	report, err := hc.AssessHealth(context.Background(), "tenant-1")
+	report, err := hc.AssessHealth(context.Background(), "tenant-1", "")
 	require.NoError(t, err)
 
 	assert.Equal(t, 3, report.TotalIssues)
@@ -772,7 +772,7 @@ func TestHealthChecker_AssessHealth_EmptyResults(t *testing.T) {
 	}
 	hc := newTestHealthChecker(repo)
 
-	report, err := hc.AssessHealth(context.Background(), "tenant-1")
+	report, err := hc.AssessHealth(context.Background(), "tenant-1", "")
 	require.NoError(t, err)
 	assert.Equal(t, 0, report.TotalIssues)
 	assert.Empty(t, report.Issues)
@@ -792,7 +792,7 @@ func TestHealthChecker_AssessHealth_NilMemoryInResultsSkipped(t *testing.T) {
 	}
 	hc := newTestHealthChecker(repo)
 
-	report, err := hc.AssessHealth(context.Background(), "tenant-1")
+	report, err := hc.AssessHealth(context.Background(), "tenant-1", "")
 	require.NoError(t, err)
 	assert.Equal(t, 0, report.TotalIssues, "nil memories should be skipped")
 	assert.Empty(t, report.Issues)
@@ -822,7 +822,7 @@ func TestHealthChecker_AssessHealth_SearchErrorReturnsNil(t *testing.T) {
 	}
 	hc := newTestHealthChecker(repo)
 
-	report, err := hc.AssessHealth(context.Background(), "tenant-1")
+	report, err := hc.AssessHealth(context.Background(), "tenant-1", "")
 	require.NoError(t, err, "search error should be handled gracefully")
 	assert.Equal(t, 0, report.TotalIssues, "no issues when search fails")
 	assert.Empty(t, report.Issues)
@@ -863,7 +863,7 @@ func TestHealthChecker_AssessHealth_CancelledContext(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	report, err := hc.AssessHealth(ctx, "tenant-1")
+	report, err := hc.AssessHealth(ctx, "tenant-1", "")
 	// With cancelled context, search returns ctx.Err(). runAllChecks logs and returns nil.
 	require.NoError(t, err, "should handle cancelled context gracefully")
 	assert.Equal(t, 0, report.TotalIssues)
@@ -1041,7 +1041,7 @@ func TestHealthChecker_AssessHealth_AllChecksInOneCall(t *testing.T) {
 	}
 	hc := newTestHealthChecker(repo)
 
-	report, err := hc.AssessHealth(context.Background(), "tenant-1")
+	report, err := hc.AssessHealth(context.Background(), "tenant-1", "")
 	require.NoError(t, err)
 
 	// Expected: orphan (medium) + stale (low) + verdict (warning) + duplication (medium) = 4
