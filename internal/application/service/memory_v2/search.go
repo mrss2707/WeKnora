@@ -20,6 +20,10 @@ const (
 	weightImpor    = 0.15
 )
 
+// ErrEmbeddingDimensionMismatch is returned when the query embedding dimension
+// does not match the stored embedding dimension, indicating a model mismatch.
+var ErrEmbeddingDimensionMismatch = fmt.Errorf("embedding dimension mismatch: query embedding model differs from the model used for stored memories; re-ingest memories with the current embedding model")
+
 // SearchMemories performs the hybrid search pipeline:
 // BM25 full-text search + HNSW cosine search + hub_score + importance scoring,
 // merges with configured weights, applies boosts and filters.
@@ -56,7 +60,13 @@ func (s *MemoryServiceV2Impl) SearchMemories(ctx context.Context, query string, 
 				}
 				cosineResults, err = s.repo.CosineSearch(ctx, cosineFilter, vector, filter.Limit*2)
 				if err != nil {
-					logger.Errorf(ctx, "cosine search failed: %v", err)
+					if isDimensionMismatch(err) {
+						logger.Warnf(ctx, "[MemoryV2] Embedding dimension mismatch: %v. "+
+							"Stored memories were embedded with a different model. "+
+							"Re-ingest memories or switch to the original embedding model.", err)
+					} else {
+						logger.Errorf(ctx, "cosine search failed: %v", err)
+					}
 					cosineResults = nil
 				}
 			}
@@ -315,4 +325,13 @@ func extractKeywordsFromQuery(query string) string {
 		return query
 	}
 	return strings.Join(keywords, " ")
+}
+
+// isDimensionMismatch detects pgvector dimension mismatch errors.
+// PG returns: "ERROR: different vector dimensions 768 and 2048 (SQLSTATE 22000)"
+func isDimensionMismatch(err error) bool {
+	if err == nil {
+		return false
+	}
+	return strings.Contains(err.Error(), "different vector dimensions")
 }
