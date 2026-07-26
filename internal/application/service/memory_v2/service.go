@@ -209,8 +209,17 @@ func (s *MemoryServiceV2Impl) getEmbedder(ctx context.Context) (embedding.Embedd
 		return nil, fmt.Errorf("memory V2: model service not available")
 	}
 
-	// Resolve default embedding model: list models, find first Embedding type
-	models, err := s.modelService.ListModels(ctx)
+	// Resolve default embedding model: list models, find first Embedding type.
+	// Wrap in a recover to handle the case where ListModels panics due to
+	// missing tenant context (e.g. during startup before any request).
+	models, err := func() (models []*types.Model, err error) {
+		defer func() {
+			if r := recover(); r != nil {
+				err = fmt.Errorf("memory V2: getEmbedder recovered from panic: %v", r)
+			}
+		}()
+		return s.modelService.ListModels(ctx)
+	}()
 	if err != nil {
 		return nil, fmt.Errorf("memory V2: failed to list models: %w", err)
 	}
@@ -243,8 +252,17 @@ func (s *MemoryServiceV2Impl) getChat(ctx context.Context) (chat.Chat, error) {
 		return nil, fmt.Errorf("memory V2: model service not available")
 	}
 
-	// Resolve default chat model: list models, find first KnowledgeQA type
-	models, err := s.modelService.ListModels(ctx)
+	// Resolve default chat model: list models, find first KnowledgeQA type.
+	// Wrap in a recover to handle the case where ListModels panics due to
+	// missing tenant context (e.g. during startup before any request).
+	models, err := func() (models []*types.Model, err error) {
+		defer func() {
+			if r := recover(); r != nil {
+				err = fmt.Errorf("memory V2: getChat recovered from panic: %v", r)
+			}
+		}()
+		return s.modelService.ListModels(ctx)
+	}()
 	if err != nil {
 		return nil, fmt.Errorf("memory V2: failed to list models: %w", err)
 	}
