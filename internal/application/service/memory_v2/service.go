@@ -149,9 +149,10 @@ type MemoryServiceV2Impl struct {
 	chat         chat.Chat
 	config       types.MemoryV2Config
 	cache        *MemoryCache
-	cancel       context.CancelFunc
-	wg           sync.WaitGroup
-	workerOnce   sync.Once
+	cancel          context.CancelFunc
+	wg              sync.WaitGroup
+	workerOnce      sync.Once
+	embedWorkerOnce sync.Once
 	tenantIDs    []string
 
 	// Sub-components
@@ -288,17 +289,21 @@ func (s *MemoryServiceV2Impl) getChat(ctx context.Context) (chat.Chat, error) {
 	return ch, nil
 }
 
-// ensureWorkers initializes embedder/chat-dependent workers on first call.
+// ensureWorkers initializes embedder/chat-dependent workers on first call
+// with a valid tenant context. Safe to call multiple times; workers are
+// started only once via embedWorkerOnce.
 func (s *MemoryServiceV2Impl) ensureWorkers(ctx context.Context) {
 	if s.entityExtractor != nil {
 		return
 	}
 	embedder, err := s.getEmbedder(ctx)
 	if err != nil {
+		logger.Warnf(ctx, "[MemoryV2] ensureWorkers: getEmbedder failed: %v", err)
 		return
 	}
 	ch, err := s.getChat(ctx)
 	if err != nil {
+		logger.Warnf(ctx, "[MemoryV2] ensureWorkers: getChat failed: %v", err)
 		return
 	}
 	s.entityExtractor = workers.NewEntityExtractor(s.repo, ch)
@@ -306,26 +311,31 @@ func (s *MemoryServiceV2Impl) ensureWorkers(ctx context.Context) {
 	s.consolidator = workers.NewConsolidator(s.repo, embedder)
 	s.dreamer = workers.NewDreamerWorker(s.repo, ch, s.config.Dreamer, s.tenantIDs)
 	s.cacheWarmer = workers.NewCacheWarmer(s.repo, embedder, s.config.CacheWarmer)
+
+	s.embedWorkerOnce.Do(func() {
+		logger.Infof(ctx, "[MemoryV2] Starting embedder-dependent background workers...")
+		s.wg.Add(4)
+		go runWorker(ctx, &s.wg, s.entityExtractor.Run)
+		go runWorker(ctx, &s.wg, s.consolidator.Run)
+		go runWorker(ctx, &s.wg, s.dreamer.Run)
+		if s.config.CacheWarmer.Enabled {
+			s.wg.Add(1)
+			go runWorker(ctx, &s.wg, s.cacheWarmer.Run)
+		}
+	})
 }
 
-// StartWorkers launches all background workers.
-// Safe to call multiple times; actual init only happens once, on the first
-// call with a valid tenant context.
+// StartWorkers launches background workers that don't depend on embedder/chat
+// models (pruner, healthChecker). Embedder-dependent workers (entityExtractor,
+// consolidator, dreamer, cacheWarmer) are started lazily on the first API
+// request that provides a valid tenant context.
 func (s *MemoryServiceV2Impl) StartWorkers(ctx context.Context) {
 	s.workerOnce.Do(func() {
-		s.ensureWorkers(ctx)
 		ctx, s.cancel = context.WithCancel(ctx)
-		s.wg.Add(5)
-
-	go runWorker(ctx, &s.wg, s.entityExtractor.Run)
-	go runWorker(ctx, &s.wg, s.consolidator.Run)
-	go runWorker(ctx, &s.wg, s.dreamer.Run)
-	go runWorker(ctx, &s.wg, s.pruner.Run)
-	go runWorker(ctx, &s.wg, s.healthChecker.Run)
-	if s.config.CacheWarmer.Enabled {
-		s.wg.Add(1)
-		go runWorker(ctx, &s.wg, s.cacheWarmer.Run)
-	}
+		s.wg.Add(2)
+		go runWorker(ctx, &s.wg, s.pruner.Run)
+		go runWorker(ctx, &s.wg, s.healthChecker.Run)
+		logger.Infof(ctx, "[MemoryV2] Started tenant-independent workers (pruner, healthChecker)")
 	})
 }
 
@@ -389,6 +399,7 @@ func (s *MemoryServiceV2Impl) AddEpisode(ctx context.Context, tenantID, userID, 
 // RetrieveMemory runs the full search pipeline and packs results as structured
 // XML into MemoryContext.RelatedEpisodes[0].Summary.
 func (s *MemoryServiceV2Impl) RetrieveMemory(ctx context.Context, userID, query string) (*types.MemoryContext, error) {
+	s.ensureWorkers(ctx)
 	if query == "" {
 		return &types.MemoryContext{}, nil
 	}
@@ -420,6 +431,7 @@ func (s *MemoryServiceV2Impl) RetrieveMemory(ctx context.Context, userID, query 
 
 // ConsolidateDream runs one dreamer pass for a tenant.
 func (s *MemoryServiceV2Impl) ConsolidateDream(ctx context.Context, tenantID string) (*types.DreamResult, error) {
+	s.ensureWorkers(ctx)
 	if s.dreamer == nil {
 		return &types.DreamResult{}, nil
 	}
