@@ -158,6 +158,38 @@ func (r *mockIntegrationRepo) ComputeHubScores(ctx context.Context, tenantID str
 
 func (r *mockIntegrationRepo) InvalidateResultCache(ctx context.Context, tenantID string) {}
 
+
+func (r *mockIntegrationRepo) GetByFingerprint(ctx context.Context, tenantID, fingerprint string) (*types.AgentMemory, error) {
+	for _, mem := range r.memories {
+		if mem.Fingerprint != nil && *mem.Fingerprint == fingerprint {
+			return mem, nil
+		}
+	}
+	return nil, nil
+}
+
+func (r *mockIntegrationRepo) CreateRelation(ctx context.Context, rel *types.MemoryRelation) error {
+	return nil
+}
+
+func (r *mockIntegrationRepo) GetRelations(ctx context.Context, memoryID, tenantID string) ([]*types.MemoryRelation, error) {
+	return nil, nil
+}
+
+func (r *mockIntegrationRepo) DeleteRelation(ctx context.Context, id, tenantID string) error {
+	return nil
+}
+
+func (r *mockIntegrationRepo) HardDeleteExpired(ctx context.Context, tenantID string, olderThan time.Time) (int64, error) {
+	return 0, nil
+}
+
+func (r *mockIntegrationRepo) SetCacheInvalidator(invalidator interfaces.CacheInvalidator) {}
+
+func (r *mockIntegrationRepo) GetEmbeddingDimension(ctx context.Context, tenantID string) (int, error) {
+	return 3, nil
+}
+
 // mockIntegrationChat implements chat.Chat for the dreamer integration tests.
 type mockIntegrationChat struct {
 	response string
@@ -195,7 +227,7 @@ func newIntegrationService(repo interfaces.MemoryRepositoryV2) *MemoryServiceV2I
 	svc.entityExtractor = workers.NewEntityExtractor(repo, nil)
 	svc.autoLinker = workers.NewAutoLinker(repo, &mockEmbedder{})
 	svc.consolidator = workers.NewConsolidator(repo, &mockEmbedder{})
-	svc.dreamer = workers.NewDreamerWorker(repo, nil, config.Dreamer)
+	svc.dreamer = workers.NewDreamerWorker(repo, nil, config.Dreamer, nil)
 	svc.pruner = workers.NewPruner(repo)
 	svc.healthChecker = workers.NewHealthChecker(repo)
 	svc.cacheWarmer = workers.NewCacheWarmer(repo, &mockEmbedder{}, config.CacheWarmer)
@@ -376,7 +408,7 @@ func TestMemoryV2Integration_DreamerDryRun(t *testing.T) {
 	}
 
 	// Wire up the dreamer with a mock chat
-	svc.dreamer = workers.NewDreamerWorker(repo, &mockIntegrationChat{response: mockResponse}, config.Dreamer)
+	svc.dreamer = workers.NewDreamerWorker(repo, &mockIntegrationChat{response: mockResponse}, config.Dreamer, nil)
 
 	// Execute the dreamer pass via ConsolidateDream
 	result, err := svc.ConsolidateDream(ctx, "tenant-dreamer-1")
@@ -659,3 +691,31 @@ func TestMemoryV2Integration_VerdictFiltering(t *testing.T) {
 // ---------------------------------------------------------------------------
 // Mock types used across integration tests
 // ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// Test: AutoLinker called from SaveMemory
+// ---------------------------------------------------------------------------
+
+func TestMemoryV2Integration_AutoLinkerFromSaveMemory(t *testing.T) {
+	repo := newMockIntegrationRepo()
+	svc := newIntegrationService(repo)
+	ctx := context.Background()
+
+	// Save a memory with multiple tags (triggers auto-linker search)
+	memory := &types.AgentMemory{
+		TenantID:   "tenant-autolink-1",
+		Content:    "The user prefers clean architecture with dependency injection patterns throughout all services.",
+		MemoryType: "preference",
+	}
+
+	result, err := svc.SaveMemory(ctx, memory)
+	require.NoError(t, err, "SaveMemory should succeed")
+	require.NotNil(t, result)
+	assert.True(t, result.Created)
+
+	// Verify ensureWorkers + autoLinker wiring: SaveMemory should not panic
+	// and the autoLinker.LinkMemory should be called (no-op in mock but wiring verified)
+	// The memory should have tags from the ingestion pipeline
+	assert.NotEmpty(t, result.Memory.Tags, "memory should have tags")
+	t.Logf("Memory %s saved with tags: %v", result.Memory.ID, result.Memory.Tags)
+}

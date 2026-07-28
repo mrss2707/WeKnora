@@ -1406,5 +1406,79 @@ func TestSearchMemories_StalenessComputed(t *testing.T) {
 			assert.False(t, r.IsStale, "recent + high importance should not be stale")
 		}
 	}
+
+
+}
+// TestIsDimensionMismatch verifies the pgvector dimension mismatch detection.
+func TestIsDimensionMismatch(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    error
+		expected bool
+	}{
+		{"nil error", nil, false},
+		{"exact PG message", fmt.Errorf("ERROR: different vector dimensions 768 and 2048 (SQLSTATE 22000)"), true},
+		{"substring match", fmt.Errorf("cosine search failed: ERROR: different vector dimensions 768 and 2048"), true},
+		{"unrelated error", fmt.Errorf("connection refused"), false},
+		{"empty error", fmt.Errorf(""), false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := isDimensionMismatch(tt.input)
+			assert.Equal(t, tt.expected, got)
+		})
+	}
 }
 
+
+// ---------------------------------------------------------------------------
+// SaveMemory nil guard
+// ---------------------------------------------------------------------------
+
+func TestSaveMemory_NilMemory(t *testing.T) {
+	svc := &MemoryServiceV2Impl{
+		config: types.DefaultMemoryV2Config(),
+	}
+
+	result, err := svc.SaveMemory(context.Background(), nil)
+	assert.Error(t, err, "should return error for nil memory")
+	assert.Nil(t, result, "should not return result for nil memory")
+	assert.Contains(t, err.Error(), "nil memory", "error should mention nil memory")
+}
+
+func TestSaveMemory_ValidateContentRejectsOverMax(t *testing.T) {
+	svc := &MemoryServiceV2Impl{
+		config: types.DefaultMemoryV2Config(),
+	}
+
+	longContent := strings.Repeat("x", 10001)
+	memory := &types.AgentMemory{
+		TenantID: "t1",
+		Content:  longContent,
+	}
+
+	result, err := svc.SaveMemory(context.Background(), memory)
+	assert.Error(t, err, "should return error for content > 10000 chars")
+	assert.Nil(t, result, "should not return result")
+	var validationErr *ErrMemoryValidation
+	assert.ErrorAs(t, err, &validationErr, "error should be ErrMemoryValidation")
+	assert.Contains(t, err.Error(), "exceeds maximum", "error should mention exceeding max")
+}
+
+func TestSaveMemory_ValidateContentRejectsUnderMin(t *testing.T) {
+	svc := &MemoryServiceV2Impl{
+		config: types.DefaultMemoryV2Config(),
+	}
+
+	memory := &types.AgentMemory{
+		TenantID: "t1",
+		Content:  "short",
+	}
+
+	result, err := svc.SaveMemory(context.Background(), memory)
+	assert.Error(t, err, "should return error for content < 10 chars")
+	assert.Nil(t, result)
+	var validationErr *ErrMemoryValidation
+	assert.ErrorAs(t, err, &validationErr, "error should be ErrMemoryValidation")
+}
