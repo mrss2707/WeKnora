@@ -154,6 +154,7 @@ type MemoryServiceV2Impl struct {
 	workerOnce      sync.Once
 	embedWorkerOnce sync.Once
 	tenantIDs    []string
+	cachedModels []*types.Model // cached model list from getEmbedder
 
 	// Sub-components
 	tokenBudget *TokenBudgetManager
@@ -224,6 +225,7 @@ func (s *MemoryServiceV2Impl) getEmbedder(ctx context.Context) (embedding.Embedd
 	if err != nil {
 		return nil, fmt.Errorf("memory V2: failed to list models: %w", err)
 	}
+	s.cachedModels = models
 	var modelID string
 	for _, m := range models {
 		if m.Type == types.ModelTypeEmbedding {
@@ -244,7 +246,8 @@ func (s *MemoryServiceV2Impl) getEmbedder(ctx context.Context) (embedding.Embedd
 }
 
 // getChat returns the chat model, initializing it lazily via modelService.
-// Resolves the first available KnowledgeQA model — does NOT pass empty ID.
+// Resolves the first available KnowledgeQA model. Reuses cached model list
+// from getEmbedder if available.
 func (s *MemoryServiceV2Impl) getChat(ctx context.Context) (chat.Chat, error) {
 	if s.chat != nil {
 		return s.chat, nil
@@ -253,19 +256,21 @@ func (s *MemoryServiceV2Impl) getChat(ctx context.Context) (chat.Chat, error) {
 		return nil, fmt.Errorf("memory V2: model service not available")
 	}
 
-	// Resolve default chat model: list models, find first KnowledgeQA type.
-	// Wrap in a recover to handle the case where ListModels panics due to
-	// missing tenant context (e.g. during startup before any request).
-	models, err := func() (models []*types.Model, err error) {
-		defer func() {
-			if r := recover(); r != nil {
-				err = fmt.Errorf("memory V2: getChat recovered from panic: %v", r)
-			}
+	// Use cached model list from getEmbedder if available
+	models := s.cachedModels
+	if models == nil {
+		var err error
+		models, err = func() (models []*types.Model, err error) {
+			defer func() {
+				if r := recover(); r != nil {
+					err = fmt.Errorf("memory V2: getChat recovered from panic: %v", r)
+				}
+			}()
+			return s.modelService.ListModels(ctx)
 		}()
-		return s.modelService.ListModels(ctx)
-	}()
-	if err != nil {
-		return nil, fmt.Errorf("memory V2: failed to list models: %w", err)
+		if err != nil {
+			return nil, fmt.Errorf("memory V2: failed to list models: %w", err)
+		}
 	}
 	var modelID string
 	for _, m := range models {
