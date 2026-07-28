@@ -86,7 +86,7 @@ func (s *MemoryServiceV2Impl) SearchMemories(ctx context.Context, query string, 
 	merged = s.applySessionBoost(merged, filter.SessionID)
 
 	// Step 7: Apply score threshold
-	merged = s.applyScoreThreshold(ctx, merged)
+	merged = s.applyScoreThreshold(merged)
 
 	// Step 8: Sort by score descending and limit
 	sort.Slice(merged, func(i, j int) bool {
@@ -161,9 +161,6 @@ func (s *MemoryServiceV2Impl) mergeResults(bm25, cosine []*types.MemorySearchRes
 	// Track seen IDs to avoid duplicates
 	seen := make(map[string]bool)
 	var merged []*types.MemorySearchResult
-
-	if len(bm25) > 0 {
-	}
 
 	// Process BM25 results first
 	for i, r := range bm25 {
@@ -294,7 +291,7 @@ func (s *MemoryServiceV2Impl) applySessionBoost(results []*types.MemorySearchRes
 }
 
 // applyScoreThreshold discards results below the configured minimum score.
-func (s *MemoryServiceV2Impl) applyScoreThreshold(ctx context.Context, results []*types.MemorySearchResult) []*types.MemorySearchResult {
+func (s *MemoryServiceV2Impl) applyScoreThreshold(results []*types.MemorySearchResult) []*types.MemorySearchResult {
 	threshold := s.config.MinScoreThreshold
 	if threshold <= 0 {
 		threshold = 0.4
@@ -307,7 +304,6 @@ func (s *MemoryServiceV2Impl) applyScoreThreshold(ctx context.Context, results [
 		}
 	}
 
-	_ = ctx
 	return filtered
 }
 

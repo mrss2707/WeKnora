@@ -560,7 +560,7 @@ func TestScoreThreshold_AboveThresholdKept(t *testing.T) {
 		makeSearchResult(mem, 0.7),
 	}
 
-	filtered := svc.applyScoreThreshold(context.Background(), results)
+	filtered := svc.applyScoreThreshold(results)
 	require.Len(t, filtered, 1, "score above threshold should be kept")
 }
 
@@ -574,7 +574,7 @@ func TestScoreThreshold_BelowThresholdExcluded(t *testing.T) {
 		makeSearchResult(mem, 0.3),
 	}
 
-	filtered := svc.applyScoreThreshold(context.Background(), results)
+	filtered := svc.applyScoreThreshold(results)
 	require.Empty(t, filtered, "score below threshold should be excluded")
 }
 
@@ -591,7 +591,7 @@ func TestScoreThreshold_DefaultThreshold(t *testing.T) {
 		makeSearchResult(memHigh, 0.6),
 	}
 
-	filtered := svc.applyScoreThreshold(context.Background(), results)
+	filtered := svc.applyScoreThreshold(results)
 
 	// Default threshold 0.4 filters out 0.2, keeps 0.6
 	require.Len(t, filtered, 1)
@@ -608,7 +608,7 @@ func TestScoreThreshold_AtThresholdKept(t *testing.T) {
 		makeSearchResult(mem, 0.5),
 	}
 
-	filtered := svc.applyScoreThreshold(context.Background(), results)
+	filtered := svc.applyScoreThreshold(results)
 	require.Len(t, filtered, 1, "score exactly at threshold should be kept")
 }
 
@@ -625,7 +625,7 @@ func TestScoreThreshold_AllBelowExcluded(t *testing.T) {
 		makeSearchResult(memB, 0.2),
 	}
 
-	filtered := svc.applyScoreThreshold(context.Background(), results)
+	filtered := svc.applyScoreThreshold(results)
 	require.Empty(t, filtered, "all scores below threshold should be excluded")
 }
 

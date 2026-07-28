@@ -95,6 +95,7 @@ func lintContradiction(ctx context.Context, memory *types.AgentMemory, repo inte
 	}
 	similar, err := repo.CosineSearch(ctx, filter, embedding, 5)
 	if err != nil {
+		logger.Warnf(ctx, "[MemoryV2] lintContradiction: CosineSearch failed for memory %s: %v", memory.ID, err)
 		return nil
 	}
 
@@ -141,6 +142,7 @@ func lintDuplication(ctx context.Context, memory *types.AgentMemory, repo interf
 	}
 	similar, err := repo.CosineSearch(ctx, filter, embedding, 3)
 	if err != nil {
+		logger.Warnf(ctx, "[MemoryV2] lintDuplication: CosineSearch failed for memory %s: %v", memory.ID, err)
 		return nil
 	}
 

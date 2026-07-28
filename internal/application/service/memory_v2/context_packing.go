@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"strings"
-	"time"
 
 	"github.com/Tencent/WeKnora/internal/types"
 )
@@ -60,6 +59,3 @@ func escapeXML(s string) string {
 	s = strings.ReplaceAll(s, "\"", "&quot;")
 	return s
 }
-
-// FormatRecencyBoost duration for convenience
-var _ = time.Nanosecond
