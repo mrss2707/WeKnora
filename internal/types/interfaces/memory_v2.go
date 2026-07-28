@@ -38,6 +38,9 @@ type MemoryRepositoryV2 interface {
 	// Cache invalidation
 	InvalidateResultCache(ctx context.Context, tenantID string)
 	SetCacheInvalidator(invalidator CacheInvalidator)
+
+	// Embedding dimension
+	GetEmbeddingDimension(ctx context.Context, tenantID string) (int, error)
 }
 
 // CacheInvalidator is a minimal interface for cache prefix invalidation.

@@ -122,6 +122,9 @@ func (m *mockCacheWarmerRepo) HardDeleteExpired(ctx context.Context, tenantID st
 	return 0, nil
 }
 func (m *mockCacheWarmerRepo) SetCacheInvalidator(invalidator interfaces.CacheInvalidator) {}
+func (m *mockCacheWarmerRepo) GetEmbeddingDimension(ctx context.Context, tenantID string) (int, error) {
+	return 0, nil
+}
 
 // mockCacheWarmerEmbedder implements embedding.Embedder for testing the cache warmer.
 type mockCacheWarmerEmbedder struct {

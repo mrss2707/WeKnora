@@ -19,7 +19,7 @@ CREATE TABLE IF NOT EXISTS agent_memories (
     tier            SMALLINT NOT NULL DEFAULT 1,
 
     -- Embedding vector (pgvector)
-    embedding       vector(1536),
+    embedding       vector(2048),
 
     -- Fingerprint for structural dedup (SHA256 first 200 normalized chars)
     fingerprint     VARCHAR(64),

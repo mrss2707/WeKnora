@@ -147,6 +147,9 @@ func (m *mockDreamerRepo) HardDeleteExpired(ctx context.Context, tenantID string
 	return 0, nil
 }
 func (m *mockDreamerRepo) SetCacheInvalidator(invalidator interfaces.CacheInvalidator) {}
+func (m *mockDreamerRepo) GetEmbeddingDimension(ctx context.Context, tenantID string) (int, error) {
+	return 0, nil
+}
 
 // mockDreamerChat implements chat.Chat for testing.
 type mockDreamerChat struct {

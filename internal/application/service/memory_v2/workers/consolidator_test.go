@@ -138,6 +138,9 @@ func (m *mockConsolidatorRepo) HardDeleteExpired(ctx context.Context, tenantID s
 	return 0, nil
 }
 func (m *mockConsolidatorRepo) SetCacheInvalidator(invalidator interfaces.CacheInvalidator) {}
+func (m *mockConsolidatorRepo) GetEmbeddingDimension(ctx context.Context, tenantID string) (int, error) {
+	return 0, nil
+}
 
 // mockConsolidatorEmbedder implements embedding.Embedder for testing.
 type mockConsolidatorEmbedder struct {

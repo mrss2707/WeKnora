@@ -51,10 +51,10 @@ func (h *HealthChecker) Run(ctx context.Context) {
 	}
 }
 
-// AssessHealth runs all 6 health checks and returns the issues.
+// AssessHealth runs all 7 health checks and returns the issues.
 // This is the public entry point called from the HTTP handler.
-func (h *HealthChecker) AssessHealth(ctx context.Context, tenantID, kbID string) (*types.HealthReport, error) {
-	issues := h.runAllChecks(ctx, tenantID, kbID)
+func (h *HealthChecker) AssessHealth(ctx context.Context, tenantID, kbID string, embedderDim int) (*types.HealthReport, error) {
+	issues := h.runAllChecks(ctx, tenantID, kbID, embedderDim)
 
 	report := &types.HealthReport{
 		TenantID:    tenantID,
@@ -75,7 +75,7 @@ func (h *HealthChecker) AssessHealth(ctx context.Context, tenantID, kbID string)
 func (h *HealthChecker) runChecks(ctx context.Context) {
 	logger.Infof(ctx, "health-checker: starting daily health check")
 
-	issues := h.runAllChecks(ctx, "", "")
+	issues := h.runAllChecks(ctx, "", "", 0)
 
 	total := len(issues)
 	bySeverity := make(map[string]int)
@@ -94,8 +94,8 @@ func (h *HealthChecker) runChecks(ctx context.Context) {
 	}
 }
 
-// runAllChecks executes all 6 health check rules.
-func (h *HealthChecker) runAllChecks(ctx context.Context, tenantID, kbID string) []*types.MemoryHealthIssue {
+// runAllChecks executes all 7 health check rules.
+func (h *HealthChecker) runAllChecks(ctx context.Context, tenantID, kbID string, embedderDim int) []*types.MemoryHealthIssue {
 	var allIssues []*types.MemoryHealthIssue
 
 	// Fetch memories
@@ -138,6 +138,11 @@ func (h *HealthChecker) runAllChecks(ctx context.Context, tenantID, kbID string)
 
 	// Check 6: Verdict consistency — WIP memories unchanged for >30 days
 	allIssues = append(allIssues, h.checkVerdictConsistency(memories)...)
+
+	// Check 7: Embedding dimension mismatch
+	if storedDim, err := h.repo.GetEmbeddingDimension(ctx, tenantID); err == nil && storedDim > 0 && embedderDim > 0 {
+		allIssues = append(allIssues, h.checkEmbeddingDimension(storedDim, embedderDim)...)
+	}
 
 	return allIssues
 }
@@ -280,6 +285,23 @@ func (h *HealthChecker) checkVerdictConsistency(memories []*types.AgentMemory) [
 		}
 	}
 	return issues
+}
+
+// checkEmbeddingDimension detects a mismatch between stored embedding
+// dimensions and the current embedder's output dimension.
+func (h *HealthChecker) checkEmbeddingDimension(storedDim, embedderDim int) []*types.MemoryHealthIssue {
+	if storedDim == 0 || embedderDim == 0 {
+		return nil
+	}
+	if storedDim != embedderDim {
+		return []*types.MemoryHealthIssue{{
+			Type:        "embedding_dimension_mismatch",
+			Severity:    "critical",
+			Description: fmt.Sprintf("Stored embeddings have %d dimensions but embedder produces %d dimensions", storedDim, embedderDim),
+			Suggestion:  "Re-ingest all memories with the current embedding model or switch to a compatible model",
+		}}
+	}
+	return nil
 }
 
 // containsNegation checks if content contains negation words.

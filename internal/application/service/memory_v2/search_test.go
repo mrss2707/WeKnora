@@ -2,6 +2,7 @@ package memory_v2
 
 import (
 	"context"
+	"fmt"
 	"math"
 	"strings"
 	"testing"
@@ -1042,6 +1043,9 @@ func (m *mockSearchRepo) HardDeleteExpired(ctx context.Context, tenantID string,
 	return 0, nil
 }
 func (m *mockSearchRepo) SetCacheInvalidator(invalidator interfaces.CacheInvalidator) {}
+func (m *mockSearchRepo) GetEmbeddingDimension(ctx context.Context, tenantID string) (int, error) {
+	return 0, nil
+}
 
 // mockEmbedder implements embedding.Embedder
 type mockEmbedder struct {

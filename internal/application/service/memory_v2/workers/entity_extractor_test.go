@@ -100,6 +100,9 @@ func (m *mockEntityExtractorRepo) HardDeleteExpired(ctx context.Context, tenantI
 	return 0, nil
 }
 func (m *mockEntityExtractorRepo) SetCacheInvalidator(invalidator interfaces.CacheInvalidator) {}
+func (m *mockEntityExtractorRepo) GetEmbeddingDimension(ctx context.Context, tenantID string) (int, error) {
+	return 0, nil
+}
 
 // mockEntityExtractorChat implements chat.Chat for testing the entity extractor.
 type mockEntityExtractorChat struct {

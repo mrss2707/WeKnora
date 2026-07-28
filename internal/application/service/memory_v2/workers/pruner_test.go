@@ -126,6 +126,9 @@ func (m *mockPrunerRepo) HardDeleteExpired(ctx context.Context, tenantID string,
 	return 0, nil
 }
 func (m *mockPrunerRepo) SetCacheInvalidator(invalidator interfaces.CacheInvalidator) {}
+func (m *mockPrunerRepo) GetEmbeddingDimension(ctx context.Context, tenantID string) (int, error) {
+	return 0, nil
+}
 
 // ---------------------------------------------------------------------------
 // Helpers

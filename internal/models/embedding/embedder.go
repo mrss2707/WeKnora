@@ -115,7 +115,7 @@ func newEmbedder(config Config, pooler EmbedderPooler, ollamaService *ollama.Oll
 		embedder, err = NewOllamaEmbedder(config.BaseURL,
 			config.ModelName, config.TruncatePromptTokens, config.Dimensions, config.ModelID, pooler, ollamaService)
 		return embedder, err
-	case string(types.ModelSourceRemote):
+	case "generic", string(types.ModelSourceRemote):
 		// Detect or use configured provider for routing
 		providerName := provider.ProviderName(config.Provider)
 		if providerName == "" {

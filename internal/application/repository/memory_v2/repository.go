@@ -47,8 +47,8 @@ func (r *MemoryRepository) Create(ctx context.Context, memory *types.AgentMemory
 	// pgvector requires at least 1 dimension matching the column definition;
 	// use a zero vector of appropriate dimensionality when no embedding is available
 	if len(memory.Embedding.Slice()) == 0 {
-		// 1536 is the default embedding dimension for the column
-		zeroVec := make([]float32, 1536)
+		// 2048 is the default embedding dimension for the column
+		zeroVec := make([]float32, 2048)
 		memory.Embedding = pgvector.NewVector(zeroVec)
 	}
 	return r.db.WithContext(ctx).Create(memory).Error
@@ -558,5 +558,21 @@ func (r *MemoryRepository) InvalidateResultCache(_ context.Context, tenantID str
 
 func timePtr(t time.Time) *time.Time { return &t }
 
-// Ensure MemoryRepository satisfies MemoryRepositoryV2 at compile time.
+// ensure MemoryRepository satisfies MemoryRepositoryV2 at compile time.
 var _ interfaces.MemoryRepositoryV2 = (*MemoryRepository)(nil)
+
+// GetEmbeddingDimension samples a single stored embedding row to determine the
+// actual vector dimension. Returns (0, nil) when the table is empty.
+func (r *MemoryRepository) GetEmbeddingDimension(ctx context.Context, tenantID string) (int, error) {
+	var emb pgvector.Vector
+	err := r.db.WithContext(ctx).
+		Table("agent_memories").
+		Select("embedding").
+		Where("tenant_id = ? AND deleted_at IS NULL", tenantID).
+		Limit(1).
+		Scan(&emb).Error
+	if err != nil {
+		return 0, err
+	}
+	return len(emb.Slice()), nil
+}

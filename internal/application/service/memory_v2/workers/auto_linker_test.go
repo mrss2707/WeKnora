@@ -123,6 +123,9 @@ func (m *mockAutoLinkerRepo) HardDeleteExpired(ctx context.Context, tenantID str
 	return 0, nil
 }
 func (m *mockAutoLinkerRepo) SetCacheInvalidator(invalidator interfaces.CacheInvalidator) {}
+func (m *mockAutoLinkerRepo) GetEmbeddingDimension(ctx context.Context, tenantID string) (int, error) {
+	return 0, nil
+}
 
 // mockAutoLinkerEmbedder implements embedding.Embedder for testing the auto-linker.
 type mockAutoLinkerEmbedder struct {

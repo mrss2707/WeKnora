@@ -442,9 +442,14 @@ func (s *MemoryServiceV2Impl) ConsolidateDream(ctx context.Context, tenantID str
 // AssessHealth
 // ---------------------------------------------------------------------------
 
-// AssessHealth runs all 6 health checks and returns issues.
+// AssessHealth runs all 7 health checks and returns issues.
 func (s *MemoryServiceV2Impl) AssessHealth(ctx context.Context, tenantID, kbID string) ([]*types.MemoryHealthIssue, error) {
-	report, err := s.healthChecker.AssessHealth(ctx, tenantID, kbID)
+	s.ensureWorkers(ctx)
+	var embedderDim int
+	if emb, err := s.getEmbedder(ctx); err == nil {
+		embedderDim = emb.GetDimensions()
+	}
+	report, err := s.healthChecker.AssessHealth(ctx, tenantID, kbID, embedderDim)
 	if err != nil {
 		return nil, err
 	}
