@@ -35,6 +35,13 @@ func (e *ErrMemoryDuplicate) Error() string {
 
 // SaveMemory runs the full ingestion pipeline and returns the result.
 func (s *MemoryServiceV2Impl) SaveMemory(ctx context.Context, memory *types.AgentMemory) (*types.SaveMemoryResult, error) {
+	// Step 0: Ensure background workers are initialized
+	s.ensureWorkers(ctx)
+
+	if memory == nil {
+		return nil, fmt.Errorf("memory_v2: SaveMemory called with nil memory")
+	}
+
 	// Step 1: Validate
 	if err := validateContent(memory.Content); err != nil {
 		return nil, err
@@ -111,6 +118,11 @@ func (s *MemoryServiceV2Impl) SaveMemory(ctx context.Context, memory *types.Agen
 		s.entityExtractor.Enqueue(memory)
 	}
 
+	// Step 10b: Auto-link to semantically similar memories
+	if s.autoLinker != nil {
+		s.autoLinker.LinkMemory(ctx, memory)
+	}
+
 	result := &types.SaveMemoryResult{
 		Memory:     memory,
 		Created:    true,
@@ -128,7 +140,9 @@ func validateContent(content string) error {
 		}
 	}
 	if len(content) > 10000 {
-		content = content[:10000]
+		return &ErrMemoryValidation{
+			Message: fmt.Sprintf("content length %d exceeds maximum 10000 characters", len(content)),
+		}
 	}
 
 	// Count non-whitespace characters
@@ -437,8 +451,6 @@ func assignTier(importance int, memoryType string) int {
 	}
 }
 
-// pgvectorFromSlice converts a []float32 to a pgvector.Vector.
-
 // clampInt clamps a value to [min, max].
 func clampInt(val, minVal, maxVal int) int {
 	if val < minVal {
@@ -466,5 +478,3 @@ func cosineSimilarity(a, b []float32) float64 {
 	}
 	return dot / (math.Sqrt(normA) * math.Sqrt(normB))
 }
-
-// roundTo rounds a float64 to a given number of decimal places.

@@ -3,6 +3,7 @@ package workers
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"sync"
 	"time"
 
@@ -128,17 +129,21 @@ Memories:
 			if ent.Confidence < 0.7 {
 				continue
 			}
-			// Store extracted entity as a relation from the memory
-			rel := &types.MemoryRelation{
-				TenantID:     mem.TenantID,
-				FromUUID:     mem.ID,
-				ToUUID:       "", // Entity name stored as tag, not FK
-				RelationType: "mentions_" + ent.Type,
-				Weight:       ent.Confidence,
+			// Append entity names to memory tags, avoiding duplicates
+			found := false
+			for _, tag := range mem.Tags {
+				if strings.EqualFold(tag, ent.Name) {
+					found = true
+					break
+				}
 			}
-			if err := e.repo.CreateRelation(ctx, rel); err != nil {
-				logger.Errorf(ctx, "entity extractor: failed to create relation: %v", err)
+			if !found {
+				mem.Tags = append(mem.Tags, ent.Name)
 			}
+		}
+		// Persist tag updates to DB
+		if err := e.repo.Update(ctx, mem); err != nil {
+			logger.Errorf(ctx, "entity extractor: failed to update memory tags for %s: %v", mem.ID, err)
 		}
 	}
 }
