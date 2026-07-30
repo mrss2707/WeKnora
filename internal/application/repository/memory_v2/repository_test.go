@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/google/uuid"
@@ -66,6 +67,9 @@ CREATE TABLE IF NOT EXISTS memory_relations (
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     deleted_at DATETIME
 );
+CREATE UNIQUE INDEX IF NOT EXISTS idx_memory_relations_unique
+    ON memory_relations(from_uuid, to_uuid, relation_type)
+    WHERE deleted_at IS NULL;
 `
 
 // ---------------------------------------------------------------------------
@@ -103,12 +107,12 @@ func createTestMemory(t *testing.T, db *gorm.DB, tenantID, content string, verdi
 func createTestRelation(t *testing.T, db *gorm.DB, tenantID, fromID, toID string, weight float64) {
 	t.Helper()
 	rel := &types.MemoryRelation{
-		ID:       uuid.New().String(),
-		TenantID: tenantID,
-		FromUUID: fromID,
-		ToUUID:   toID,
+		ID:           uuid.New().String(),
+		TenantID:     tenantID,
+		FromUUID:     fromID,
+		ToUUID:       toID,
 		RelationType: "related_to",
-		Weight:   weight,
+		Weight:       weight,
 	}
 	require.NoError(t, db.Create(rel).Error)
 }
@@ -715,4 +719,204 @@ func TestSearch_TierFilter(t *testing.T) {
 	require.NoError(t, err)
 	assert.EqualValues(t, 1, total)
 	assert.Equal(t, "critical memory", got[0].Memory.Content)
+}
+
+func TestRelations_CreateGetDelete(t *testing.T) {
+	repo, db := newTestRepo(t)
+	ctx := context.Background()
+
+	mem1 := createTestMemory(t, db, "t1", "one", types.VerdictNone)
+	mem2 := createTestMemory(t, db, "t1", "two", types.VerdictNone)
+	mem3 := createTestMemory(t, db, "t1", "three", types.VerdictNone)
+	otherTenant := createTestMemory(t, db, "t2", "other", types.VerdictNone)
+
+	relOut := &types.MemoryRelation{ID: uuid.New().String(), TenantID: "t1", FromUUID: mem1.ID, ToUUID: mem2.ID, RelationType: "supports", Weight: 1.0}
+	relIn := &types.MemoryRelation{ID: uuid.New().String(), TenantID: "t1", FromUUID: mem3.ID, ToUUID: mem1.ID, RelationType: "contradicts", Weight: 2.0}
+	otherRel := &types.MemoryRelation{ID: uuid.New().String(), TenantID: "t2", FromUUID: otherTenant.ID, ToUUID: mem1.ID, RelationType: "supports", Weight: 3.0}
+	require.NoError(t, repo.CreateRelation(ctx, relOut))
+	require.NoError(t, repo.CreateRelation(ctx, relIn))
+	require.NoError(t, repo.CreateRelation(ctx, otherRel))
+
+	rels, err := repo.GetRelations(ctx, mem1.ID, "t1")
+	require.NoError(t, err)
+	require.Len(t, rels, 2)
+	ids := []string{rels[0].ID, rels[1].ID}
+	assert.ElementsMatch(t, []string{relOut.ID, relIn.ID}, ids)
+
+	require.NoError(t, repo.DeleteRelation(ctx, relOut.ID, "t1"))
+	rels, err = repo.GetRelations(ctx, mem1.ID, "t1")
+	require.NoError(t, err)
+	require.Len(t, rels, 1)
+	assert.Equal(t, relIn.ID, rels[0].ID)
+}
+
+func TestCreateRelation_AssignsID(t *testing.T) {
+	repo, db := newTestRepo(t)
+	ctx := context.Background()
+	mem1 := createTestMemory(t, db, "t1", "one", types.VerdictNone)
+	mem2 := createTestMemory(t, db, "t1", "two", types.VerdictNone)
+	rel := &types.MemoryRelation{TenantID: "t1", FromUUID: mem1.ID, ToUUID: mem2.ID, RelationType: "supports"}
+
+	require.NoError(t, repo.CreateRelation(ctx, rel))
+
+	assert.NotEmpty(t, rel.ID)
+}
+
+func TestCreateRelation_DuplicateIgnored(t *testing.T) {
+	repo, db := newTestRepo(t)
+	ctx := context.Background()
+	mem1 := createTestMemory(t, db, "t1", "one", types.VerdictNone)
+	mem2 := createTestMemory(t, db, "t1", "two", types.VerdictNone)
+	rel1 := &types.MemoryRelation{ID: uuid.New().String(), TenantID: "t1", FromUUID: mem1.ID, ToUUID: mem2.ID, RelationType: "supports"}
+	rel2 := &types.MemoryRelation{ID: uuid.New().String(), TenantID: "t1", FromUUID: mem1.ID, ToUUID: mem2.ID, RelationType: "supports"}
+
+	require.NoError(t, repo.CreateRelation(ctx, rel1))
+	require.NoError(t, repo.CreateRelation(ctx, rel2))
+
+	rels, err := repo.GetRelations(ctx, mem1.ID, "t1")
+	require.NoError(t, err)
+	assert.Len(t, rels, 1)
+	assert.Equal(t, rel1.ID, rels[0].ID)
+}
+
+func TestGetByFingerprint_FoundTenantScoped(t *testing.T) {
+	repo, db := newTestRepo(t)
+	ctx := context.Background()
+	fingerprint := "fp-shared"
+	mem1 := createTestMemory(t, db, "t1", "tenant one", types.VerdictNone)
+	mem2 := createTestMemory(t, db, "t2", "tenant two", types.VerdictNone)
+	require.NoError(t, db.Model(&types.AgentMemory{}).Where("id = ?", mem1.ID).Update("fingerprint", fingerprint).Error)
+	require.NoError(t, db.Model(&types.AgentMemory{}).Where("id = ?", mem2.ID).Update("fingerprint", fingerprint).Error)
+
+	got, err := repo.GetByFingerprint(ctx, "t1", fingerprint)
+
+	require.NoError(t, err)
+	require.NotNil(t, got)
+	assert.Equal(t, mem1.ID, got.ID)
+}
+
+func TestGetByFingerprint_NotFoundReturnsNilNil(t *testing.T) {
+	repo, _ := newTestRepo(t)
+	got, err := repo.GetByFingerprint(context.Background(), "t1", "missing")
+
+	require.NoError(t, err)
+	assert.Nil(t, got)
+}
+
+func TestGetByFingerprint_IgnoresSoftDeleted(t *testing.T) {
+	repo, db := newTestRepo(t)
+	ctx := context.Background()
+	fingerprint := "fp-deleted"
+	mem := createTestMemory(t, db, "t1", "deleted", types.VerdictNone)
+	require.NoError(t, db.Model(&types.AgentMemory{}).Where("id = ?", mem.ID).Update("fingerprint", fingerprint).Error)
+	require.NoError(t, repo.Delete(ctx, "t1", mem.ID))
+
+	got, err := repo.GetByFingerprint(ctx, "t1", fingerprint)
+
+	require.NoError(t, err)
+	assert.Nil(t, got)
+}
+
+func TestHardDeleteExpired(t *testing.T) {
+	repo, db := newTestRepo(t)
+	ctx := context.Background()
+	now := time.Now()
+	cutoff := now.Add(-30 * 24 * time.Hour)
+
+	active := createTestMemory(t, db, "t1", "active", types.VerdictNone)
+	oldDeletedUnused := createTestMemory(t, db, "t1", "old deleted unused", types.VerdictNone)
+	newDeleted := createTestMemory(t, db, "t1", "new deleted", types.VerdictNone)
+	oldDeletedUsed := createTestMemory(t, db, "t1", "old deleted used", types.VerdictNone)
+	wrongTenant := createTestMemory(t, db, "t2", "wrong tenant", types.VerdictNone)
+
+	require.NoError(t, db.Model(&types.AgentMemory{}).Where("id = ?", oldDeletedUsed.ID).Update("access_count", 1).Error)
+	softDeleteAt(t, db, oldDeletedUnused.ID, cutoff.Add(-24*time.Hour))
+	softDeleteAt(t, db, newDeleted.ID, cutoff.Add(24*time.Hour))
+	softDeleteAt(t, db, oldDeletedUsed.ID, cutoff.Add(-24*time.Hour))
+	softDeleteAt(t, db, wrongTenant.ID, cutoff.Add(-24*time.Hour))
+
+	rows, err := repo.HardDeleteExpired(ctx, "t1", cutoff)
+
+	require.NoError(t, err)
+	assert.EqualValues(t, 1, rows)
+	assertMemoryRowExists(t, db, active.ID)
+	assertMemoryRowMissing(t, db, oldDeletedUnused.ID)
+	assertMemoryRowExists(t, db, newDeleted.ID)
+	assertMemoryRowExists(t, db, oldDeletedUsed.ID)
+	assertMemoryRowExists(t, db, wrongTenant.ID)
+}
+
+func softDeleteAt(t *testing.T, db *gorm.DB, id string, deletedAt time.Time) {
+	t.Helper()
+	require.NoError(t, db.Model(&types.AgentMemory{}).Unscoped().Where("id = ?", id).Update("deleted_at", deletedAt).Error)
+}
+
+func assertMemoryRowExists(t *testing.T, db *gorm.DB, id string) {
+	t.Helper()
+	var count int64
+	require.NoError(t, db.Unscoped().Model(&types.AgentMemory{}).Where("id = ?", id).Count(&count).Error)
+	assert.EqualValues(t, 1, count)
+}
+
+func assertMemoryRowMissing(t *testing.T, db *gorm.DB, id string) {
+	t.Helper()
+	var count int64
+	require.NoError(t, db.Unscoped().Model(&types.AgentMemory{}).Where("id = ?", id).Count(&count).Error)
+	assert.Zero(t, count)
+}
+
+type testCacheInvalidator struct {
+	prefixes []string
+}
+
+func (c *testCacheInvalidator) InvalidateByPrefix(prefix string) {
+	c.prefixes = append(c.prefixes, prefix)
+}
+
+func TestInvalidateResultCache_UsesTenantPrefix(t *testing.T) {
+	repo, _ := newTestRepo(t)
+	cache := &testCacheInvalidator{}
+	repo.SetCacheInvalidator(cache)
+
+	repo.InvalidateResultCache(context.Background(), "tenant-1")
+
+	assert.Equal(t, []string{"mem:tenant-1"}, cache.prefixes)
+}
+
+func TestGetEmbeddingDimension_EmptyTableReturnsZero(t *testing.T) {
+	repo, _ := newTestRepo(t)
+	dim, err := repo.GetEmbeddingDimension(context.Background(), "t1")
+
+	require.NoError(t, err)
+	assert.Zero(t, dim)
+}
+
+func TestGetEmbeddingDimension_ReturnsStoredDimension(t *testing.T) {
+	repo, db := newTestRepo(t)
+	mem := createTestMemory(t, db, "t1", "embedded", types.VerdictNone)
+	vec := pgvector.NewVector([]float32{0.1, 0.2, 0.3})
+	require.NoError(t, db.Model(&types.AgentMemory{}).Where("id = ?", mem.ID).Update("embedding", vec).Error)
+
+	dim, err := repo.GetEmbeddingDimension(context.Background(), "t1")
+
+	require.NoError(t, err)
+	assert.Equal(t, 3, dim)
+}
+
+func TestBM25Search_EmptyQueryReturnsNil(t *testing.T) {
+	repo, _ := newTestRepo(t)
+	results, err := repo.BM25Search(context.Background(), &types.MemoryFilter{TenantID: "t1"})
+
+	require.NoError(t, err)
+	assert.Nil(t, results)
+}
+
+func TestBM25Search_PostgresSpecificFallbackReturnsErrorOnSQLite(t *testing.T) {
+	repo, db := newTestRepo(t)
+	ctx := context.Background()
+	createTestMemory(t, db, "t1", "searchable content", types.VerdictNone)
+
+	_, err := repo.BM25Search(ctx, &types.MemoryFilter{TenantID: "t1", Query: "searchable", Limit: 10})
+
+	assert.Error(t, err, "BM25Search should fail on SQLite because it uses PostgreSQL full-text functions")
 }
