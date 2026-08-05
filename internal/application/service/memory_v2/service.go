@@ -20,9 +20,9 @@ var _ interfaces.MemoryServiceV2 = (*MemoryServiceV2Impl)(nil)
 
 // MemoryCache provides a simple in-memory cache for embeddings and results.
 type MemoryCache struct {
-	mu       sync.RWMutex
-	items    map[string]cacheEntry
-	maxSize  int
+	mu      sync.RWMutex
+	items   map[string]cacheEntry
+	maxSize int
 }
 
 type cacheEntry struct {
@@ -143,18 +143,20 @@ func (c *MemoryCache) evictExpired() {
 
 // MemoryServiceV2Impl implements MemoryServiceV2.
 type MemoryServiceV2Impl struct {
-	repo         interfaces.MemoryRepositoryV2
-	modelService interfaces.ModelService // lazy init for embedder and chat
-	embedder     embedding.Embedder
-	chat         chat.Chat
-	config       types.MemoryV2Config
-	cache        *MemoryCache
+	repo            interfaces.MemoryRepositoryV2
+	modelService    interfaces.ModelService // lazy init for embedder and chat
+	embedder        embedding.Embedder
+	chat            chat.Chat
+	config          types.MemoryV2Config
+	cache           *MemoryCache
 	cancel          context.CancelFunc
 	wg              sync.WaitGroup
 	workerOnce      sync.Once
 	embedWorkerOnce sync.Once
-	tenantIDs    []string
-	cachedModels []*types.Model // cached model list from getEmbedder
+	modelMu         sync.Mutex
+	workerMu        sync.Mutex
+	tenantIDs       []string
+	cachedModels    []*types.Model // cached model list from getEmbedder
 
 	// Sub-components
 	tokenBudget *TokenBudgetManager
@@ -204,6 +206,9 @@ func NewMemoryServiceV2(
 // Resolves the first available Embedding model — does NOT pass empty ID
 // (the system has no "default model by empty ID" convention).
 func (s *MemoryServiceV2Impl) getEmbedder(ctx context.Context) (embedding.Embedder, error) {
+	s.modelMu.Lock()
+	defer s.modelMu.Unlock()
+
 	if s.embedder != nil {
 		return s.embedder, nil
 	}
@@ -249,6 +254,9 @@ func (s *MemoryServiceV2Impl) getEmbedder(ctx context.Context) (embedding.Embedd
 // Resolves the first available KnowledgeQA model. Reuses cached model list
 // from getEmbedder if available.
 func (s *MemoryServiceV2Impl) getChat(ctx context.Context) (chat.Chat, error) {
+	s.modelMu.Lock()
+	defer s.modelMu.Unlock()
+
 	if s.chat != nil {
 		return s.chat, nil
 	}
@@ -298,6 +306,9 @@ func (s *MemoryServiceV2Impl) getChat(ctx context.Context) (chat.Chat, error) {
 // with a valid tenant context. Safe to call multiple times; workers are
 // started only once via embedWorkerOnce.
 func (s *MemoryServiceV2Impl) ensureWorkers(ctx context.Context) {
+	s.workerMu.Lock()
+	defer s.workerMu.Unlock()
+
 	if s.entityExtractor != nil {
 		return
 	}
@@ -319,7 +330,7 @@ func (s *MemoryServiceV2Impl) ensureWorkers(ctx context.Context) {
 
 	s.embedWorkerOnce.Do(func() {
 		logger.Infof(ctx, "[MemoryV2] Starting embedder-dependent background workers...")
-		s.wg.Add(4)
+		s.wg.Add(3)
 		go runWorker(ctx, &s.wg, s.entityExtractor.Run)
 		go runWorker(ctx, &s.wg, s.consolidator.Run)
 		go runWorker(ctx, &s.wg, s.dreamer.Run)
