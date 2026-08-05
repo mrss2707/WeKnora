@@ -401,3 +401,38 @@ func TestSaveMemoryUniqueMemoryPopulatesDerivedFieldsAndStores(t *testing.T) {
 	assert.Equal(t, 3, repo.lastCosineLimit)
 	assert.Contains(t, repo.memories, memory.ID)
 }
+
+func TestErrMemoryValidationError(t *testing.T) {
+	err := &ErrMemoryValidation{Message: "content is missing"}
+
+	assert.Equal(t, "memory validation error: content is missing", err.Error())
+}
+
+func TestCosineSimilarity(t *testing.T) {
+	tests := []struct {
+		name string
+		a    []float32
+		b    []float32
+		want float64
+	}{
+		{name: "mismatched dimensions", a: []float32{1, 0}, b: []float32{1}, want: 0},
+		{name: "empty vectors", a: nil, b: nil, want: 0},
+		{name: "zero vector", a: []float32{0, 0}, b: []float32{1, 0}, want: 0},
+		{name: "orthogonal", a: []float32{1, 0}, b: []float32{0, 1}, want: 0},
+		{name: "identical", a: []float32{1, 2, 3}, b: []float32{1, 2, 3}, want: 1},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.InDelta(t, tt.want, cosineSimilarity(tt.a, tt.b), 0.000001)
+		})
+	}
+}
+
+func TestComputeImportance_KeywordAndClampBranches(t *testing.T) {
+	assert.Equal(t, 6, computeImportance(strings.Repeat("word ", 110)+"critical approved", "decision"))
+	assert.Equal(t, 5, computeImportance(strings.Repeat("word ", 60)+"mandatory workflow", "procedural"))
+	assert.Equal(t, 1, computeImportance("I maybe prefer compact output but am not sure", "preference"))
+	assert.Equal(t, 3, computeImportance("A vector database is important for retrieval", "semantic"))
+	assert.Equal(t, 0, computeImportance("Plain content without configured importance signals", "fact"))
+}

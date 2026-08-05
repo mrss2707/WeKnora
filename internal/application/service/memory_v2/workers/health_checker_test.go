@@ -19,17 +19,17 @@ import (
 
 // mockHealthCheckerRepo implements interfaces.MemoryRepositoryV2 for testing the health checker.
 type mockHealthCheckerRepo struct {
-	mu                 sync.Mutex
-	createFunc         func(ctx context.Context, memory *types.AgentMemory) error
-	getByIDFunc        func(ctx context.Context, tenantID, id string) (*types.AgentMemory, error)
-	updateFunc         func(ctx context.Context, memory *types.AgentMemory) error
-	deleteFunc         func(ctx context.Context, tenantID, id string) error
-	searchFunc         func(ctx context.Context, filter *types.MemoryFilter) ([]*types.MemorySearchResult, int64, error)
-	cosineSearchFunc   func(ctx context.Context, filter *types.MemoryFilter, embedding []float32, limit int) ([]*types.MemorySearchResult, error)
-	tryDreamerLockFunc func(ctx context.Context, tenantID string, workerID string) (bool, error)
-	unlockDreamerFunc  func(ctx context.Context, tenantID string) error
-	computeHubScores   func(ctx context.Context, tenantID string) error
-	invalidateCache    func(ctx context.Context, tenantID string)
+	mu                  sync.Mutex
+	createFunc          func(ctx context.Context, memory *types.AgentMemory) error
+	getByIDFunc         func(ctx context.Context, tenantID, id string) (*types.AgentMemory, error)
+	updateFunc          func(ctx context.Context, memory *types.AgentMemory) error
+	deleteFunc          func(ctx context.Context, tenantID, id string) error
+	searchFunc          func(ctx context.Context, filter *types.MemoryFilter) ([]*types.MemorySearchResult, int64, error)
+	cosineSearchFunc    func(ctx context.Context, filter *types.MemoryFilter, embedding []float32, limit int) ([]*types.MemorySearchResult, error)
+	tryDreamerLockFunc  func(ctx context.Context, tenantID string, workerID string) (bool, error)
+	unlockDreamerFunc   func(ctx context.Context, tenantID string) error
+	computeHubScores    func(ctx context.Context, tenantID string) error
+	invalidateCache     func(ctx context.Context, tenantID string)
 	getEmbeddingDimFunc func(ctx context.Context, tenantID string) (int, error)
 
 	// Tracking

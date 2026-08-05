@@ -31,8 +31,11 @@ type mockPrunerRepo struct {
 	invalidateCache    func(ctx context.Context, tenantID string)
 
 	// Tracking
-	deleteCalls []deleteCall
-	searchCalls int
+	deleteCalls     []deleteCall
+	searchCalls     int
+	hardDeleteCalls int
+	hardDeleteRows  int64
+	hardDeleteErr   error
 }
 
 func (m *mockPrunerRepo) Create(ctx context.Context, memory *types.AgentMemory) error {
@@ -123,7 +126,12 @@ func (m *mockPrunerRepo) DeleteRelation(ctx context.Context, id, tenantID string
 	return nil
 }
 func (m *mockPrunerRepo) HardDeleteExpired(ctx context.Context, tenantID string, olderThan time.Time) (int64, error) {
-	return 0, nil
+	m.mu.Lock()
+	m.hardDeleteCalls++
+	rows := m.hardDeleteRows
+	err := m.hardDeleteErr
+	m.mu.Unlock()
+	return rows, err
 }
 func (m *mockPrunerRepo) SetCacheInvalidator(invalidator interfaces.CacheInvalidator) {}
 func (m *mockPrunerRepo) GetEmbeddingDimension(ctx context.Context, tenantID string) (int, error) {
@@ -427,14 +435,23 @@ func TestPruner_SoftDeleteExpired_NonProtectedTagDoesNotProtect(t *testing.T) {
 // Test: hardDeleteSoftDeleted (no-op but verifies no panic)
 // ---------------------------------------------------------------------------
 
-func TestPruner_HardDeleteSoftDeleted_NoOp(t *testing.T) {
-	repo := &mockPrunerRepo{}
+func TestPruner_HardDeleteSoftDeleted_RowsAffected(t *testing.T) {
+	repo := &mockPrunerRepo{hardDeleteRows: 3}
 	p := newTestPruner(repo)
 
-	// Should not panic or error — currently a no-op that logs
 	p.hardDeleteSoftDeleted(context.Background())
 
 	assert.Empty(t, repo.deleteCalls, "hard-delete should not call repo.Delete")
+	assert.Equal(t, 1, repo.hardDeleteCalls)
+}
+
+func TestPruner_HardDeleteSoftDeleted_Error(t *testing.T) {
+	repo := &mockPrunerRepo{hardDeleteErr: assert.AnError}
+	p := newTestPruner(repo)
+
+	p.hardDeleteSoftDeleted(context.Background())
+
+	assert.Equal(t, 1, repo.hardDeleteCalls)
 }
 
 func TestPruner_pruneAll_CallsHardDeleteSoftDeleted(t *testing.T) {

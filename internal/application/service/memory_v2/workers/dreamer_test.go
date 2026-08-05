@@ -34,11 +34,11 @@ type mockDreamerRepo struct {
 	invalidateCache    func(ctx context.Context, tenantID string)
 
 	// Tracking
-	tryLockCalls   []tryLockCall
-	unlockCalls    []string
-	updateCalls    []*types.AgentMemory
-	deleteCalls    []deleteCall
-	searchCalls    int
+	tryLockCalls []tryLockCall
+	unlockCalls  []string
+	updateCalls  []*types.AgentMemory
+	deleteCalls  []deleteCall
+	searchCalls  int
 }
 
 type tryLockCall struct {
@@ -192,6 +192,53 @@ func makeDreamerMemory(id, tenantID, content string, verdict types.MemoryVerdict
 
 func newTestDreamer(repo *mockDreamerRepo, chatClient chat.Chat, config types.DreamerConfig) *DreamerWorker {
 	return NewDreamerWorker(repo, chatClient, config, nil)
+}
+
+func TestParseDuration_DefaultInvalidAndValid(t *testing.T) {
+	fallback := 15 * time.Minute
+
+	assert.Equal(t, fallback, parseDuration("", fallback))
+	assert.Equal(t, fallback, parseDuration("not-a-duration", fallback))
+	assert.Equal(t, 2*time.Hour, parseDuration("2h", fallback))
+}
+
+func TestDreamer_DreamPassRunsAllTenantsAndContinuesAfterTenantError(t *testing.T) {
+	repo := &mockDreamerRepo{
+		searchFunc: func(ctx context.Context, filter *types.MemoryFilter) ([]*types.MemorySearchResult, int64, error) {
+			if filter.TenantID == "t1" {
+				return nil, 0, assert.AnError
+			}
+			return nil, 0, nil
+		},
+	}
+	d := NewDreamerWorker(repo, &mockDreamerChat{}, types.DreamerConfig{Enabled: true}, []string{"t1", "t2"})
+
+	d.dreamPass(context.Background())
+
+	repo.mu.Lock()
+	defer repo.mu.Unlock()
+	require.Len(t, repo.tryLockCalls, 2)
+	assert.Equal(t, "t1", repo.tryLockCalls[0].TenantID)
+	assert.Equal(t, "t2", repo.tryLockCalls[1].TenantID)
+	assert.Equal(t, []string{"t1", "t2"}, repo.unlockCalls)
+}
+
+func TestDreamer_DreamPassFallbackEmptyTenant(t *testing.T) {
+	repo := &mockDreamerRepo{
+		searchFunc: func(ctx context.Context, filter *types.MemoryFilter) ([]*types.MemorySearchResult, int64, error) {
+			assert.Equal(t, "", filter.TenantID)
+			return nil, 0, nil
+		},
+	}
+	d := NewDreamerWorker(repo, &mockDreamerChat{}, types.DreamerConfig{Enabled: true}, nil)
+
+	d.dreamPass(context.Background())
+
+	repo.mu.Lock()
+	defer repo.mu.Unlock()
+	require.Len(t, repo.tryLockCalls, 1)
+	assert.Equal(t, "", repo.tryLockCalls[0].TenantID)
+	assert.Equal(t, []string{""}, repo.unlockCalls)
 }
 
 // dreamerActionJSON builds the JSON for the LLM to return for a list of actions.
