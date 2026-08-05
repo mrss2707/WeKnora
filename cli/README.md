@@ -133,10 +133,11 @@ For AI agents (any MCP-capable host) integrating WeKnora:
    weknora profile add prod --host <server-url> --use
    weknora auth login
    ```
-3. Register MCP in the host's MCP config:
-   ```json
-   {"mcpServers": {"weknora": {"command": "weknora", "args": ["mcp", "serve"]}}}
+3. Register MCP in supported agent platforms:
+   ```bash
+   weknora mcp setup
    ```
+   `weknora memory setup` remains available as a legacy/deprecated alias.
 4. Read the [wire contract](AGENTS.md#wire-contract-for-ai-agents) before
    parsing `--format json` output.
 5. Read the [exit-10 anti-patterns](AGENTS.md#exit-10-anti-patterns) before

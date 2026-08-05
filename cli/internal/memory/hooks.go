@@ -29,6 +29,12 @@ type SessionStartInput struct {
 
 // SessionStartOutput is the stdout payload for the session-start hook.
 type SessionStartOutput struct {
+	HookSpecificOutput *SessionStartHookOutput `json:"hookSpecificOutput,omitempty"`
+}
+
+// SessionStartHookOutput carries PaiCode/Claude-compatible SessionStart context.
+type SessionStartHookOutput struct {
+	HookEventName     string `json:"hookEventName"`
 	AdditionalContext string `json:"additionalContext,omitempty"`
 }
 
@@ -47,7 +53,7 @@ type PromptContextOutput struct {
 // PostToolInput is the stdin payload for the post-tool hook.
 type PostToolInput struct {
 	HookStdinBase
-	ToolName  string         `json:"tool_name"`
+	ToolName  string          `json:"tool_name"`
 	ToolInput json.RawMessage `json:"tool_input"`
 }
 
@@ -163,7 +169,10 @@ func runSessionStart(hctx *HookContext) error {
 	}
 
 	// Build compact XML context
-	out.AdditionalContext = buildCompactXML(results, 1500)
+	out.HookSpecificOutput = &SessionStartHookOutput{
+		HookEventName:     "SessionStart",
+		AdditionalContext: buildCompactXML(results, 1500),
+	}
 	fmt.Fprintf(os.Stderr, "%s\n%d\n", T("hook.session_started"), status.MemoryCount)
 	return writeJSON(os.Stdout, out)
 }

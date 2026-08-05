@@ -1,4 +1,4 @@
-package memorycmd
+package mcpcmd
 
 import (
 	"fmt"
@@ -10,20 +10,19 @@ import (
 	"github.com/Tencent/WeKnora/cli/internal/mcpsetup"
 )
 
-// NewCmdSetup builds the legacy `weknora memory setup [--platform <name>]` command.
+// NewCmdSetup builds `weknora mcp setup [--platform <name>]`.
 func NewCmdSetup(_ *cmdutil.Factory) *cobra.Command {
 	opts := &mcpsetup.Options{}
 
 	cmd := &cobra.Command{
 		Use:   "setup",
-		Short: "Configure WeKnora MCP integration (deprecated)",
-		Long: `Legacy alias for ` + "`weknora mcp setup`" + `.
+		Short: "Configure WeKnora MCP integration for agent platforms",
+		Long: `Set up WeKnora MCP integration for supported AI agent platforms.
 
-Set up WeKnora MCP integration for an AI agent platform. This command still
-writes MCP server config, lifecycle hooks, and memory protocol rules using the
-same defaults as previous releases, but new scripts should use the MCP namespace.
-
-Run without --platform to pick platforms and setup components interactively (TUI).
+Writes MCP server config for ` + "`weknora mcp serve`" + `. In interactive mode,
+you can also choose Memory lifecycle hooks and Memory instruction rules as setup
+components. Non-interactive and flag-driven runs keep the historical default and
+configure all components: MCP server config, Memory hooks, and Memory rules.
 
 Supported platforms:
   claude-code  - .mcp.json + .claude/settings.json + CLAUDE.md
@@ -38,13 +37,12 @@ Supported platforms:
 
 The command is idempotent: running it twice does not duplicate entries.
 Use --dry-run to preview changes without writing files.`,
-		Example: `  weknora mcp setup                       # preferred interactive TUI
-  weknora memory setup --platform claude-code
-  weknora memory setup --platform cursor --dry-run
-  weknora memory setup --platform auto`,
+		Example: `  weknora mcp setup                       # interactive TUI
+  weknora mcp setup --platform claude-code
+  weknora mcp setup --platform cursor --dry-run
+  weknora mcp setup --platform auto`,
 		Args: cobra.NoArgs,
 		RunE: func(c *cobra.Command, _ []string) error {
-			fmt.Fprintln(c.ErrOrStderr(), "Command \"setup\" is deprecated, use `weknora mcp setup` instead")
 			cwd, err := os.Getwd()
 			if err != nil {
 				return cmdutil.Wrapf(cmdutil.CodeLocalFileIO, err, "get working directory")
@@ -61,7 +59,7 @@ Use --dry-run to preview changes without writing files.`,
 		},
 	}
 	addSetupFlags(cmd, opts)
-	cmdutil.SetAgentHelp(cmd, setupAgentHelp("configure WeKnora MCP integration for an AI agent platform; legacy alias for `weknora mcp setup`"))
+	cmdutil.SetAgentHelp(cmd, setupAgentHelp("configure WeKnora MCP integration for an AI agent platform, including optional Memory hooks and rules in interactive mode"))
 	return cmd
 }
 
@@ -120,12 +118,4 @@ func setupAgentHelp(usedFor string) cmdutil.AgentHelp {
 			"omit --platform to run interactive TUI form with component selection",
 		},
 	}
-}
-
-func flattenKBIDs(raw []string) []string {
-	return mcpsetup.FlattenKBIDs(raw)
-}
-
-func splitCommaSeparated(s string) []string {
-	return mcpsetup.SplitCommaSeparated(s)
 }

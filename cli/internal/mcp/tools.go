@@ -126,7 +126,7 @@ type memoryService interface {
 	GetMemory(ctx context.Context, id string) (*sdk.AgentMemory, error)
 }
 
-// registerTools wires the curated 10 tools onto server. Adding a tool here
+// registerTools wires the curated 15 tools onto server. Adding a tool here
 // is a deliberate API expansion - the agent-callable surface is the
 // reason this CLI ships an MCP server, not its CLI command list, so this
 // list must be maintained by hand.

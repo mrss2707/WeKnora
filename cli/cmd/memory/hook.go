@@ -64,11 +64,15 @@ The KB is resolved from WEKNORA_KB_ID env var or linked project.`,
 
 	cmd.Flags().StringVar(&opts.KBID, "kb", "", "Knowledge base ID (overrides WEKNORA_KB_ID env var)")
 	cmdutil.SetAgentHelp(cmd, cmdutil.AgentHelp{
-		UsedFor: "run a memory lifecycle hook — agent platforms invoke this via their hook system",
-		Output:  "stdout: JSON payload (shape depends on the hook event); stderr: log messages",
-		RequiredFlags: []string{"<event>"},
+		UsedFor:       "run a memory lifecycle hook - agent platforms invoke this via their hook system",
+		Output:        "stdout: JSON payload (shape depends on the hook event); stderr: log messages",
+		RequiredFlags: []string{"event (positional)"},
+		Examples: []string{
+			"weknora memory hook session-start < payload.json",
+			"echo '{\"session_id\":\"s1\",\"cwd\":\"/project\"}' | weknora memory hook session-start",
+		},
 		Warnings: []string{
-			"requires stdin JSON — pipe it from the agent platform's hook dispatcher",
+			"requires stdin JSON - pipe it from the agent platform's hook dispatcher",
 			"errors are written to stderr; stdout always carries the hook response JSON",
 		},
 	})

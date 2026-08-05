@@ -186,12 +186,8 @@ func TestUpsertPaiCodeHooks_WithEnv(t *testing.T) {
 	cmd, ok := innerHooks[0].(map[string]any)
 	require.True(t, ok)
 	assert.Equal(t, "command", cmd["type"])
-	assert.Equal(t, "weknora memory hook session-start", cmd["command"])
-
-	env, ok := cmd["env"].(map[string]string)
-	require.True(t, ok)
-	assert.Equal(t, "https://example.com/api/v1", env["WEKNORA_BASE_URL"])
-	assert.Equal(t, "sk-test", env["WEKNORA_API_KEY"])
+	assert.Equal(t, `env WEKNORA_API_KEY="sk-test" WEKNORA_BASE_URL="https://example.com/api/v1" weknora memory hook session-start`, cmd["command"])
+	assert.NotContains(t, cmd, "env")
 }
 
 func TestUpsertJSONHooks_WithEnv(t *testing.T) {

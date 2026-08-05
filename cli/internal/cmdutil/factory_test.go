@@ -447,10 +447,22 @@ func TestBuildClientFromEnv(t *testing.T) {
 		assert.NotNil(t, c)
 	})
 
+	t.Run("api key + legacy WEKNORA_BASE_URL builds a client", func(t *testing.T) {
+		t.Setenv("WEKNORA_TOKEN", "")
+		t.Setenv("WEKNORA_API_KEY", "sk-test")
+		t.Setenv("WEKNORA_HOST", "")
+		t.Setenv("WEKNORA_BASE_URL", "https://legacy.example.com")
+		c, handled, err := buildClientFromEnv(emptyCfg)
+		assert.True(t, handled)
+		require.NoError(t, err)
+		assert.NotNil(t, c)
+	})
+
 	t.Run("token set but no host is a typed input error", func(t *testing.T) {
 		t.Setenv("WEKNORA_API_KEY", "")
 		t.Setenv("WEKNORA_TOKEN", "jwt-token")
 		t.Setenv("WEKNORA_HOST", "")
+		t.Setenv("WEKNORA_BASE_URL", "")
 		c, handled, err := buildClientFromEnv(emptyCfg)
 		assert.True(t, handled, "env creds set → handled even on host error")
 		assert.Nil(t, c)
@@ -463,6 +475,7 @@ func TestBuildClientFromEnv(t *testing.T) {
 		t.Setenv("WEKNORA_API_KEY", "")
 		t.Setenv("WEKNORA_TOKEN", "jwt-token")
 		t.Setenv("WEKNORA_HOST", "")
+		t.Setenv("WEKNORA_BASE_URL", "")
 		f := &Factory{Config: func() (*config.Config, error) {
 			return &config.Config{
 				CurrentProfile: "p",

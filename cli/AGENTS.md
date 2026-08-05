@@ -218,7 +218,7 @@ Key packages:
 - `internal/secrets/` — `Store` interface; `KeyringStore` primary, `FileStore` 0600 fallback, `MemStore` for tests
 - `internal/prompt/` — `TTYPrompter` (password no-echo) + `AgentPrompter` (non-TTY no-prompt sentinel)
 - `internal/sse/` — `Accumulator` for chat / session ask SSE streams
-- `internal/mcp/` — curated 10-tool stdio MCP server (wired by `cmd/mcp/serve.go`); see [MCP tool surface](#mcp-tool-surface) for the curation rationale and inventory
+- `internal/mcp/` — curated 15-tool stdio MCP server (wired by `cmd/mcp/serve.go`); see [MCP tool surface](#mcp-tool-surface) for the curation rationale and inventory
 - `client/` (parent module) — generated SDK
 
 ## Command Structure
@@ -541,7 +541,7 @@ The three surfaces do not auto-sync: each is wired separately so agents that onl
 
 WeKnora's MCP server exposes a curated read-only tool surface. Many MCP servers in the wild ship write / mutation operations on by default and rely on credential-scope or sandbox restrictions for safety. WeKnora opts for curation instead: the server side doesn't yet enforce per-token scope, so an agent holding a user's token has full write access. Until server-side scope ships, the CLI keeps mutation tools out of the MCP surface as a belt-and-braces second line of defense. When server scope arrives this stance can loosen.
 
-The curated 10 tools (`cli/internal/mcp/tools.go`):
+The curated 15 tools (`cli/internal/mcp/tools.go`):
 
 | Tool | Purpose |
 | --- | --- |
@@ -554,7 +554,12 @@ The curated 10 tools (`cli/internal/mcp/tools.go`):
 | `search_chunks` | hybrid (vector + keyword) retrieval |
 | `chat` | stream a RAG answer; auto-creates a session if absent |
 | `agent_list` | list custom agents |
-| `agent_invoke` | run a query through a custom agent |
+| `session_ask` | run a query through a custom agent |
+| `memory_recall` | search saved Memory V2 records |
+| `memory_save` | save a Memory V2 record |
+| `memory_graph` | inspect graph context for a memory |
+| `memory_detail` | fetch one saved memory by id |
+| `memory_status` | inspect Memory V2 subsystem status |
 
 Adding a tool is a deliberate API expansion — the AI-agent-callable surface is the reason this CLI ships an MCP server, not its CLI command list, so the registration list in `registerTools` is maintained by hand.
 

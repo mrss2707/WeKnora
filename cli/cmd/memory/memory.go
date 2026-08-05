@@ -12,13 +12,13 @@ import (
 func NewCmd(f *cmdutil.Factory) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "memory",
-		Short: "Memory V2 agent integration (hooks, setup)",
-		Long: `Memory V2 agent integration commands.
+		Short: "Memory V2 runtime hooks and legacy setup",
+		Long: `Memory V2 runtime integration commands.
 
-Manage weknora memory hooks and platform setup for AI agents
-(Claude Code, PaiCode, Cursor, VS Code Copilot, Windsurf,
-Cline, Continue, Gemini CLI) to auto-save and recall memories
-during development sessions.`,
+Manage WeKnora memory lifecycle hooks used by configured AI agent platforms to
+auto-save and recall memories during development sessions. New platform setup
+should use ` + "`weknora mcp setup`" + `; ` + "`weknora memory setup`" + ` remains as a deprecated
+legacy alias.`,
 	}
 	cmd.AddCommand(NewCmdHook(f))
 	cmd.AddCommand(NewCmdSetup(f))

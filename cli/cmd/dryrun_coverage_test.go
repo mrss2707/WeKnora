@@ -22,16 +22,16 @@ var dryRunExpectation = map[string]bool{
 	// --- mutations: MUST have --dry-run ---
 	"kb create": true, "kb update": true, "kb delete": true, "kb pin": true, "kb unpin": true,
 	"kb config set": true, // binds models to a KB (state change)
-	"model create": true, "model update": true, "model delete": true,
+	"model create":  true, "model update": true, "model delete": true,
 	"doc create": true, "doc upload": true, "doc fetch": true, "doc delete": true,
-	"doc reparse": true, // re-triggers server-side parsing (a state change)
-	"doc update":  true, // edits title/description server-side
+	"doc reparse":  true, // re-triggers server-side parsing (a state change)
+	"doc update":   true, // edits title/description server-side
 	"chunk delete": true, "message delete": true,
 	"session delete": true, "session stop": true, "session tool-approval resolve": true,
 	"agent create": true, "agent update": true, "agent delete": true,
 	"profile add": true, "profile use": true, "profile remove": true,
 	"skills install": true, // writes skill files to a local dir (state change)
-	"auth logout": true, "auth refresh": true,
+	"auth logout":    true, "auth refresh": true,
 	"link": true, "unlink": true,
 	"api": true, // passthrough: dry-run previews write methods, rejected on GET
 
@@ -39,7 +39,7 @@ var dryRunExpectation = map[string]bool{
 	// reads
 	"kb list": false, "kb view": false, "kb status": false, "kb check": false,
 	"kb config": false, // read-only inspection of a KB's model config
-	"doc list": false, "doc view": false, "doc download": false,
+	"doc list":  false, "doc view": false, "doc download": false,
 	"doc wait":   false, // polling read, no mutation
 	"chunk list": false, "chunk view": false,
 	"message list": false, "message search": false,
@@ -62,6 +62,8 @@ var dryRunExpectation = map[string]bool{
 	"auth login": false,
 	// long-running stdio server, not a one-shot command.
 	"mcp serve": false,
+	// mcp setup writes local agent integration files - mutation, has --dry-run.
+	"mcp setup": true,
 	// memory hooks process stdin and call the API — read/process, no local writes to preview.
 	"memory hook": false,
 	// memory setup writes config files — mutation, has --dry-run.
@@ -90,7 +92,6 @@ func TestIdAddressedCommandsTolerateKB(t *testing.T) {
 			t.Errorf("`%s` must accept a --kb flag (ignored) so a carried-over --kb doesn't error", strings.Join(path, " "))
 		}
 	}
-}
 }
 
 func TestDryRunCoverageMatchesExpectation(t *testing.T) {

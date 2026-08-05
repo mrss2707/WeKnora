@@ -1,9 +1,13 @@
 package memorycmd
 
 import (
+	"bytes"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
+	"github.com/Tencent/WeKnora/cli/internal/cmdutil"
 )
 
 func TestFlattenKBIDs_SingleValue(t *testing.T) {
@@ -69,4 +73,31 @@ func TestSplitCommaSeparated_Empty(t *testing.T) {
 func TestSplitCommaSeparated_Whitespace(t *testing.T) {
 	result := splitCommaSeparated(" kb_abc , kb_def ")
 	assert.Equal(t, []string{"kb_abc", "kb_def"}, result)
+}
+
+func TestSetupLegacyWrapperDryRun(t *testing.T) {
+	cmd := NewCmdSetup(cmdutil.New())
+	cmd.SetArgs([]string{"--platform", "claude-code", "--dry-run"})
+	require.NoError(t, cmd.Execute())
+}
+
+func TestSetupLegacyWrapperDeprecationWarning(t *testing.T) {
+	cmd := NewCmd(cmdutil.New())
+	var errBuf bytes.Buffer
+	cmd.SetErr(&errBuf)
+	cmd.SetArgs([]string{"setup", "--platform", "claude-code", "--dry-run"})
+
+	require.NoError(t, cmd.Execute())
+	assert.Contains(t, errBuf.String(), "deprecated")
+	assert.Contains(t, errBuf.String(), "weknora mcp setup")
+}
+
+func TestSetupLegacyWrapperVisibleInHelp(t *testing.T) {
+	cmd := NewCmd(cmdutil.New())
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+
+	require.NoError(t, cmd.Help())
+	assert.Contains(t, out.String(), "setup")
+	assert.Contains(t, out.String(), "deprecated")
 }

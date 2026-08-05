@@ -234,6 +234,9 @@ func buildClientFromEnv(f *Factory) (client *sdk.Client, handled bool, err error
 	}
 	host := strings.TrimSpace(os.Getenv("WEKNORA_HOST"))
 	if host == "" {
+		host = strings.TrimSpace(os.Getenv("WEKNORA_BASE_URL"))
+	}
+	if host == "" {
 		// Best-effort fallback to the active profile's host; ignore config
 		// errors so env creds + WEKNORA_HOST stay usable with no config at all.
 		if cfg, cerr := f.Config(); cerr == nil && cfg != nil {
@@ -245,7 +248,7 @@ func buildClientFromEnv(f *Factory) (client *sdk.Client, handled bool, err error
 	if host == "" {
 		return nil, true, NewError(CodeInputInvalidArgument,
 			"WEKNORA_TOKEN / WEKNORA_API_KEY is set but no host is available").
-			WithHint("set WEKNORA_HOST (e.g. https://kb.example.com) or configure a profile host")
+			WithHint("set WEKNORA_HOST (or legacy WEKNORA_BASE_URL), e.g. https://kb.example.com, or configure a profile host")
 	}
 	if token != "" {
 		return sdk.NewClient(host, sdk.WithBearerToken(token)), true, nil

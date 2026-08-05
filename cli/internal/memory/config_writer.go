@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -222,10 +224,7 @@ func upsertPaiCodeHooks(existing map[string]any, entries []HookEntry) UpsertJSON
 	for _, entry := range entries {
 		innerHook := map[string]any{
 			"type":    "command",
-			"command": entry.Command,
-		}
-		if len(entry.Env) > 0 {
-			innerHook["env"] = entry.Env
+			"command": paiCodeCommandWithEnv(entry.Command, entry.Env),
 		}
 		matcher := map[string]any{
 			"hooks": []any{innerHook},
@@ -240,6 +239,24 @@ func upsertPaiCodeHooks(existing map[string]any, entries []HookEntry) UpsertJSON
 }
 
 // hasWeknoraInNestedHooks checks PaiCode-style nested hooks for any weknora command.
+func paiCodeCommandWithEnv(command string, env map[string]string) string {
+	if len(env) == 0 {
+		return command
+	}
+	keys := make([]string, 0, len(env))
+	for k := range env {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	parts := make([]string, 0, len(keys)+2)
+	parts = append(parts, "env")
+	for _, k := range keys {
+		parts = append(parts, k+"="+strconv.Quote(env[k]))
+	}
+	parts = append(parts, command)
+	return strings.Join(parts, " ")
+}
+
 func hasWeknoraInNestedHooks(hooks map[string]any) bool {
 	for _, entries := range hooks {
 		arr, _ := entries.([]any)

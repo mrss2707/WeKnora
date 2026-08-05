@@ -4,9 +4,9 @@
 // the JSON-RPC 2.0 wire protocol agentic IDEs use to call external tools.
 // `weknora mcp serve` exposes a curated subset of the CLI as MCP tools so
 // an IDE-side agent can list / view / search / chat against the user's
-// active WeKnora profile without shelling out to the CLI per call. Most
-// tools are read-only; chat and session_ask create conversation/message
-// records.
+// active WeKnora profile without shelling out to the CLI per call. `weknora
+// mcp setup` writes agent-platform integration config. Most tools are read-only;
+// chat and session_ask create conversation/message records.
 //
 // Package name is `mcpcmd` to avoid shadowing `cli/internal/mcp` (the
 // transport-and-handlers implementation). Same naming hygiene as
@@ -23,19 +23,22 @@ import (
 func NewCmd(f *cmdutil.Factory) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "mcp",
-		Short: "Run weknora as a Model Context Protocol server",
-		Long: `Exposes weknora's tool surface as MCP tools so any
-MCP-compatible client can call them over JSON-RPC.
+		Short: "Serve and configure WeKnora MCP integration",
+		Long: `Run WeKnora as a Model Context Protocol server or configure supported
+agent platforms to use it.
 
-Curated 10-tool surface: kb_list / kb_view / doc_list / doc_view /
-doc_download / search_chunks / chunk_list / agent_list are read-only;
-chat and session_ask create conversation/message records. Destructive
-verbs (create / delete / upload) are deliberately excluded - the agent
-should ask the user before mutating; the CLI's exit-10 protocol covers
-that path.`,
+` + "`weknora mcp serve`" + ` exposes the curated MCP tool surface over JSON-RPC.
+Read-only tools cover knowledge bases, documents, chunks, search, agents, and
+memory inspection; chat/session tools create conversation records. Destructive
+verbs (create / delete / upload) are deliberately excluded - the agent should
+ask the user before mutating; the CLI's exit-10 protocol covers that path.
+
+` + "`weknora mcp setup`" + ` writes MCP server config and, in interactive mode,
+can also enable Memory lifecycle hooks and Memory instruction rules.`,
 		Args: cobra.NoArgs,
 		Run:  func(c *cobra.Command, _ []string) { _ = c.Help() },
 	}
 	cmd.AddCommand(NewCmdServe(f))
+	cmd.AddCommand(NewCmdSetup(f))
 	return cmd
 }
