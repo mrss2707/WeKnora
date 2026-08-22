@@ -35,7 +35,6 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/agent/approval"
 	"github.com/Tencent/WeKnora/internal/application/repository"
-	memoryRepoV2 "github.com/Tencent/WeKnora/internal/application/repository/memory_v2"
 	dorisRepo "github.com/Tencent/WeKnora/internal/application/repository/retriever/doris"
 	elasticsearchRepoV7 "github.com/Tencent/WeKnora/internal/application/repository/retriever/elasticsearch/v7"
 	elasticsearchRepoV8 "github.com/Tencent/WeKnora/internal/application/repository/retriever/elasticsearch/v8"
@@ -50,7 +49,6 @@ import (
 	"github.com/Tencent/WeKnora/internal/application/service"
 	chatpipeline "github.com/Tencent/WeKnora/internal/application/service/chat_pipeline"
 	"github.com/Tencent/WeKnora/internal/application/service/file"
-	memoryServiceV2 "github.com/Tencent/WeKnora/internal/application/service/memory_v2"
 	"github.com/Tencent/WeKnora/internal/application/service/retriever"
 	"github.com/Tencent/WeKnora/internal/common"
 	"github.com/Tencent/WeKnora/internal/config"
@@ -158,7 +156,9 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(repository.NewAuthTokenRepository))
 	must(container.Provide(repository.NewSystemSettingRepository))
 	must(container.Provide(neo4jRepo.NewNeo4jRepository))
-	must(container.Provide(memoryRepoV2.NewMemoryRepository, dig.As(new(interfaces.MemoryRepositoryV2))))
+	// Memory V2 — repository, lazy service, chat pipeline plugin and HTTP
+	// handler are wired in memory_v2.go behind this single stable call.
+	must(registerMemoryV2(container))
 	must(container.Provide(repository.NewMCPServiceRepository))
 	must(container.Provide(repository.NewMCPToolApprovalRepository))
 	must(container.Provide(repository.NewMCPOAuthRepository))
@@ -219,22 +219,6 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(service.NewMCPToolApprovalService))
 	must(container.Provide(service.NewCustomAgentService))
 	must(container.Provide(service.NewUserResourceFavoriteService))
-
-	// Memory V2 service — embedder and chat model are resolved lazily at first use
-	// to avoid tenant context dependency during DI registration.
-	must(container.Provide(func(
-		repo interfaces.MemoryRepositoryV2,
-		modelSvc interfaces.ModelService,
-		cfg *config.Config,
-	) interfaces.MemoryServiceV2 {
-		memCfg := cfg.MemoryV2
-		if memCfg == nil {
-			defaults := types.DefaultMemoryV2Config()
-			memCfg = &defaults
-		}
-		return memoryServiceV2.NewMemoryServiceV2(repo, modelSvc, *memCfg, nil)
-	}))
-
 
 	must(container.Provide(service.NewWikiPageService))
 	must(container.Provide(service.NewWikiLogEntryService))
@@ -355,12 +339,6 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Invoke(chatpipeline.NewPluginSearchEntity))
 	must(container.Invoke(chatpipeline.NewPluginSearchParallel))
 	must(container.Invoke(chatpipeline.NewPluginWikiBoost))
-	must(container.Invoke(func(
-		eventManager *chatpipeline.EventManager,
-		memV2 interfaces.MemoryServiceV2,
-	) {
-		chatpipeline.NewMemoryPluginV2(eventManager, memV2)
-	}))
 	logger.Debugf(ctx, "[Container] Chat pipeline plugins registered")
 
 	// HTTP handlers layer
@@ -410,7 +388,6 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(handler.NewIMHandler))
 	must(container.Provide(handler.NewEmbedChannelHandler))
 	must(container.Provide(handler.NewWeKnoraCloudHandler))
-	must(container.Provide(handler.NewMemoryV2Handler))
 	logger.Debugf(ctx, "[Container] HTTP handlers registered")
 
 
@@ -775,13 +752,7 @@ func initDatabase(cfg *config.Config) (*gorm.DB, error) {
 	}
 	// Memory V2 workers share the GORM pool with HTTP handlers.
 	// Increase pool size by MEMORY_V2_DB_POOL_DELTA (default 5) when V2 is enabled.
-	if cfg.MemoryV2 != nil && cfg.MemoryV2.Enabled {
-		poolDelta := 5
-		if v := os.Getenv("MEMORY_V2_DB_POOL_DELTA"); v != "" {
-			if d, err := strconv.Atoi(v); err == nil && d > 0 {
-				poolDelta = d
-			}
-		}
+	if poolDelta := MemoryV2PoolDelta(cfg); poolDelta > 0 {
 		maxOpen += poolDelta
 		maxIdle += poolDelta / 2
 	}
