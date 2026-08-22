@@ -40,6 +40,10 @@ type memoryV2HandlerServiceFake struct {
 	dreamErr    error
 	dreamTenant string
 	dreamCalls  int
+
+	// readiness, when non-nil, is returned by Readiness; nil means the
+	// default enabled state.
+	readiness *types.MemoryV2Readiness
 }
 
 var _ interfaces.MemoryServiceV2 = (*memoryV2HandlerServiceFake)(nil)
@@ -87,6 +91,13 @@ func (f *memoryV2HandlerServiceFake) AssessHealth(_ context.Context, tenantID, k
 
 func (f *memoryV2HandlerServiceFake) StartWorkers(context.Context) {}
 func (f *memoryV2HandlerServiceFake) Cleanup()                     {}
+
+func (f *memoryV2HandlerServiceFake) Readiness() types.MemoryV2Readiness {
+	if f.readiness == nil {
+		return types.MemoryV2Readiness{Ready: true, Reason: types.MemoryV2ReasonEnabled}
+	}
+	return *f.readiness
+}
 
 type memoryV2HandlerRepoFake struct {
 	searchResults []*types.MemorySearchResult

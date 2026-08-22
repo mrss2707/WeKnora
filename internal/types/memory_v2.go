@@ -377,11 +377,36 @@ func DefaultMemoryV2Config() MemoryV2Config {
 	}
 }
 
+// Memory V2 readiness reasons. The ConcreteReason strings are reported to
+// operators via GET /api/v1/tenants/memory-status and to logs, so they name
+// the specific condition preventing Memory V2 from running.
+const (
+	// MemoryV2ReasonEnabled marks the module ready to serve requests.
+	MemoryV2ReasonEnabled = "enabled"
+	// MemoryV2ReasonConfigDisabled marks the module disabled via configuration.
+	MemoryV2ReasonConfigDisabled = "disabled: memory_v2.enabled is false"
+	// MemoryV2ReasonLiteMode marks the module disabled because Lite mode
+	// (SQLite) cannot host the pgvector-backed memory tables.
+	MemoryV2ReasonLiteMode = "disabled: Lite mode uses SQLite; Memory V2 requires PostgreSQL with pgvector"
+	// MemoryV2ReasonRepoUnavailable marks the module not ready because its
+	// repository is not available (nil).
+	MemoryV2ReasonRepoUnavailable = "not_ready: repository unavailable"
+)
+
+// MemoryV2Readiness describes the module runtime state: whether requests and
+// background workers may run, and the concrete reason when they may not.
+type MemoryV2Readiness struct {
+	Ready  bool   `json:"ready"`
+	Reason string `json:"reason,omitempty"`
+}
+
 // MemoryStatusResponse is the typed response for GET /api/v1/tenants/memory-status.
 type MemoryStatusResponse struct {
 	Backend     string `json:"backend"`
 	Available   bool   `json:"available"`
 	MemoryCount int64  `json:"memory_count,omitempty"`
+	Status      string `json:"status,omitempty"`
+	Reason      string `json:"reason,omitempty"`
 }
 
 // ---------------------------------------------------------------------------

@@ -22,6 +22,7 @@ func stubMemoryV2Deps(c *dig.Container) {
 	must(c.Provide(func() interfaces.ModelService { return nil }))
 	must(c.Provide(func() *config.Config { return &config.Config{} }))
 	must(c.Provide(chatpipeline.NewEventManager))
+	must(c.Provide(NewResourceCleaner, dig.As(new(interfaces.ResourceCleaner))))
 }
 
 // TestRegisterMemoryV2WiresFullGraph resolves every type the module

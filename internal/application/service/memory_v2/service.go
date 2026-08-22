@@ -158,6 +158,12 @@ type MemoryServiceV2Impl struct {
 	tenantIDs       []string
 	cachedModels    []*types.Model // cached model list from getEmbedder
 
+	// readinessReason overrides the disabled reason derived from config
+	// (used to report Lite mode). Set once during wiring; guarded by
+	// readinessMu.
+	readinessMu     sync.RWMutex
+	readinessReason string
+
 	// Sub-components
 	tokenBudget *TokenBudgetManager
 
@@ -200,6 +206,46 @@ func NewMemoryServiceV2(
 	svc.healthChecker = workers.NewHealthChecker(repo)
 
 	return svc
+}
+
+// SetReadinessReason overrides the disabled reason reported by Readiness
+// (used to report Lite mode at wiring time). Safe to call from any goroutine.
+func (s *MemoryServiceV2Impl) SetReadinessReason(reason string) {
+	s.readinessMu.Lock()
+	defer s.readinessMu.Unlock()
+	s.readinessReason = reason
+}
+
+// Readiness reports whether the module may serve requests and run background
+// work, with the concrete reason when it may not. The reported reason is, in
+// order of precedence: the wiring-time override (e.g. Lite mode), a missing
+// repository, or the enabled flag in config.
+func (s *MemoryServiceV2Impl) Readiness() types.MemoryV2Readiness {
+	if s == nil {
+		return types.MemoryV2Readiness{Ready: false, Reason: types.MemoryV2ReasonRepoUnavailable}
+	}
+	s.readinessMu.RLock()
+	override := s.readinessReason
+	s.readinessMu.RUnlock()
+	if override != "" {
+		return types.MemoryV2Readiness{Ready: false, Reason: override}
+	}
+	if s.repo == nil {
+		return types.MemoryV2Readiness{Ready: false, Reason: types.MemoryV2ReasonRepoUnavailable}
+	}
+	if !s.config.Enabled {
+		return types.MemoryV2Readiness{Ready: false, Reason: types.MemoryV2ReasonConfigDisabled}
+	}
+	return types.MemoryV2Readiness{Ready: true, Reason: types.MemoryV2ReasonEnabled}
+}
+
+// notReadyReason returns the readiness reason when the module is not ready,
+// or "" when it is. Callers reject work with this reason.
+func (s *MemoryServiceV2Impl) notReadyReason() string {
+	if r := s.Readiness(); !r.Ready {
+		return r.Reason
+	}
+	return ""
 }
 
 // getEmbedder returns the embedder, initializing it lazily via modelService.
@@ -304,8 +350,13 @@ func (s *MemoryServiceV2Impl) getChat(ctx context.Context) (chat.Chat, error) {
 
 // ensureWorkers initializes embedder/chat-dependent workers on first call
 // with a valid tenant context. Safe to call multiple times; workers are
-// started only once via embedWorkerOnce.
+// started only once via embedWorkerOnce. When the module is not ready the
+// call is a no-op so a disabled module never reaches the model service.
 func (s *MemoryServiceV2Impl) ensureWorkers(ctx context.Context) {
+	if reason := s.notReadyReason(); reason != "" {
+		logger.Warnf(ctx, "[MemoryV2] ensureWorkers skipped: %s", reason)
+		return
+	}
 	s.workerMu.Lock()
 	defer s.workerMu.Unlock()
 
@@ -346,6 +397,10 @@ func (s *MemoryServiceV2Impl) ensureWorkers(ctx context.Context) {
 // consolidator, dreamer, cacheWarmer) are started lazily on the first API
 // request that provides a valid tenant context.
 func (s *MemoryServiceV2Impl) StartWorkers(ctx context.Context) {
+	if reason := s.notReadyReason(); reason != "" {
+		logger.Warnf(ctx, "[MemoryV2] StartWorkers skipped: %s", reason)
+		return
+	}
 	s.workerOnce.Do(func() {
 		ctx, s.cancel = context.WithCancel(ctx)
 		s.wg.Add(2)
@@ -380,8 +435,14 @@ func runWorker(ctx context.Context, wg *sync.WaitGroup, fn func(context.Context)
 
 // AddEpisode processes a conversation session and adds memories.
 // This is a bridge method for compatibility with the existing interface.
+// Without a tenant the episode cannot be scoped to a workspace, so the call
+// is a no-op instead of writing tenant-less data.
 func (s *MemoryServiceV2Impl) AddEpisode(ctx context.Context, tenantID, userID, sessionID string, messages []types.Message) error {
 	if len(messages) == 0 {
+		return nil
+	}
+	if strings.TrimSpace(tenantID) == "" {
+		logger.Warnf(ctx, "[MemoryV2] AddEpisode skipped: empty tenantID")
 		return nil
 	}
 
@@ -445,8 +506,17 @@ func (s *MemoryServiceV2Impl) RetrieveMemory(ctx context.Context, userID, query 
 // ConsolidateDream
 // ---------------------------------------------------------------------------
 
-// ConsolidateDream runs one dreamer pass for a tenant.
+// ConsolidateDream runs one dreamer pass for a tenant. Empty results signal
+// "nothing to do" for both an unready module and a missing tenant.
 func (s *MemoryServiceV2Impl) ConsolidateDream(ctx context.Context, tenantID string) (*types.DreamResult, error) {
+	if reason := s.notReadyReason(); reason != "" {
+		logger.Warnf(ctx, "[MemoryV2] ConsolidateDream skipped: %s", reason)
+		return &types.DreamResult{}, nil
+	}
+	if strings.TrimSpace(tenantID) == "" {
+		logger.Warnf(ctx, "[MemoryV2] ConsolidateDream skipped: empty tenantID")
+		return &types.DreamResult{}, nil
+	}
 	s.ensureWorkers(ctx)
 	if s.dreamer == nil {
 		return &types.DreamResult{}, nil
@@ -458,8 +528,15 @@ func (s *MemoryServiceV2Impl) ConsolidateDream(ctx context.Context, tenantID str
 // AssessHealth
 // ---------------------------------------------------------------------------
 
-// AssessHealth runs all 7 health checks and returns issues.
+// AssessHealth runs all 7 health checks and returns issues. Health checks
+// scope per tenant, so an empty tenant or an unready module is an error.
 func (s *MemoryServiceV2Impl) AssessHealth(ctx context.Context, tenantID, kbID string) ([]*types.MemoryHealthIssue, error) {
+	if reason := s.notReadyReason(); reason != "" {
+		return nil, fmt.Errorf("memory V2: %s", reason)
+	}
+	if strings.TrimSpace(tenantID) == "" {
+		return nil, fmt.Errorf("memory V2: tenant ID is required for health assessment")
+	}
 	s.ensureWorkers(ctx)
 	var embedderDim int
 	if emb, err := s.getEmbedder(ctx); err == nil {

@@ -1,6 +1,7 @@
 package container
 
 import (
+	"context"
 	"os"
 	"strconv"
 
@@ -11,6 +12,7 @@ import (
 	memoryServiceV2 "github.com/Tencent/WeKnora/internal/application/service/memory_v2"
 	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/handler"
+	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 )
@@ -40,7 +42,15 @@ func registerMemoryV2(container *dig.Container) error {
 			defaults := types.DefaultMemoryV2Config()
 			memCfg = &defaults
 		}
-		return memoryServiceV2.NewMemoryServiceV2(repo, modelSvc, *memCfg, nil)
+		var svc *memoryServiceV2.MemoryServiceV2Impl = memoryServiceV2.NewMemoryServiceV2(repo, modelSvc, *memCfg, nil)
+		// Lite mode (SQLite) cannot host the pgvector-backed memory tables;
+		// mark the module not ready with the concrete reason so workers stay
+		// down and every entry point rejects work instead of hitting SQLite.
+		if os.Getenv("DB_DRIVER") == "sqlite" {
+			svc.SetReadinessReason(types.MemoryV2ReasonLiteMode)
+			logger.Warnf(context.Background(), "[MemoryV2] disabled: %s", types.MemoryV2ReasonLiteMode)
+		}
+		return svc
 	}); err != nil {
 		return err
 	}
@@ -50,6 +60,28 @@ func registerMemoryV2(container *dig.Container) error {
 		memV2 interfaces.MemoryServiceV2,
 	) {
 		chatpipeline.NewMemoryPluginV2(eventManager, memV2)
+	}); err != nil {
+		return err
+	}
+
+	// Shutdown hook: register the worker cleanup so app teardown stops the V2
+	// workers exactly once, via the shared ResourceCleaner.
+	if err := container.Invoke(func(
+		cleaner interfaces.ResourceCleaner,
+		memV2 interfaces.MemoryServiceV2,
+	) {
+		cleaner.RegisterWithName("MemoryV2", func() error {
+			memV2.Cleanup()
+			return nil
+		})
+	}); err != nil {
+		return err
+	}
+
+	if err := container.Invoke(func(memV2 interfaces.MemoryServiceV2) {
+		if readiness := memV2.Readiness(); !readiness.Ready {
+			logger.Warnf(context.Background(), "[MemoryV2] not ready: %s", readiness.Reason)
+		}
 	}); err != nil {
 		return err
 	}

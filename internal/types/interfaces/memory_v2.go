@@ -73,4 +73,8 @@ type MemoryServiceV2 interface {
 
 	// Cleanup stops all workers gracefully.
 	Cleanup()
+
+	// Readiness reports whether the module may serve requests and run
+	// background work, with the concrete reason when it may not.
+	Readiness() types.MemoryV2Readiness
 }

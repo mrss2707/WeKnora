@@ -577,14 +577,43 @@ func (h *MemoryV2Handler) TriggerDream(c *gin.Context) {
 // GET /api/v1/tenants/memory-status
 // ---------------------------------------------------------------------------
 
-// MemoryStatus returns the memory backend status.
+// readinessStatus maps a readiness reason string to the coarse status field
+// reported by MemoryStatus: enabled, disabled (config/Lite) or not_ready.
+func readinessStatus(reason string) string {
+	switch {
+	case reason == "" || reason == types.MemoryV2ReasonEnabled:
+		return "enabled"
+	case strings.HasPrefix(reason, "disabled"):
+		return "disabled"
+	default:
+		return "not_ready"
+	}
+}
+
+// MemoryStatus returns the memory backend status. Service readiness (config
+// flag, Lite mode, repository wiring) is the first authority; the legacy
+// repository probe only runs for a ready module.
 func (h *MemoryV2Handler) MemoryStatus(c *gin.Context) {
 	ctx := c.Request.Context()
+
+	if h.memorySvc != nil {
+		if r := h.memorySvc.Readiness(); !r.Ready {
+			c.JSON(http.StatusOK, gin.H{
+				"backend":   "v2",
+				"available": false,
+				"status":    readinessStatus(r.Reason),
+				"reason":    r.Reason,
+			})
+			return
+		}
+	}
 
 	if h.memoryRepo == nil {
 		c.JSON(http.StatusOK, gin.H{
 			"backend":   "v2",
 			"available": false,
+			"status":    "not_ready",
+			"reason":    types.MemoryV2ReasonRepoUnavailable,
 		})
 		return
 	}
@@ -594,6 +623,7 @@ func (h *MemoryV2Handler) MemoryStatus(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{
 			"backend":   "v2",
 			"available": true,
+			"status":    "enabled",
 		})
 		return
 	}
@@ -610,6 +640,7 @@ func (h *MemoryV2Handler) MemoryStatus(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{
 			"backend":   "v2",
 			"available": true,
+			"status":    "enabled",
 		})
 		return
 	}
@@ -618,5 +649,6 @@ func (h *MemoryV2Handler) MemoryStatus(c *gin.Context) {
 		"backend":      "v2",
 		"available":    true,
 		"memory_count": total,
+		"status":       "enabled",
 	})
 }

@@ -42,9 +42,22 @@ func (s *MemoryServiceV2Impl) SaveMemory(ctx context.Context, memory *types.Agen
 		return nil, fmt.Errorf("memory_v2: SaveMemory called with nil memory")
 	}
 
-	// Step 1: Validate
+	// Step 1: Validate (pure — no repository or model touch).
 	if err := validateContent(memory.Content); err != nil {
 		return nil, err
+	}
+
+	// Scope guard: memories must be scoped to a tenant before any repository
+	// touch. An unscoped write would create data invisible to (and hidden
+	// from) every workspace filter below.
+	if strings.TrimSpace(memory.TenantID) == "" {
+		return nil, &ErrMemoryValidation{Message: "tenant_id is required"}
+	}
+
+	// Readiness guard: a disabled/not-ready module (config flag, Lite mode or
+	// missing repository) rejects writes instead of reaching the repository.
+	if reason := s.notReadyReason(); reason != "" {
+		return nil, fmt.Errorf("memory V2 not ready: %s", reason)
 	}
 
 	// Step 2: SHA256 fingerprint dedup
