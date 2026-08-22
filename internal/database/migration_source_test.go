@@ -45,21 +45,21 @@ func readAll(t *testing.T, r io.ReadCloser) string {
 // core 1..3, module alpha 900001-900002, sqlite 0.
 func validFixture(t *testing.T, roots *migrationRoots) {
 	testFiles := map[string]string{
-		"versioned/000001_init.up.sql":   "core up 1",
-		"versioned/000001_init.down.sql": "core down 1",
-		"versioned/000002_agent.up.sql":  "core up 2",
-		"versioned/000002_agent.down.sql": "core down 2",
-		"versioned/000003_docs.up.sql":   "core up 3",
-		"versioned/000003_docs.down.sql": "core down 3",
-		"versioned/README.md":            "not a migration",
-		"modules/alpha/postgres/900001_alpha.up.sql":   "mod up 900001",
-		"modules/alpha/postgres/900001_alpha.down.sql": "mod down 900001",
-		"modules/alpha/postgres/900002_beta.up.sql":    "mod up 900002",
-		"modules/alpha/postgres/900002_beta.down.sql":  "mod down 900002",
+		"versioned/000001_init.up.sql":                    "core up 1",
+		"versioned/000001_init.down.sql":                  "core down 1",
+		"versioned/000002_agent.up.sql":                   "core up 2",
+		"versioned/000002_agent.down.sql":                 "core down 2",
+		"versioned/000003_docs.up.sql":                    "core up 3",
+		"versioned/000003_docs.down.sql":                  "core down 3",
+		"versioned/README.md":                             "not a migration",
+		"modules/alpha/postgres/900001_alpha.up.sql":      "mod up 900001",
+		"modules/alpha/postgres/900001_alpha.down.sql":    "mod down 900001",
+		"modules/alpha/postgres/900002_beta.up.sql":       "mod up 900002",
+		"modules/alpha/postgres/900002_beta.down.sql":     "mod down 900002",
 		"modules/alpha/sqlite/000001_alpha_lite.up.sql":   "must be ignored for postgres",
 		"modules/alpha/sqlite/000001_alpha_lite.down.sql": "must be ignored for postgres",
-		"sqlite/000000_init.up.sql":   "sqlite up 0",
-		"sqlite/000000_init.down.sql": "sqlite down 0",
+		"sqlite/000000_init.up.sql":                       "sqlite up 0",
+		"sqlite/000000_init.down.sql":                     "sqlite down 0",
 	}
 	*roots, _ = buildFixture(t, testFiles)
 }
@@ -135,16 +135,16 @@ func TestCompositeSourcePostgresOrderAndReads(t *testing.T) {
 
 func TestCompositeSourceRejectsDuplicateVersions(t *testing.T) {
 	roots, _ := buildFixture(t, map[string]string{
-		"versioned/000002_a.up.sql":        "a",
-		"versioned/000002_a.down.sql":      "a d",
-		"versioned/000002_dup.up.sql":      "dup",
-		"versioned/000002_dup.down.sql":    "dup d",
+		"versioned/000002_a.up.sql":            "a",
+		"versioned/000002_a.down.sql":          "a d",
+		"versioned/000002_dup.up.sql":          "dup",
+		"versioned/000002_dup.down.sql":        "dup d",
 		"modules/m/postgres/900010_m.up.sql":   "m",
 		"modules/m/postgres/900010_m.down.sql": "m d",
 		"modules/n/postgres/900010_m.up.sql":   "cross-module collision",
 		"modules/n/postgres/900010_m.down.sql": "cross-module collision d",
-		"sqlite/000000_init.up.sql":   "s",
-		"sqlite/000000_init.down.sql": "s d",
+		"sqlite/000000_init.up.sql":            "s",
+		"sqlite/000000_init.down.sql":          "s d",
 	})
 	_, err := assembleSource(BackendPostgres, roots)
 	if !errors.Is(err, ErrInvalidMigrationSet) {
@@ -236,7 +236,7 @@ func TestCompositeSourceSQLiteExcludesModules(t *testing.T) {
 
 func TestCompositeSourceSQLiteRejectsModuleRangeFiles(t *testing.T) {
 	roots, _ := buildFixture(t, map[string]string{
-		"sqlite/900074_memory_v2.up.sql": "PostgreSQL SQL must never enter the sqlite stream",
+		"sqlite/900074_memory_v2.up.sql":   "PostgreSQL SQL must never enter the sqlite stream",
 		"sqlite/900074_memory_v2.down.sql": "down",
 	})
 	_, err := assembleSource(BackendSQLite, roots)
@@ -331,5 +331,101 @@ func TestRealRepositoryLayoutAssembles(t *testing.T) {
 	}
 	if migrations := sqliteSrc.(*compositeSource).Versions(); len(migrations) == 0 {
 		t.Fatal("real sqlite set is empty")
+	}
+}
+
+// The module range is the merge-isolation anchor: the four relocated
+// migrations must stay present in the postgres stream and never enter the
+// sqlite stream, no matter how upstream renumbers the core files. This table
+// is the invariant that survives the main merge.
+var realLayoutInvariantTable = []struct {
+	name      string
+	presentIn []uint // must all exist in the postgres stream
+	absentIn  []uint // must not exist in the postgres stream
+	check     func(t *testing.T, pg, lite []uint)
+}{
+	{
+		name:      "module versions permanently in postgres",
+		presentIn: []uint{900073, 900074, 900075, 900076},
+	},
+	{
+		name:     "core stream never crosses into the module range",
+		absentIn: []uint{900000, 900072, 909999},
+		check: func(t *testing.T, pg, lite []uint) {
+			for _, v := range pg {
+				if v >= moduleRangeMin && v <= moduleRangeMax {
+					continue // legit module zone
+				}
+				if v > moduleRangeMax {
+					t.Fatalf("postgres version %d exceeds the reserved module range", v)
+				}
+			}
+		},
+	},
+	{
+		name: "postgres stream strictly ascending",
+		check: func(t *testing.T, pg, lite []uint) {
+			for i := 1; i < len(pg); i++ {
+				if pg[i] <= pg[i-1] {
+					t.Fatalf("postgres versions not strictly ascending at %d: %d then %d", i, pg[i-1], pg[i])
+				}
+			}
+		},
+	},
+	{
+		name: "sqlite stream carries no module SQL",
+		check: func(t *testing.T, pg, lite []uint) {
+			for _, v := range lite {
+				if v >= moduleRangeMin {
+					t.Fatalf("sqlite version %d leaks module-range SQL into Lite mode", v)
+				}
+			}
+		},
+	},
+}
+
+// TestRealLayoutInvariantTable drives the merge-safe invariant table against
+// the repository's actual migration files: the module anchors stay in
+// postgres, nothing crosses the reserved range, ordering holds, and Lite mode
+// never receives module SQL.
+func TestRealLayoutInvariantTable(t *testing.T) {
+	root := repoRoot(t)
+	roots := migrationRoots{
+		versioned: filepath.Join(root, versionedMigrationsDir),
+		modules:   filepath.Join(root, moduleMigrationsDir),
+		sqlite:    filepath.Join(root, sqliteMigrationsDir),
+	}
+
+	pgSrc, err := assembleSource(BackendPostgres, roots)
+	if err != nil {
+		t.Fatalf("real postgres set invalid: %v", err)
+	}
+	liteSrc, err := assembleSource(BackendSQLite, roots)
+	if err != nil {
+		t.Fatalf("real sqlite set invalid: %v", err)
+	}
+	pg := pgSrc.(*compositeSource).Versions()
+	lite := liteSrc.(*compositeSource).Versions()
+
+	for _, tc := range realLayoutInvariantTable {
+		t.Run(tc.name, func(t *testing.T) {
+			pgSet := map[uint]bool{}
+			for _, v := range pg {
+				pgSet[v] = true
+			}
+			for _, want := range tc.presentIn {
+				if !pgSet[want] {
+					t.Fatalf("postgres stream missing anchor version %d", want)
+				}
+			}
+			for _, banned := range tc.absentIn {
+				if pgSet[banned] {
+					t.Fatalf("postgres stream unexpectedly contains version %d", banned)
+				}
+			}
+			if tc.check != nil {
+				tc.check(t, pg, lite)
+			}
+		})
 	}
 }
