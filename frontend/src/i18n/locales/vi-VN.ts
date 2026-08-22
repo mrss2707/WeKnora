@@ -2964,6 +2964,11 @@ export default {
     }
   },
   chat: {
+    memoryUsedCount: 'Đã dùng {count} ký ức',
+    memoryForget: 'Xóa ký ức này',
+    memoryForgotten: 'Đã xóa ký ức',
+    memoryForgetFailed: 'Không thể xóa',
+    memoryHint: 'Đây là những ký ức dài hạn mà câu trả lời này đã xem. Xóa một ký ức sẽ khiến nó không được dùng lại.',
     title: 'Trò chuyện',
     newChat: 'Trò chuyện Mới',
     suggestedQuestions: 'You can ask me',
@@ -5813,6 +5818,33 @@ export default {
     },
   },
   memory: {
+    types: {
+      episodic: 'Tình tiết',
+      semantic: 'Ngữ nghĩa',
+      procedural: 'Thủ tục',
+      decision: 'Quyết định',
+      preference: 'Sở thích',
+      fact: 'Dữ kiện'
+    },
+    verdicts: {
+      none: 'Không',
+      fixed: 'Đã sửa',
+      refuted: 'Bị bác bỏ',
+      decision: 'Quyết định',
+      gotcha: 'Cạm bẫy',
+      wip: 'Đang xử lý'
+    },
+    tiers: {
+      0: 'Hạng 0',
+      1: 'Hạng 1',
+      2: 'Hạng 2',
+      3: 'Hạng 3'
+    },
+    card: {
+      importance: 'Quan trọng: {count}/10',
+      stale: 'Cũ',
+      staleTitle: 'Không dùng trong {days} ngày'
+    },
     graph: {
       depth: 'Độ sâu',
       fitToScreen: 'Vừa màn hình',
@@ -5954,5 +5986,181 @@ export default {
     subtabGraph: 'Đồ thị',
     subtabHealth: 'Sức khỏe',
     subtabHistory: 'Lịch sử',
+  },
+  memorySettings: {
+    title: 'Ký ức của tôi',
+    description: 'Những gì trợ lý ghi nhớ về bạn qua các cuộc trò chuyện. Bạn có thể xem lại, chỉnh sửa và xóa bất kỳ mục nào tại đây; ký ức đã xóa sẽ không bao giờ được dùng lại.',
+    workspaceDisabled: 'Bộ nhớ dài hạn đang tắt cho không gian làm việc này. Công tắc này chỉ có hiệu lực sau khi quản trị viên bật nó lên.',
+    enableLabel: 'Dùng bộ nhớ dài hạn cho tôi',
+    enableDescription: 'Khi tắt, trợ lý không đọc cũng không thêm ký ức của bạn. Ký ức hiện có được giữ nguyên và hoạt động trở lại khi bạn bật lại.',
+    agentDisabledHint: 'Một tác tử có thể tự tắt bộ nhớ dài hạn cho riêng nó. Trong hội thoại với tác tử đó, ký ức của bạn không được đọc hay thêm vào; các tác tử khác không bị ảnh hưởng.',
+    usage: {
+      title: 'Khi nào ký ức được dùng',
+      iconHint: 'Xem những ký ức nào được dùng trong hội thoại',
+      intro: 'Chỉ các ký ức Đang hoạt động mới được dùng trong hội thoại.',
+      rows: {
+        alwaysOn: {
+          label: 'Mỗi lượt',
+          text: 'Hồ sơ, sở thích và bất cứ điều gì bạn yêu cầu ghi nhớ'
+        },
+        situational: {
+          label: 'Khi có liên quan',
+          text: 'Sự kiện và công việc đang diễn ra'
+        },
+        interest: {
+          label: 'Chủ đề thường gặp',
+          text: 'Mối quan tâm dài hạn; không nhất thiết được trích dẫn mỗi lượt'
+        },
+        tracking: {
+          label: 'Theo dõi trước',
+          text: 'Chủ đề lặp lại được đếm trước, chỉ trở thành mối quan tâm dài hạn khi chạm ngưỡng'
+        },
+        documents: {
+          label: 'Nguồn quen thuộc',
+          text: 'Tài liệu mà câu trả lời của bạn liên tục dựa vào; việc truy xuất hơi ưu tiên chúng'
+        },
+        pending: {
+          label: 'Sau khi bạn xác nhận',
+          text: 'Các mục suy luận đang chờ xem xét'
+        },
+        inactive: {
+          label: 'Không dùng',
+          text: 'Các mục đã được thay thế và lưu trữ'
+        }
+      }
+    },
+    listTitle: 'Ký ức',
+    listCount: 'Tổng cộng {count}',
+    statusActive: 'Đang hoạt động',
+    statusSuperseded: 'Đã thay thế',
+    statusArchived: 'Đã lưu trữ',
+    statusPending: 'Cần xem xét',
+    statusTracking: 'Đang theo dõi',
+    statusDocuments: 'Nguồn quen thuộc',
+    confirmGuess: 'Có',
+    rejectGuess: 'Không',
+    pendingHint: 'Đây là những mục được suy luận từ câu hỏi của bạn. Chúng không được dùng cho đến khi bạn xác nhận.',
+    trackingHint: 'Đây là những chủ đề bạn thường hỏi, nhưng chưa chạm ngưỡng để trở thành mối quan tâm dài hạn. Chúng chưa được dùng trong hội thoại cho đến lúc đó.',
+    documentsHint: 'Những tài liệu này liên tục xuất hiện trong câu trả lời, nên việc truy xuất hơi nghiêng về chúng. Dừng theo dõi để bỏ ưu tiên; chúng sẽ xuất hiện lại sau hai lần trích dẫn nữa.',
+    supersededHint: 'Những mục này đã được thay thế bằng ký ức mới hơn. Chúng được giữ làm lịch sử thay đổi và không được dùng trong hội thoại.',
+    archivedHint: 'Ký ức đã lưu trữ không được dùng trong hội thoại. Khi chạm giới hạn mỗi người, các mục ít dùng sẽ được tự động cất đi.',
+    pendingEmptyTitle: 'Không có gì để xem xét',
+    pendingEmptyDescription: 'Khi có điều gì đó được suy luận về bạn từ câu hỏi của bạn, nó sẽ chờ xác nhận tại đây.',
+    trackingEmptyTitle: 'Không có chủ đề nào đang được theo dõi',
+    trackingEmptyDescription: 'Khi tự động chắt lọc được bật, hệ thống sẽ đếm những gì bạn thường hỏi và biến nó thành mối quan tâm dài hạn sau đủ số lần lặp.',
+    documentsEmptyTitle: 'Chưa có nguồn quen thuộc',
+    documentsEmptyDescription: 'Tài liệu xuất hiện ở đây sau khi được trích dẫn trong câu trả lời ít nhất hai lần.',
+    supersededEmptyTitle: 'Chưa có gì bị thay thế',
+    supersededEmptyDescription: 'Khi cách diễn đạt mới bao trùm cùng chủ đề, bản cũ ở lại đây. Chỉnh sửa một mục trên trang này cập nhật ngay tại chỗ, không tạo dòng lịch sử.',
+    archivedEmptyTitle: 'Chưa có gì được lưu trữ',
+    archivedEmptyDescription: 'Khi ký ức hoạt động vượt giới hạn (mặc định 200), các mục ít dùng sẽ được cất đi. Công việc có thời hạn cũng về đây sau khi hết hạn.',
+    documentsHits: 'Được trích dẫn {hits} lần',
+    untitledDocument: 'Tài liệu không tiêu đề',
+    openDocument: 'Mở tài liệu',
+    openDocumentUnavailable: 'Không thể mở: thiếu cơ sở tri thức',
+    stopTrackingDocument: 'Dừng theo dõi',
+    stopTrackingDocumentConfirm: 'Ngừng dùng tài liệu này cho truy xuất cá nhân hóa? Nó sẽ xuất hiện lại sau hai lần trích dẫn nữa.',
+    stopTrackingDocumentSuccess: 'Đã dừng theo dõi nguồn này',
+    stopTrackingDocumentFailed: 'Không thể dừng theo dõi',
+    trackingProgress: 'Đã hỏi {hits} lần; trở thành mối quan tâm dài hạn ở {threshold}',
+    trackingReady: 'Đã chạm ngưỡng — bạn có thể lưu thành mối quan tâm dài hạn',
+    trackingAliases: 'Cũng được hỏi là: {aliases}',
+    promoteTopic: 'Lưu thành mối quan tâm',
+    dismissTopic: 'Ngừng theo dõi',
+    dismissTopicConfirm: 'Ngừng theo dõi chủ đề này? Hỏi lại về nó sẽ không tự lưu thành mối quan tâm dài hạn.',
+    promoteSuccess: 'Đã lưu thành mối quan tâm dài hạn',
+    promoteFailed: 'Không thể lưu thành mối quan tâm',
+    dismissSuccess: 'Đã ngừng theo dõi chủ đề này',
+    dismissFailed: 'Không thể ngừng theo dõi',
+    confirmSuccess: 'Đã xác nhận',
+    confirmFailed: 'Không thể xác nhận',
+    rejectSuccess: 'Đã từ chối. Nó sẽ không được suy luận lại.',
+    rejectFailed: 'Không thể từ chối',
+    export: 'Xuất',
+    consolidate: 'Dọn dẹp',
+    consolidateConfirm: 'Các mục gần trùng lặp sẽ được gộp. Cách diễn đạt cũ nằm trong mục Đã thay thế. Tiếp tục?',
+    consolidateSuccess: 'Đã dọn dẹp: gộp {merged} nhóm, lưu trữ {expired} mục hết hạn, giáng cấp {demoted} công việc cũ',
+    consolidateNothing: 'Không cần dọn dẹp gì',
+    consolidateTooFewItems: 'Quá ít ký ức để dọn dẹp',
+    consolidateNoCandidates: 'Không có ký ức nào đủ giống nhau để gộp',
+    consolidateModelDeclined: 'Mô hình đã xem xét và thấy chúng là những thứ khác nhau, nên không gộp gì',
+    consolidateTooSoon: 'Vừa mới dọn dẹp xong. Vui lòng thử lại sau chốc lát.',
+    consolidateModelUnavailable: 'Mô hình không khả dụng, nên không thay đổi gì thay vì mạo hiểm gộp sai',
+    consolidateFailed: 'Dọn dẹp thất bại',
+    clear: 'Xóa tất cả',
+    clearConfirm: 'Thao tác này xóa vĩnh viễn mọi ký ức, chủ đề đang theo dõi và nguồn quen thuộc của bạn và không thể hoàn tác. Tiếp tục?',
+    deleteConfirm: 'Xóa vĩnh viễn ký ức này?',
+    add: 'Thêm',
+    addPlaceholder: 'Viết một câu bạn muốn trợ lý ghi nhớ',
+    addTitle: 'Thêm ký ức',
+    addKindLabel: 'Loại',
+    addContentLabel: 'Nội dung',
+    emptyTitle: 'Chưa có ký ức nào',
+    emptyDescription: 'Hãy nói "nhớ rằng ..." trong hội thoại, hoặc thêm trực tiếp ở trên.',
+    kinds: {
+      profile: 'Về bạn',
+      preference: 'Sở thích',
+      fact: 'Sự kiện',
+      task: 'Công việc đang diễn ra',
+      interest: 'Mối quan tâm dài hạn'
+    },
+    kindHints: {
+      profile: 'Được đưa vào mỗi lượt về sau',
+      preference: 'Được đưa vào mỗi lượt về sau',
+      fact: 'Chỉ dùng khi câu hỏi có liên quan',
+      task: 'Chỉ dùng khi câu hỏi có liên quan',
+      interest: 'Giúp trợ lý hiểu bạn thường hỏi về gì; không nhất thiết được trích dẫn mỗi lượt'
+    },
+    origins: {
+      explicit: 'Bạn yêu cầu',
+      extracted: 'Được chắt lọc',
+      manual: 'Thêm thủ công'
+    },
+    toasts: {
+      enabled: 'Đã bật bộ nhớ dài hạn cho bạn',
+      disabled: 'Đã tắt bộ nhớ dài hạn',
+      added: 'Đã thêm',
+      updated: 'Đã cập nhật',
+      deleted: 'Đã xóa',
+      cleared: 'Đã xóa {count} ký ức',
+      saveFailed: 'Thao tác thất bại: {message}'
+    }
+  },
+  memoryWorkspaceSettings: {
+    title: 'Bộ nhớ dài hạn',
+    description: 'Cho phép trợ lý ghi nhớ những gì thành viên nói — họ là ai, thích làm việc thế nào, các sự kiện ổn định và những gì họ đang làm — xuyên suốt các cuộc trò chuyện.',
+    introTitle: 'Mặc định tắt, bạn cần bật nó lên',
+    introDescription: 'Bộ nhớ dài hạn giữ lại những gì thành viên nói trong hội thoại, nên nó không được bật sẵn. Khi bật, mỗi thành viên có không gian ký ức riêng biệt và có thể xem lại, chỉnh sửa, xóa hoặc tắt hoàn toàn trong "Ký ức của tôi". Ký ức hồ sơ và sở thích đang hoạt động được đưa vào mọi lượt về sau; sự kiện và công việc đang diễn ra chỉ được gợi lại khi câu hỏi có liên quan.',
+    enableLabel: 'Bật bộ nhớ dài hạn trong không gian làm việc này',
+    enableDescription: 'Khi tắt, không cuộc trò chuyện nào trong không gian làm việc này đọc hoặc ghi ký ức.',
+    writeModeLabel: 'Cách ghi ký ức',
+    writeModeDescription: 'Kiểm soát những gì được ghi nhớ.',
+    writeModeExplicit: 'Chỉ khi yêu cầu rõ',
+    writeModeAuto: 'Tự chắt lọc',
+    writeModeExplicitHint: 'Chỉ ghi những gì thành viên yêu cầu ghi nhớ rõ ràng, cộng các mục thêm thủ công. Không tốn thêm lượt gọi mô hình.',
+    writeModeAutoHint: 'Thêm một lượt gọi mô hình nền sau hội thoại để chắt lọc những gì đáng giữ từ lời thành viên nói.',
+    extractModelLabel: 'Mô hình chắt lọc',
+    extractModelDescription: 'Để trống để dùng chính mô hình của cuộc trò chuyện.',
+    extractDelayLabel: 'Độ trễ chắt lọc',
+    extractDelayDescription: 'Sau bao lâu kể từ khi lượt hội thoại kết thúc thì chạy chắt lọc. Việc chờ giúp một lượt gọi mô hình bao phủ nhiều tin nhắn mà người dùng thường gửi liên tiếp.',
+    extractMinIntervalLabel: 'Khoảng tối thiểu giữa các lần chạy',
+    extractMinIntervalDescription: 'Ngưỡng sàn giữa hai lần chắt lọc cho một người, dùng để giới hạn chi phí. Tin nhắn sinh ra trong khoảng đó không bị bỏ — chúng được chuyển sang lần chạy kế tiếp.',
+    vectorRecallLabel: 'Khớp ký ức theo ngữ nghĩa',
+    vectorRecallDescription: 'Thêm khớp ngữ nghĩa bên cạnh khớp từ ngữ, để ký ức vẫn hiện ra khi người dùng diễn đạt lại chủ đề — và hầu hết ký ức sớm muộn cũng bị diễn đạt lại. Tốn một lượt embedding mỗi vòng, và quay về khớp từ ngữ thuần túy khi hết thời gian chờ.',
+    embeddingModelLabel: 'Mô hình embedding cho ký ức',
+    embeddingModelDescription: 'Gợi nhớ ngữ nghĩa dùng đúng một mô hình này, độc lập với các mô hình embedding mà cơ sở tri thức ràng buộc. Để trống để chỉ khớp từ ngữ. Sau khi đổi, ký ức mới dùng mô hình mới ngay; ký ức cũ vẫn khớp từ ngữ cho đến khi được nhúng lại.',
+    conditioningLabel: 'Để ký ức định hình việc truy xuất',
+    conditioningDescription: 'Ký ức tham gia vào việc viết lại truy vấn và xếp hạng tài liệu thay vì chỉ được nối vào prompt trả lời. Đây là nơi ký ức phát huy giá trị trong một sản phẩm cơ sở tri thức.',
+    interestThresholdLabel: 'Số câu hỏi trước khi chủ đề thành mối quan tâm',
+    interestThresholdDescription: 'Một chủ đề chỉ được ghi nhận sau khi xuất hiện đủ số lần này. Đặt 1 sẽ ghi mọi câu hỏi thoáng qua, thường là quá nhiễu.',
+    instructionsLabel: 'Quy tắc chắt lọc tùy chỉnh',
+    instructionsDescription: 'Các quy tắc của không gian làm việc được nối vào prompt chắt lọc, cho những chính sách sản phẩm không đoán trước được — ví dụ "không bao giờ ghi tên khách hàng".',
+    instructionsPlaceholder: 'Một quy tắc mỗi dòng, ví dụ: không bao giờ ghi tên khách hàng',
+    maxItemsLabel: 'Số ký ức mỗi thành viên',
+    maxItemsDescription: 'Vượt quá mức này, các ký ức xếp hạng thấp nhất sẽ được lưu trữ theo mức quan trọng và mức mới. Ký ức đã lưu trữ vẫn hiển thị trong "Ký ức của tôi".',
+    toasts: {
+      saveSuccess: 'Đã lưu cài đặt bộ nhớ dài hạn',
+      saveFailed: 'Lưu thất bại: {message}'
+    }
   },
 }
