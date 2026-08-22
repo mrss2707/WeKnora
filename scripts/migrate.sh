@@ -23,8 +23,9 @@ DB_NAME=${DB_NAME:-WeKnora}
 # Use versioned migrations directory
 MIGRATIONS_DIR="${MIGRATIONS_DIR:-migrations/versioned}"
 
-# Check if migrate tool is installed
-if ! command -v migrate &> /dev/null; then
+# Check if migrate tool is installed (not needed for the validate subcommand,
+# which is a pure Go assembly check without any database access)
+if [ "$1" != "validate" ] && ! command -v migrate &> /dev/null; then
     echo "Error: migrate tool is not installed"
     echo "Install it with: go install -tags 'postgres' github.com/golang-migrate/migrate/v4/cmd/migrate@latest"
     exit 1
@@ -113,8 +114,25 @@ case "$1" in
         echo "Migrating to version $2..."
         migrate -path ${MIGRATIONS_DIR} -database ${DB_URL} goto $2
         ;;
+    validate)
+        BACKEND="${2:-postgres}"
+        case "$BACKEND" in
+            postgres|sqlite)
+                ;;
+            *)
+                echo "Error: backend must be 'postgres' or 'sqlite'"
+                echo "Usage: $0 validate [postgres|sqlite]"
+                exit 1
+                ;;
+        esac
+        echo "Validating migration set for backend: ${BACKEND}"
+        echo "  postgres: versioned + modules/*/postgres composite stream"
+        echo "  sqlite:   migrations/sqlite only (module SQL must never enter Lite)"
+        cd "$PROJECT_ROOT"
+        go run ./cmd/migrate_validate "$BACKEND"
+        ;;
     *)
-        echo "Usage: $0 {up|down|create <migration_name>|version|force <version>|goto <version>}"
+        echo "Usage: $0 {up|down|create <migration_name>|version|force <version>|goto <version>|validate [postgres|sqlite]}"
         exit 1
         ;;
 esac

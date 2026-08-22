@@ -209,6 +209,12 @@ migrate-goto:
 	fi
 	./scripts/migrate.sh goto $(version)
 
+migrate-validate:
+	./scripts/migrate.sh validate
+
+migrate-validate-sqlite:
+	./scripts/migrate.sh validate sqlite
+
 # Generate API documentation (Swagger)
 docs:
 	@echo "生成 Swagger API 文档..."
