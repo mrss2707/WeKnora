@@ -1,0 +1,18 @@
+{
+  "module": "memory_v2",
+  "owner": "Memory V2 module (develop branch)",
+  "backend": "postgres",
+  "reserved_range": "900000-909999",
+  "migrations": [
+    "900074_memory_v2.up.sql",
+    "900075_memory_v2_verdict.up.sql",
+    "900076_memory_v2_hnsw.up.sql"
+  ],
+  "prerequisites": [
+    "PostgreSQL (uuid-ossp legacy note: gen_random_uuid requires PG 13+)",
+    "pgvector (vector type, ivfflat/hnsw indexes)",
+    "ParadeDB pg_search (bm25 full-text index)"
+  ],
+  "rollback_policy": "Down migrations are bundled but only revert additive, idempotent changes. For manual rollback of a live DB use: ./scripts/migrate.sh force 76 (see README).",
+  "upgrade_guide": "See README.md 'Upgrading existing databases'."
+}

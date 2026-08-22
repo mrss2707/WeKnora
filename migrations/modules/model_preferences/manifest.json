@@ -1,0 +1,14 @@
+{
+  "module": "model_preferences",
+  "owner": "develop branch (per-tenant model ordering)",
+  "backend": "postgres",
+  "reserved_range": "900000-909999",
+  "migrations": [
+    "900073_model_preferences.up.sql"
+  ],
+  "prerequisites": [
+    "PostgreSQL"
+  ],
+  "rollback_policy": "Down migration bundled; re-runs are idempotent (ADD COLUMN IF NOT EXISTS).",
+  "upgrade_guide": "See README.md."
+}
