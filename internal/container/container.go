@@ -715,6 +715,15 @@ func initDatabase(cfg *config.Config) (*gorm.DB, error) {
 		// Run base migrations (all versioned migrations including embeddings)
 		// The embeddings migration will be conditionally executed based on skip_embedding parameter in DSN
 		if err := database.RunMigrationsWithOptions(migrateDSN, migrationOpts); err != nil {
+			// Fail closed when the migration SET itself cannot be assembled
+			// (bad names, duplicate versions, out-of-range module files): the
+			// schema source is untrustworthy and the app must not boot with a
+			// half-known history. Runtime errors from running m.Up() keep the
+			// historical warn-and-continue behaviour (migrations may be managed
+			// externally and Lite mode stays usable).
+			if errors.Is(err, database.ErrInvalidMigrationSet) {
+				return nil, fmt.Errorf("migration set is invalid, refusing to start: %w", err)
+			}
 			// Log warning but don't fail startup - migrations might be handled externally
 			logger.Warnf(context.Background(), "Database migration failed: %v", err)
 			logger.Warnf(

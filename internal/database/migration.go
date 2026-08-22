@@ -15,6 +15,9 @@ import (
 	_ "github.com/golang-migrate/migrate/v4/source/file"
 )
 
+// sourceName identifies the composite in-memory source in migrate logs.
+const sourceName = "weknora-composite"
+
 var (
 	migrationStateMu        sync.RWMutex
 	currentMigrationVersion uint
@@ -103,9 +106,19 @@ func RunMigrationsWithOptions(dsn string, opts MigrationOptions) error {
 
 	logger.Infof(ctx, "Starting database migration...")
 
-	migrationsPath := "file://migrations/versioned"
+	// Assemble the backend-aware composite migration source (fail closed on
+	// an invalid set): postgres = core versioned + module postgres streams,
+	// sqlite = migrations/sqlite only.
+	backend := BackendPostgres
 	if strings.HasPrefix(dsn, "sqlite3://") {
-		migrationsPath = "file://migrations/sqlite"
+		backend = BackendSQLite
+	}
+	src, err := NewCompositeMigrationSource(backend)
+	if err != nil {
+		logger.Errorf(ctx, "Failed to assemble migration set: %v", err)
+		wrapped := fmt.Errorf("failed to assemble migration set: %w", err)
+		setMigrationState(0, false, wrapped.Error(), false)
+		return wrapped
 	}
 
 	var m *migrate.Migrate
@@ -125,7 +138,7 @@ func RunMigrationsWithOptions(dsn string, opts MigrationOptions) error {
 			setMigrationState(0, false, wrapped.Error(), false)
 			return wrapped
 		}
-		m, err = migrate.NewWithDatabaseInstance(migrationsPath, "sqlite3", driver)
+		m, err = migrate.NewWithInstance(sourceName, src, "sqlite3", driver)
 		if err != nil {
 			logger.Errorf(ctx, "Failed to create migrate instance: %v", err)
 			wrapped := fmt.Errorf("failed to create migrate instance: %w", err)
@@ -133,8 +146,7 @@ func RunMigrationsWithOptions(dsn string, opts MigrationOptions) error {
 			return wrapped
 		}
 	} else {
-		var err error
-		m, err = migrate.New(migrationsPath, dsn)
+		m, err = migrate.NewWithSourceInstance(sourceName, src, dsn)
 		if err != nil {
 			logger.Errorf(ctx, "Failed to create migrate instance: %v", err)
 			wrapped := fmt.Errorf("failed to create migrate instance: %w", err)
@@ -298,7 +310,8 @@ func recoverFromDirtyState(ctx context.Context, m *migrate.Migrate, dirtyVersion
 	return nil
 }
 
-// GetMigrationVersion returns the current migration version
+// GetMigrationVersion returns the current migration version derived from the
+// composite postgres migration set.
 func GetMigrationVersion() (uint, bool, error) {
 	dbURL := fmt.Sprintf(
 		"postgres://%s:%s@%s:%s/%s?sslmode=disable",
@@ -309,9 +322,12 @@ func GetMigrationVersion() (uint, bool, error) {
 		os.Getenv("DB_NAME"),
 	)
 
-	migrationsPath := "file://migrations/versioned"
+	src, err := NewCompositeMigrationSource(BackendPostgres)
+	if err != nil {
+		return 0, false, fmt.Errorf("failed to assemble migration set: %w", err)
+	}
 
-	m, err := migrate.New(migrationsPath, dbURL)
+	m, err := migrate.NewWithSourceInstance(sourceName, src, dbURL)
 	if err != nil {
 		return 0, false, fmt.Errorf("failed to create migrate instance: %w", err)
 	}
