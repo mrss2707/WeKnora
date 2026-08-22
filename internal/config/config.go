@@ -34,6 +34,11 @@ type Config struct {
 	IM              *IMConfig              `yaml:"im"               json:"im"`
 	Agent           *AgentConfig           `yaml:"agent"            json:"agent"`
 	MemoryV2        *types.MemoryV2Config  `yaml:"memory_v2"        json:"memory_v2"`
+	// CrossSessionMemory gates main's legacy cross-session memory runtime.
+	// Disabled (false) by default: Memory V2 is the default runtime and is
+	// registered unconditionally. The flag is consumed by the single gated
+	// registration block in internal/container/cross_session_memory.go.
+	CrossSessionMemory bool `yaml:"cross_session_memory" json:"cross_session_memory"`
 	// FrontendBaseURL is the externally-visible origin of the SPA, used
 	// to compose absolute share-link URLs. Empty falls back to a host-
 	// relative URL ("/register?token=…") which the SPA then resolves
@@ -583,7 +588,8 @@ func LoadConfig() (*Config, error) {
 	applyKnowledgeBaseEnvOverrides(&cfg)
 	applyAuthAndTenantDefaults(&cfg)
 	applyAuditDefaults(&cfg)
-		applyMemoryV2Defaults(&cfg)
+	applyMemoryV2Defaults(&cfg)
+	applyCrossSessionMemoryDefaults(&cfg)
 
 	if err := ValidateConfig(&cfg); err != nil {
 		return nil, err
@@ -930,6 +936,16 @@ func applyMemoryV2Defaults(cfg *Config) {
 	// Env override: explicit "false" disables; anything else keeps the default (true).
 	if v := strings.ToLower(strings.TrimSpace(os.Getenv("MEMORY_V2_ENABLED"))); v == "false" || v == "0" {
 		cfg.MemoryV2.Enabled = false
+	}
+}
+
+// applyCrossSessionMemoryDefaults initializes the cross-session memory gate.
+// Disabled by default; set CROSS_SESSION_MEMORY=true to opt in. The flag is
+// consumed by the single gated registration block in
+// internal/container/cross_session_memory.go.
+func applyCrossSessionMemoryDefaults(cfg *Config) {
+	if v := strings.ToLower(strings.TrimSpace(os.Getenv("CROSS_SESSION_MEMORY"))); v == "true" || v == "1" {
+		cfg.CrossSessionMemory = true
 	}
 }
 

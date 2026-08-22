@@ -159,6 +159,9 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	// Memory V2 — repository, lazy service, chat pipeline plugin and HTTP
 	// handler are wired in memory_v2.go behind this single stable call.
 	must(registerMemoryV2(container))
+	// Cross-session memory (main) — single gated choice point; a no-op unless
+	// config cross_session_memory is enabled. Wired in cross_session_memory.go.
+	must(registerCrossSessionMemory(container))
 	must(container.Provide(repository.NewMCPServiceRepository))
 	must(container.Provide(repository.NewMCPToolApprovalRepository))
 	must(container.Provide(repository.NewMCPOAuthRepository))
@@ -389,7 +392,6 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(handler.NewEmbedChannelHandler))
 	must(container.Provide(handler.NewWeKnoraCloudHandler))
 	logger.Debugf(ctx, "[Container] HTTP handlers registered")
-
 
 	logger.Debugf(ctx, "[Container] HTTP handlers registered")
 
