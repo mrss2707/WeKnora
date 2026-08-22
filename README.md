@@ -246,6 +246,22 @@ docker compose up -d    # Recreate containers with new images
 
 > `docker compose up -d` alone reuses locally cached images and may leave the UI version out of sync with the release you downloaded.
 
+#### One-time migration recovery for databases at version ≤ 76
+
+Memory V2 was relocated from the shared versioned range (000073–000076) to a
+dedicated module range (900073–900076), so databases created before that
+relocation skip the four core migrations the versioned range now contains. Run
+this exactly once on a COPY of such a database before switching branches —
+every migration is additive and idempotent, so this is safe to re-run:
+
+```bash
+./scripts/migrate.sh force 72
+./scripts/migrate.sh up
+```
+
+Fresh databases need nothing: the composite migration source applies the
+versioned range first, then the module range, ending at the maximum version.
+
 ### 🔧 Optional Services (Docker Compose Profiles)
 
 Add `--profile` flags to enable additional components. Multiple profiles can be combined:
