@@ -180,6 +180,9 @@ func (t *KnowledgeSearchTool) Execute(ctx context.Context, args json.RawMessage)
 	var userSpecifiedKBs []string
 	if len(input.KnowledgeBaseIDs) > 0 {
 		userSpecifiedKBs = input.KnowledgeBaseIDs
+		if err := validateKnowledgeBaseIDsInSearchTargets(t.searchTargets, userSpecifiedKBs); err != nil {
+			return &types.ToolResult{Success: false, Error: err.Error()}, err
+		}
 		logger.Infof(ctx, "[Tool][KnowledgeSearch] User specified %d knowledge bases: %v", len(userSpecifiedKBs), userSpecifiedKBs)
 	}
 
@@ -193,6 +196,9 @@ func (t *KnowledgeSearchTool) Execute(ctx context.Context, args json.RawMessage)
 		}
 		var filteredTargets types.SearchTargets
 		for _, target := range t.searchTargets {
+			if target == nil {
+				continue
+			}
 			if userKBSet[target.KnowledgeBaseID] {
 				filteredTargets = append(filteredTargets, target)
 			}
@@ -460,6 +466,9 @@ func (t *KnowledgeSearchTool) concurrentSearchByTargets(
 	}
 	filteredTargets := make(types.SearchTargets, 0, len(searchTargets))
 	for _, st := range searchTargets {
+		if st == nil || st.KnowledgeBaseID == "" {
+			continue
+		}
 		if searchableKBs[st.KnowledgeBaseID] {
 			filteredTargets = append(filteredTargets, st)
 			continue
@@ -482,6 +491,9 @@ func (t *KnowledgeSearchTool) concurrentSearchByTargets(
 
 	groups := make(map[string][]*types.SearchTarget)
 	for _, st := range searchTargets {
+		if st == nil || st.KnowledgeBaseID == "" {
+			continue
+		}
 		key := modelKeyMap[st.KnowledgeBaseID]
 		groups[key] = append(groups[key], st)
 	}
@@ -785,7 +797,8 @@ Output only the scores, no explanations or additional text.`,
 		// Each score line is ~15 tokens, add buffer for safety
 		maxTokens := len(batch)*20 + 100
 
-		response, err := t.chatModel.Chat(ctx, messages, &chat.ChatOptions{
+		modelCtx := types.WithLLMCallMetadata(ctx, "knowledge_search_rerank", "")
+		response, err := t.chatModel.Chat(modelCtx, messages, &chat.ChatOptions{
 			Temperature: 0.1, // Low temperature for consistent scoring
 			MaxTokens:   maxTokens,
 		})
@@ -1090,6 +1103,39 @@ func (t *KnowledgeSearchTool) buildContentSignature(content string) string {
 	return searchutil.BuildContentSignature(content)
 }
 
+// writeKnowledgeMetadataHeader emits document-scoped metadata once per
+// knowledge item. Chunk entries keep only chunk-specific content so repeated
+// results from the same document do not waste model context.
+func writeKnowledgeMetadataHeader(ob *strings.Builder, results []*searchResultWithMeta) {
+	seen := make(map[string]struct{}, len(results))
+	hasMetadata := false
+	var documents strings.Builder
+	for _, result := range results {
+		if result == nil || result.SearchResult == nil || result.KnowledgeID == "" || result.KnowledgeCustomMetadata == "" {
+			continue
+		}
+		if _, ok := seen[result.KnowledgeID]; ok {
+			continue
+		}
+		seen[result.KnowledgeID] = struct{}{}
+		hasMetadata = true
+		documents.WriteString(fmt.Sprintf(
+			"<document knowledge_id=\"%s\" knowledge_base_id=\"%s\" title=\"%s\">\n",
+			xmlEscape(result.KnowledgeID),
+			xmlEscape(result.KnowledgeBaseID),
+			xmlEscape(result.KnowledgeTitle),
+		))
+		documents.WriteString(fmt.Sprintf("<metadata>%s</metadata>\n", xmlEscape(result.KnowledgeCustomMetadata)))
+		documents.WriteString("</document>\n")
+	}
+	if !hasMetadata {
+		return
+	}
+	ob.WriteString("<documents>\n")
+	ob.WriteString(documents.String())
+	ob.WriteString("</documents>\n")
+}
+
 // formatOutput formats the search results for display
 func (t *KnowledgeSearchTool) formatOutput(
 	ctx context.Context,
@@ -1123,7 +1169,7 @@ func (t *KnowledgeSearchTool) formatOutput(
 	// Count results by KB
 	kbCounts := make(map[string]int)
 	for _, r := range results {
-		kbCounts[r.KnowledgeID]++
+		kbCounts[r.KnowledgeBaseID]++
 	}
 
 	// Format individual results as XML. Tag names are kept in sync with
@@ -1135,8 +1181,10 @@ func (t *KnowledgeSearchTool) formatOutput(
 	for _, q := range queries {
 		ob.WriteString(fmt.Sprintf("<query>%s</query>\n", xmlEscape(q)))
 	}
+	writeKnowledgeMetadataHeader(&ob, results)
 
 	formattedResults := make([]map[string]interface{}, 0, len(results))
+	enabled := true
 
 	faqMetadataCache := make(map[string]*types.FAQChunkMetadata)
 
@@ -1175,7 +1223,8 @@ func (t *KnowledgeSearchTool) formatOutput(
 				_, total, err := t.chunkService.GetRepository().ListPagedChunksByKnowledgeID(ctx,
 					effectiveTenantID, result.KnowledgeID,
 					&types.Pagination{Page: 1, PageSize: 1},
-					[]types.ChunkType{types.ChunkTypeText, types.ChunkTypeFAQ}, "", "", "", "", "",
+					[]types.ChunkType{types.ChunkTypeText, types.ChunkTypeFAQ}, nil, "", "", "", "",
+					&enabled,
 				)
 				if err != nil {
 					logger.Warnf(ctx, "[Tool][KnowledgeSearch] Failed to get total chunks for knowledge %s: %v", result.KnowledgeID, err)
@@ -1289,6 +1338,7 @@ func (t *KnowledgeSearchTool) formatOutput(
 			"knowledge_id":        result.KnowledgeID,
 			"knowledge_base_id":   result.KnowledgeBaseID,
 			"knowledge_title":     result.KnowledgeTitle,
+			"knowledge_metadata":  result.KnowledgeCustomMetadata,
 			"match_type":          result.MatchType,
 			"source_query":        result.SourceQuery,
 			"query_type":          result.QueryType,
@@ -1490,23 +1540,20 @@ func (t *KnowledgeSearchTool) applyMMR(
 		tokenSets[i] = t.tokenizeSimple(t.getEnrichedPassage(ctx, r.SearchResult))
 	}
 
-	// MMR selection loop
+	// MMR selection loop, incremental form: maxRedundancy[i] caches candidate i's
+	// maximum jaccard against everything selected so far, so each round only needs
+	// one comparison per remaining candidate instead of one per (candidate, selected)
+	// pair. Selection output is identical to the naive form, including tie-breaking,
+	// because the candidate iteration order is unchanged.
+	selectedTokenSets := make([]map[string]struct{}, 0, k)
+	maxRedundancy := make([]float64, len(candidates))
 	for len(selected) < k && len(candidates) > 0 {
 		bestIdx := 0
 		bestScore := -1.0
 
 		for i, r := range candidates {
-			relevance := r.Score
-			redundancy := 0.0
-
-			// Calculate maximum redundancy with already selected results
-			for _, s := range selected {
-				selectedTokens := t.tokenizeSimple(t.getEnrichedPassage(ctx, s.SearchResult))
-				redundancy = math.Max(redundancy, t.jaccard(tokenSets[i], selectedTokens))
-			}
-
 			// MMR score: balance relevance and diversity
-			mmr := lambda*relevance - (1.0-lambda)*redundancy
+			mmr := lambda*r.Score - (1.0-lambda)*maxRedundancy[i]
 			if mmr > bestScore {
 				bestScore = mmr
 				bestIdx = i
@@ -1515,20 +1562,27 @@ func (t *KnowledgeSearchTool) applyMMR(
 
 		// Add best candidate to selected and remove from candidates
 		selected = append(selected, candidates[bestIdx])
+		chosenTokens := tokenSets[bestIdx]
+		selectedTokenSets = append(selectedTokenSets, chosenTokens)
 		candidates = append(candidates[:bestIdx], candidates[bestIdx+1:]...)
-		// Remove corresponding token set
+		// Remove corresponding token set and cached redundancy
 		tokenSets = append(tokenSets[:bestIdx], tokenSets[bestIdx+1:]...)
+		maxRedundancy = append(maxRedundancy[:bestIdx], maxRedundancy[bestIdx+1:]...)
+
+		// Fold the freshly selected result into every remaining candidate's cache
+		for i := range candidates {
+			maxRedundancy[i] = math.Max(maxRedundancy[i], t.jaccard(tokenSets[i], chosenTokens))
+		}
 	}
 
-	// Compute average redundancy among selected results
+	// Compute average redundancy among selected results, reusing the cached token
+	// sets instead of re-tokenizing every pair
 	avgRed := 0.0
-	if len(selected) > 1 {
+	if len(selectedTokenSets) > 1 {
 		pairs := 0
-		for i := 0; i < len(selected); i++ {
-			for j := i + 1; j < len(selected); j++ {
-				si := t.tokenizeSimple(t.getEnrichedPassage(ctx, selected[i].SearchResult))
-				sj := t.tokenizeSimple(t.getEnrichedPassage(ctx, selected[j].SearchResult))
-				avgRed += t.jaccard(si, sj)
+		for i := 0; i < len(selectedTokenSets); i++ {
+			for j := i + 1; j < len(selectedTokenSets); j++ {
+				avgRed += t.jaccard(selectedTokenSets[i], selectedTokenSets[j])
 				pairs++
 			}
 		}

@@ -95,6 +95,10 @@ func prepareMessagesWithHistory(chatManage *types.ChatManage) []chat.Message {
 		"contexts": chatManage.RenderedContexts,
 	})
 	systemPrompt = appendRetrievedImageOutputRequirement(systemPrompt, chatManage.RenderedContexts)
+	// Memory goes at the end of the system prompt, after the retrieved-context
+	// placeholders have been rendered, so a remembered sentence can never be
+	// substituted into prompt structure.
+	systemPrompt += chatManage.MemoryPrompt
 
 	chatMessages := []chat.Message{
 		{Role: "system", Content: systemPrompt},
@@ -111,6 +115,18 @@ func prepareMessagesWithHistory(chatManage *types.ChatManage) []chat.Message {
 	chatMessages = append(chatMessages, userMsg)
 
 	return chatMessages
+}
+
+func withPromptCacheMetadata(
+	ctx context.Context,
+	chatModel chat.Chat,
+	messages []chat.Message,
+	opts *chat.ChatOptions,
+	purpose string,
+) context.Context {
+	prefixFingerprint := chat.PromptPrefixFingerprint(messages, opts)
+	_ = chatModel // model identity is already captured by the usage sink
+	return types.WithLLMCallMetadata(ctx, purpose, prefixFingerprint)
 }
 
 // AppendHistoryMessages appends prior Q&A rounds in chronological order.

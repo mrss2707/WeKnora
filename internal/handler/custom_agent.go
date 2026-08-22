@@ -17,6 +17,13 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+// sandboxConfigLookup is the existence check an agent's sandbox selection needs.
+// Narrower than the full config service so this handler cannot grow a dependency
+// on config mutation.
+type sandboxConfigLookup interface {
+	Get(ctx context.Context, tenantID uint64, id string) (*types.TenantSandboxConfigEntity, error)
+}
+
 // CustomAgentHandler defines the HTTP handler for custom agent operations
 type CustomAgentHandler struct {
 	service      interfaces.CustomAgentService
@@ -25,6 +32,9 @@ type CustomAgentHandler struct {
 	// userService 仅用于 list 接口批量回填 creator_name，作用见
 	// KnowledgeBaseHandler.userService。
 	userService interfaces.UserService
+	// sandboxConfigs validates an agent's sandbox backend selection. Optional —
+	// nil in partially-wired unit tests, where the selection is left unchecked.
+	sandboxConfigs sandboxConfigLookup
 }
 
 // NewCustomAgentHandler creates a new custom agent handler instance
@@ -33,12 +43,14 @@ func NewCustomAgentHandler(
 	imService *im.Service,
 	disabledRepo interfaces.TenantDisabledSharedAgentRepository,
 	userService interfaces.UserService,
+	sandboxConfigs *service.TenantSandboxConfigService,
 ) *CustomAgentHandler {
 	return &CustomAgentHandler{
-		service:      service,
-		imService:    imService,
-		disabledRepo: disabledRepo,
-		userService:  userService,
+		service:        service,
+		imService:      imService,
+		disabledRepo:   disabledRepo,
+		userService:    userService,
+		sandboxConfigs: sandboxConfigs,
 	}
 }
 
@@ -83,6 +95,10 @@ func (h *CustomAgentHandler) CreateAgent(c *gin.Context) {
 		return
 	}
 	if err := authorizeAgentKnowledgeScope(ctx, req.Config); err != nil {
+		c.Error(err)
+		return
+	}
+	if err := h.validateAgentSandboxConfig(ctx, req.Config); err != nil {
 		c.Error(err)
 		return
 	}
@@ -329,6 +345,10 @@ func (h *CustomAgentHandler) UpdateAgent(c *gin.Context) {
 		c.Error(err)
 		return
 	}
+	if err := h.validateAgentSandboxConfig(ctx, req.Config); err != nil {
+		c.Error(err)
+		return
+	}
 
 	// Build agent object
 	agent := &types.CustomAgent{
@@ -563,7 +583,7 @@ func (h *CustomAgentHandler) GetAgentTypePresets(c *gin.Context) {
 // @Param        knowledge_base_ids  query     string  false  "知识库ID列表（逗号分隔），覆盖智能体默认配置"
 // @Param        knowledge_ids       query     string  false  "知识ID列表（逗号分隔），限定到具体文档"
 // @Param        tag_scopes          query     string  false  "带知识库归属的标签范围（JSON）"
-// @Param        limit               query     int     false  "返回数量上限（默认6）"
+// @Param        limit               query     int     false  "返回数量上限（未传时使用智能体配置的开场问题数量，最大30）"
 // @Success      200                 {object}  map[string]interface{}  "推荐问题列表"
 // @Failure      400                 {object}  errors.AppError         "请求参数错误"
 // @Failure      404                 {object}  errors.AppError         "智能体不存在"
@@ -608,7 +628,10 @@ func (h *CustomAgentHandler) GetSuggestedQuestions(c *gin.Context) {
 		}
 	}
 
-	limit := 6
+	// limit == 0 signals "unspecified" so the service falls back to the agent's
+	// configured starter count. A provided value is passed through unchanged and
+	// bounded by the service's safety cap.
+	limit := 0
 	if limitStr := c.Query("limit"); limitStr != "" {
 		if parsed, err := strconv.Atoi(limitStr); err == nil && parsed > 0 {
 			limit = parsed
@@ -641,6 +664,34 @@ func (h *CustomAgentHandler) GetSuggestedQuestions(c *gin.Context) {
 			"questions": questions,
 		},
 	})
+}
+
+// validateAgentSandboxConfig rejects a selection the workspace does not have.
+//
+// Checking at save time is what makes the mistake fixable: a dangling reference
+// only fails when the agent next runs a skill, mid-conversation, as an opaque
+// resolution error with no hint about which agent to edit.
+func (h *CustomAgentHandler) validateAgentSandboxConfig(
+	ctx context.Context, cfg types.CustomAgentConfig,
+) error {
+	configID := strings.TrimSpace(cfg.SandboxConfigID)
+	if configID == "" || h.sandboxConfigs == nil {
+		// Empty means the deployment-wide default, which always exists.
+		return nil
+	}
+	tenantID, ok := types.TenantIDFromContext(ctx)
+	if !ok {
+		return errors.NewUnauthorizedError("Missing workspace context")
+	}
+	stored, err := h.sandboxConfigs.Get(ctx, tenantID, configID)
+	if err != nil {
+		return errors.NewInternalServerError("Failed to verify sandbox config").
+			WithDetails(err.Error())
+	}
+	if stored == nil {
+		return errors.NewBadRequestError("所选沙箱后端配置不存在，请重新选择")
+	}
+	return nil
 }
 
 func authorizeAgentKnowledgeScope(ctx context.Context, cfg types.CustomAgentConfig) error {

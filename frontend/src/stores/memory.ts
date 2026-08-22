@@ -178,7 +178,7 @@ export const useMemoryStore = defineStore('memory', {
         const id = memoryId || (this.memories.length > 0 ? this.memories[0].id : '')
         if (!id) return
         const resp = await getMemoryGraph(id, { kb_id: kbId, deep: false })
-        this.graphData = resp.data?.data ?? null
+        this.graphData = resp.data ?? null
       } finally {
         this.graphLoading = false
       }
@@ -188,7 +188,7 @@ export const useMemoryStore = defineStore('memory', {
       this.healthLoading = true
       try {
         const resp = await getHealthReport(kbId)
-        this.healthReport = resp.data?.data ?? null
+        this.healthReport = resp.data ?? null
       } finally {
         this.healthLoading = false
       }
@@ -198,7 +198,7 @@ export const useMemoryStore = defineStore('memory', {
       this.statsLoading = true
       try {
         const resp = await getMemoryStats(kbId)
-        this.stats = resp.data?.data ?? null
+        this.stats = resp.data ?? null
       } finally {
         this.statsLoading = false
       }
@@ -208,7 +208,7 @@ export const useMemoryStore = defineStore('memory', {
       this.dreamerLoading = true
       try {
         const resp = await triggerDream({ kb_id: kbId })
-        this.lastDreamResult = resp.data?.data ?? null
+        this.lastDreamResult = resp.data ?? null
       } finally {
         this.dreamerLoading = false
       }
@@ -230,7 +230,7 @@ export const useMemoryStore = defineStore('memory', {
       })
       // Reload the memory list to reflect the new memory.
       await this.loadMemories(kbId)
-      return result.data?.data as SaveMemoryResult
+      return result.data
     },
 
     // -----------------------------------------------------------------------

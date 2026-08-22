@@ -2,16 +2,21 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
 import { test } from 'node:test'
-import { fileURLToPath } from 'node:url'
 
 import { LOCALE_BUNDLES, collectLocaleKeys, type LocaleName } from './localeKeyAudit.ts'
 
-// The repository-wide audit is not enough on its own: it catches a key present
-// in en-US but missing in ko-KR, but never a key referenced in code and
-// missing from *every* locale. The memory namespaces shipped exactly such a
-// reference before (`memoryWorkspaceSettings.instructionsLabel`), while every
-// check stayed green and the UI rendered the raw key. This guards the memory
-// namespaces specifically.
+// The repository-wide audit compares locales against each other: it catches a
+// key present in en-US but missing in ko-KR. It cannot catch a key that is
+// referenced in code and missing from *every* locale, because it starts from
+// the keys that already exist.
+//
+// That gap is not hypothetical — the memory settings shipped a reference to
+// `memoryWorkspaceSettings.instructionsLabel` while it existed in no locale,
+// and every check stayed green while the UI would have rendered the raw key.
+//
+// This guards the memory namespaces specifically. There are pre-existing
+// violations elsewhere in the app; widening this check means fixing those
+// first, which is a separate change.
 const GUARDED_PREFIXES = ['memory.', 'memorySettings.', 'memoryWorkspaceSettings.', 'chat.memory']
 
 const STATIC_KEY_PATTERN = /\$?\bt\(\s*['"]([a-zA-Z][\w]*(?:\.[\w]+)+)['"]/g
@@ -32,7 +37,7 @@ function collectStaticKeys(dir: string, found = new Set<string>()): Set<string> 
 }
 
 test('memory i18n keys referenced in code exist in every locale', () => {
-  const referenced = [...collectStaticKeys(path.join(path.dirname(fileURLToPath(import.meta.url)), '..'))].filter((key) =>
+  const referenced = [...collectStaticKeys(path.join(import.meta.dirname, '..'))].filter((key) =>
     GUARDED_PREFIXES.some((prefix) => key.startsWith(prefix)),
   )
   assert.ok(referenced.length > 0, 'no memory i18n keys were found; has the scan pattern drifted?')

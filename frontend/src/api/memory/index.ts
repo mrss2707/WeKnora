@@ -139,6 +139,7 @@ export interface GraphNode {
 export interface GraphEdge {
   source: string
   target: string
+  relation?: string
   relation_type: string
   weight: number
 }
@@ -319,10 +320,13 @@ export interface TimelineEvent {
 // -------------------------------------------------------------------------
 
 export interface PaginatedMemoriesResponse {
-  data: AgentMemory[]
-  total: number
-  page: number
-  page_size: number
+  success?: boolean
+  data: {
+    items: AgentMemory[]
+    total: number
+    page: number
+    page_size: number
+  }
 }
 
 // -------------------------------------------------------------------------

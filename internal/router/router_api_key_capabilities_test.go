@@ -62,6 +62,7 @@ func TestPlatformControlPlaneRoutesDeclarePlatformCapabilities(t *testing.T) {
 		{http.MethodPut, "/api/v1/system/admin/settings/:key", types.APIKeyCapabilitySystemSettingsManage},
 		{http.MethodGet, "/api/v1/system/admin/runtime/queues", types.APIKeyCapabilitySystemRuntimeRead},
 		{http.MethodPost, "/api/v1/system/admin/runtime/queues/:queue/tasks/:task_id/actions/:action", types.APIKeyCapabilitySystemRuntimeManage},
+		{http.MethodDelete, "/api/v1/system/admin/runtime/queues/:queue/archived", types.APIKeyCapabilitySystemRuntimeManage},
 	}
 	for _, tc := range cases {
 		policy := mustLookupAPIKeyPolicy(t, g, tc.method, tc.path)
@@ -307,6 +308,7 @@ func TestKnowledgeReadRoutesDeclareRetrieveCapability(t *testing.T) {
 		{http.MethodPost, "/api/v1/knowledge-bases/:id/hybrid-search"},
 		{http.MethodGet, "/api/v1/knowledge-bases/:id/knowledge"},
 		{http.MethodGet, "/api/v1/knowledge/:id"},
+		{http.MethodGet, "/api/v1/knowledge/:id/download"},
 		{http.MethodPost, "/api/v1/knowledge-bases/:id/faq/search"},
 		{http.MethodGet, "/api/v1/knowledge-bases/:id/tags"},
 		{http.MethodPost, "/api/v1/knowledge-search"},
@@ -340,10 +342,16 @@ func TestTenantInfrastructureRoutesDeclareSpecificCapabilities(t *testing.T) {
 	RegisterWebSearchProviderRoutes(v1, &handler.WebSearchProviderHandler{}, &handler.WebSearchProviderCredentialsHandler{}, g)
 	RegisterVectorStoreRoutes(v1, &handler.VectorStoreHandler{}, g)
 	RegisterStorageBackendRoutes(v1, &handler.StorageBackendHandler{}, g)
+	RegisterSandboxConfigRoutes(v1, &handler.SandboxConfigHandler{}, g)
 	RegisterEmbedChannelRoutes(v1, &handler.EmbedChannelHandler{}, g)
 	RegisterIMChannelRoutes(v1, &handler.IMHandler{}, g)
 	RegisterDataSourceRoutes(v1, &handler.DataSourceHandler{}, &handler.DataSourceCredentialsHandler{}, g)
 	RegisterWeKnoraCloudRoutes(v1, &handler.WeKnoraCloudHandler{}, g)
+
+	capabilitiesPolicy := mustLookupAPIKeyPolicy(t, g, http.MethodGet, "/api/v1/system/capabilities")
+	if capabilitiesPolicy.RequireFullAccess || len(capabilitiesPolicy.Capabilities) != 0 {
+		t.Fatalf("system capabilities should be readable by any valid API key: %#v", capabilitiesPolicy)
+	}
 
 	cases := []struct {
 		method string
@@ -372,6 +380,39 @@ func TestTenantInfrastructureRoutesDeclareSpecificCapabilities(t *testing.T) {
 			}
 			if !policyHasCapability(policy, tc.cap) {
 				t.Fatalf("policy capabilities = %#v, want %s", policy.Capabilities, tc.cap)
+			}
+		})
+	}
+}
+
+func TestSandboxConfigRoutesRequireFullAccessOnly(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	g := &rbacGuards{}
+	v1 := gin.New().Group("/api/v1")
+
+	RegisterSandboxConfigRoutes(v1, &handler.SandboxConfigHandler{}, g)
+
+	cases := []struct {
+		method string
+		path   string
+	}{
+		{http.MethodGet, "/api/v1/sandbox-configs"},
+		{http.MethodPost, "/api/v1/sandbox-configs"},
+		{http.MethodPost, "/api/v1/sandbox-configs/templates/query"},
+		{http.MethodGet, "/api/v1/sandbox-configs/:id"},
+		{http.MethodPut, "/api/v1/sandbox-configs/:id"},
+		{http.MethodDelete, "/api/v1/sandbox-configs/:id"},
+		{http.MethodGet, "/api/v1/sandbox-configs/:id/sandboxes"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.method+" "+tc.path, func(t *testing.T) {
+			policy := mustLookupAPIKeyPolicy(t, g, tc.method, tc.path)
+			if !policy.RequireFullAccess {
+				t.Fatal("sandbox config routes should require full access")
+			}
+			if len(policy.Capabilities) != 0 {
+				t.Fatalf("sandbox config routes must not be granted by a scoped capability: %#v", policy.Capabilities)
 			}
 		})
 	}

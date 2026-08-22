@@ -12,12 +12,12 @@ func EnvLanguage() string {
 }
 
 // DefaultLanguage returns the configured default language locale.
-// It reads the WEKNORA_LANGUAGE environment variable; if unset, falls back to "vi-VN".
+// It reads the WEKNORA_LANGUAGE environment variable; if unset, falls back to "zh-CN".
 func DefaultLanguage() string {
 	if lang := EnvLanguage(); lang != "" {
 		return lang
 	}
-	return "vi-VN"
+	return "zh-CN"
 }
 
 // TenantIDFromContext extracts the tenant ID from ctx.
@@ -52,6 +52,53 @@ func RequestIDFromContext(ctx context.Context) (string, bool) {
 func UserIDFromContext(ctx context.Context) (string, bool) {
 	v, ok := ctx.Value(UserIDContextKey).(string)
 	return v, ok && v != ""
+}
+
+// WithWikiEditSource marks ctx so wiki page writes performed under it are
+// attributed to the given edit source (WikiEditSourceUser / Agent / Revert).
+// Writes without the mark are attributed to the ingest pipeline.
+func WithWikiEditSource(ctx context.Context, source string) context.Context {
+	return context.WithValue(ctx, WikiEditSourceContextKey, NormalizeWikiEditSource(source))
+}
+
+// WikiEditSourceFromContext returns the wiki edit source carried by ctx,
+// defaulting to WikiEditSourcePipeline when absent.
+func WikiEditSourceFromContext(ctx context.Context) string {
+	v, _ := ctx.Value(WikiEditSourceContextKey).(string)
+	return NormalizeWikiEditSource(v)
+}
+
+// TaskInitiator is the authenticated caller that submitted an asynchronous
+// task. Workers restore it into their context so audit entries describe who
+// initiated the operation, while tasks created by schedulers remain
+// attributable to the system.
+type TaskInitiator struct {
+	UserID string     `json:"user_id,omitempty"`
+	Role   TenantRole `json:"role,omitempty"`
+}
+
+// TaskInitiatorFromContext snapshots the real caller identity for a task
+// payload. Synthetic API-key users are service identities, not people, and are
+// intentionally left empty so the activity feed presents them as system work.
+func TaskInitiatorFromContext(ctx context.Context) TaskInitiator {
+	userID, ok := UserIDFromContext(ctx)
+	if !ok || IsSyntheticUserID(userID) {
+		return TaskInitiator{}
+	}
+	return TaskInitiator{UserID: userID, Role: TenantRoleFromContext(ctx)}
+}
+
+// Apply restores a captured task initiator onto a worker context. Empty or
+// legacy payloads are a no-op and therefore retain the system-task fallback.
+func (i TaskInitiator) Apply(ctx context.Context) context.Context {
+	if i.UserID == "" {
+		return ctx
+	}
+	ctx = context.WithValue(ctx, UserIDContextKey, i.UserID)
+	if i.Role.IsValid() {
+		ctx = context.WithValue(ctx, TenantRoleContextKey, i.Role)
+	}
+	return ctx
 }
 
 // IsSyntheticUserID reports whether id refers to the synthetic system
@@ -113,6 +160,51 @@ func SessionTenantIDFromContext(ctx context.Context) (uint64, bool) {
 	return TenantIDFromContext(ctx)
 }
 
+// WithSessionID returns a derived context carrying the current session ID.
+// Stateful sandbox backends (e.g. CubeSandbox) rely on this key to route
+// script execution to the per-session persistent MicroVM instance.
+func WithSessionID(ctx context.Context, sessionID string) context.Context {
+	if sessionID == "" {
+		return ctx
+	}
+	return context.WithValue(ctx, SessionIDContextKey, sessionID)
+}
+
+// SessionIDFromContext extracts the current session ID from ctx.
+// Returns ("", false) when the key is absent or the value is not a non-empty string.
+func SessionIDFromContext(ctx context.Context) (string, bool) {
+	if ctx == nil {
+		return "", false
+	}
+	v, ok := ctx.Value(SessionIDContextKey).(string)
+	return v, ok && v != ""
+}
+
+// WithSandboxTenantID records the session-owner tenant that session→sandbox
+// bindings must be keyed by, independently of the tenant the rest of the
+// pipeline runs as. Callers set it wherever they swap TenantIDContextKey for a
+// shared agent's workspace.
+func WithSandboxTenantID(ctx context.Context, tenantID uint64) context.Context {
+	if tenantID == 0 {
+		return ctx
+	}
+	return context.WithValue(ctx, SandboxTenantIDContextKey, tenantID)
+}
+
+// SandboxTenantIDFromContext returns the tenant to key session→sandbox
+// bindings by. It falls back to TenantIDFromContext, which is correct for every
+// path that never borrows another workspace's tenant: there the request tenant
+// already IS the session owner.
+func SandboxTenantIDFromContext(ctx context.Context) (uint64, bool) {
+	if ctx == nil {
+		return 0, false
+	}
+	if v, ok := ctx.Value(SandboxTenantIDContextKey).(uint64); ok && v != 0 {
+		return v, true
+	}
+	return TenantIDFromContext(ctx)
+}
+
 // WithMCPOAuthNonInteractive marks ctx as originating from a channel that cannot
 // complete an in-conversation MCP OAuth prompt (e.g. an IM bot). The agent uses
 // this to emit a one-shot authorization notice instead of blocking on the OAuth
@@ -150,6 +242,57 @@ func IsBackgroundTask(ctx context.Context) bool {
 	return v
 }
 
+type taskRetryMetadata struct {
+	retried  int
+	maxRetry int
+}
+
+// WithTaskRetryMetadata records retry counters for task executors that do not
+// provide Asynq's native worker context, notably the Lite synchronous executor.
+func WithTaskRetryMetadata(ctx context.Context, retried, maxRetry int) context.Context {
+	return context.WithValue(ctx, taskRetryMetadataContextKey{}, taskRetryMetadata{
+		retried: retried, maxRetry: maxRetry,
+	})
+}
+
+// TaskRetryMetadataFromContext returns retry counters supplied by a non-Asynq
+// task executor. The boolean is false for ordinary request contexts.
+func TaskRetryMetadataFromContext(ctx context.Context) (retried, maxRetry int, ok bool) {
+	if ctx == nil {
+		return 0, 0, false
+	}
+	metadata, ok := ctx.Value(taskRetryMetadataContextKey{}).(taskRetryMetadata)
+	if !ok {
+		return 0, 0, false
+	}
+	return metadata.retried, metadata.maxRetry, true
+}
+
+type taskRetryMetadataContextKey struct{}
+
+// WithLLMCallMetadata annotates a provider call for cache observability. The
+// fingerprint must be a hash, never raw prompt content.
+func WithLLMCallMetadata(ctx context.Context, purpose, prefixFingerprint string) context.Context {
+	if strings.TrimSpace(purpose) != "" {
+		ctx = context.WithValue(ctx, LLMCallPurposeContextKey, strings.TrimSpace(purpose))
+	}
+	if strings.TrimSpace(prefixFingerprint) != "" {
+		ctx = context.WithValue(ctx, LLMPromptPrefixFingerprintContextKey, strings.TrimSpace(prefixFingerprint))
+	}
+	return ctx
+}
+
+// LLMCallMetadataFromContext returns the cache-observability labels attached
+// by the orchestration layer.
+func LLMCallMetadataFromContext(ctx context.Context) (purpose, prefixFingerprint string) {
+	if ctx == nil {
+		return "", ""
+	}
+	purpose, _ = ctx.Value(LLMCallPurposeContextKey).(string)
+	prefixFingerprint, _ = ctx.Value(LLMPromptPrefixFingerprintContextKey).(string)
+	return purpose, prefixFingerprint
+}
+
 // LanguageFromContext extracts the language locale string from ctx (e.g. "zh-CN", "en-US").
 // Returns ("zh-CN", false) when the key is absent.
 func LanguageFromContext(ctx context.Context) (string, bool) {
@@ -157,20 +300,51 @@ func LanguageFromContext(ctx context.Context) (string, bool) {
 	return v, ok && v != ""
 }
 
+// ResolveLanguage resolves the effective locale for work that may carry its own
+// language, in descending precedence: the explicit locale, the locale in ctx,
+// then DefaultLanguage().
+//
+// Async workers must use this rather than reading a payload field directly: a
+// task payload persisted before the language field existed, or enqueued from a
+// background path that never passed through the HTTP language middleware,
+// carries an empty locale. Interpolating that empty value into a prompt yields
+// instructions like "Write in ." and lets the model pick a language at random.
+func ResolveLanguage(ctx context.Context, locale string) string {
+	if locale = strings.TrimSpace(locale); locale != "" {
+		return locale
+	}
+	if ctxLocale, ok := LanguageFromContext(ctx); ok {
+		return ctxLocale
+	}
+	return DefaultLanguage()
+}
+
+// ResolveLanguageName is ResolveLanguage rendered as the human-readable name
+// that prompt templates interpolate (e.g. "Chinese (Simplified)").
+//
+// It is idempotent over already-resolved names: LanguageLocaleName passes
+// unknown values through, so re-resolving a display name returns it unchanged.
+func ResolveLanguageName(ctx context.Context, locale string) string {
+	return LanguageLocaleName(ResolveLanguage(ctx, locale))
+}
+
+// LanguageFromContextOrDefault returns the locale carried by ctx, falling back
+// to DefaultLanguage(). Use it when persisting a locale onto an async task
+// payload so downstream workers never inherit an empty language.
+func LanguageFromContextOrDefault(ctx context.Context) string {
+	return ResolveLanguage(ctx, "")
+}
+
 // LanguageNameFromContext returns the human-readable language name for use in prompts.
 // e.g. "zh-CN" -> "Chinese (Simplified)", "en-US" -> "English", "ko-KR" -> "Korean"
 // Falls back to DefaultLanguage() (WEKNORA_LANGUAGE env, then "zh-CN").
 func LanguageNameFromContext(ctx context.Context) string {
-	lang, ok := LanguageFromContext(ctx)
-	if !ok {
-		lang = DefaultLanguage()
-	}
-	return LanguageLocaleName(lang)
+	return ResolveLanguageName(ctx, "")
 }
 
 // AcceptLanguageHeader returns a well-formed Accept-Language header value
 // derived from the request context's language locale.
-// Falls back to "vi-VN,vi;q=0.9,en;q=0.8" when no locale is set.
+// Falls back to "zh-CN,zh;q=0.9,en;q=0.8" when no locale is set.
 func AcceptLanguageHeader(ctx context.Context) string {
 	lang, ok := LanguageFromContext(ctx)
 	if !ok {

@@ -23,6 +23,16 @@ var (
 	ErrAgentNameRequired   = errors.New("agent name is required")
 )
 
+const (
+	// suggestionDefaultLimit is the fallback count when neither the caller nor
+	// the agent configuration specifies how many suggestions to return.
+	suggestionDefaultLimit = 6
+	// suggestionMaxLimit caps how many suggestions a single request may ask for.
+	// It bounds the downstream candidate pool (limit*5) so an oversized limit
+	// cannot turn into an unbounded chunk query.
+	suggestionMaxLimit = 30
+)
+
 // customAgentService implements the CustomAgentService interface
 type customAgentService struct {
 	repo           interfaces.CustomAgentRepository
@@ -134,8 +144,9 @@ func (s *customAgentService) GetAgentByID(ctx context.Context, id string) (*type
 		// Try to get from database first (for customized config)
 		agent, err := s.repo.GetAgentByID(ctx, id, tenantID)
 		if err == nil {
-			// Found in database, return with customized config
+			// Found in database, overlay locale-specific name/description/avatar
 			agent.EnsureDefaults()
+			types.ApplyBuiltinAgentLocalization(ctx, agent)
 			return agent, nil
 		}
 		// Not in database, return default built-in agent from registry (i18n-aware)
@@ -212,6 +223,7 @@ func (s *customAgentService) ListAgents(ctx context.Context) ([]*types.CustomAge
 			// Use customized config from database
 			for _, agent := range allAgents {
 				if agent.ID == builtinID {
+					types.ApplyBuiltinAgentLocalization(ctx, agent)
 					result = append(result, agent)
 					break
 				}
@@ -497,8 +509,15 @@ func (s *customAgentService) getSuggestedQuestions(
 	limit int,
 	includeCurated bool,
 ) ([]types.SuggestedQuestion, error) {
-	if limit <= 0 {
-		limit = 6
+	// A non-positive limit means "unspecified": fall back to the agent's
+	// configured Starters.Count (below) or the default. An explicit limit is
+	// authoritative and only bounded by the safety cap.
+	limitProvided := limit > 0
+	if !limitProvided {
+		limit = suggestionDefaultLimit
+	}
+	if limit > suggestionMaxLimit {
+		limit = suggestionMaxLimit
 	}
 
 	if err := types.AuthorizeTenantAPIKeyKnowledgeTargets(ctx, kbIDs, knowledgeIDs); err != nil {
@@ -529,7 +548,10 @@ func (s *customAgentService) getSuggestedQuestions(
 		if suggestionConfig == nil || !suggestionConfig.Starters.Enabled {
 			return []types.SuggestedQuestion{}, nil
 		}
-		if limit > suggestionConfig.Starters.Count {
+		// Starters.Count is the agent-author default, applied only when the
+		// caller did not request a specific limit. An explicit limit stays
+		// authoritative so ?limit=N actually changes how many are returned.
+		if !limitProvided && suggestionConfig.Starters.Count > 0 {
 			limit = suggestionConfig.Starters.Count
 		}
 		starterMode = suggestionConfig.Starters.Mode
@@ -702,7 +724,11 @@ func (s *customAgentService) getSuggestedQuestions(
 			if err != nil || meta == nil || len(meta.GeneratedQuestions) == 0 {
 				continue
 			}
-			q := meta.GeneratedQuestions[0].Question
+			questions := meta.GetQuestionStrings()
+			if len(questions) == 0 {
+				continue
+			}
+			q := questions[0]
 			if q == "" || seen[q] {
 				continue
 			}
@@ -738,7 +764,7 @@ func (s *customAgentService) getSuggestedQuestions(
 				})
 				continue
 			}
-			locale, _ := types.LanguageFromContext(ctx)
+			locale := types.LanguageFromContextOrDefault(ctx)
 			for _, page := range wikiPages {
 				q := wikiSuggestionFromPage(page, locale)
 				if q == "" || seen[q] {

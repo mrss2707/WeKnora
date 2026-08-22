@@ -314,6 +314,11 @@
                 <label class="form-label">App Secret</label>
                 <t-input v-model="formData.credentials.app_secret" type="password" placeholder="App Secret" />
               </div>
+              <div class="form-item">
+                <label class="form-label">Base URL</label>
+                <t-input v-model="formData.credentials.api_base_url" placeholder="https://open.feishu.cn" />
+                <p class="form-desc">{{ $t('agentEditor.im.feishuAPIBaseURLHint') }}</p>
+              </div>
               <template v-if="formData.mode === 'webhook'">
                 <div class="form-item">
                   <label class="form-label">Verification Token</label>
@@ -477,23 +482,40 @@
 
             <!-- Yunzhijia credentials -->
             <template v-if="formData.platform === 'yunzhijia'">
-              <div class="platform-link-hint">
-                <a href="https://open.yunzhijia.com/" target="_blank" rel="noopener noreferrer" class="doc-link">
-                  {{ $t('agentEditor.im.yunzhijiaConsole') }}
-                  <t-icon name="link" class="link-icon" />
-                </a>
-                <span class="hint-text">{{ $t('agentEditor.im.consoleTip') }}</span>
-              </div>
               <div class="form-item">
                 <label class="form-label required">{{ $t('agentEditor.im.yunzhijiaSendMsgUrl') }}</label>
                 <t-input v-model="formData.credentials.send_msg_url"
                   placeholder="https://www.yunzhijia.com/gateway/robot/webhook/send?yzjtype=0&yzjtoken=..." />
+                <p class="form-desc">
+                  {{ $t('agentEditor.im.yunzhijiaSendMsgUrlHint') }}
+                  <a href="https://www.yunzhijia.com/opendocs/docs.html#/guide/im/robot" target="_blank"
+                    rel="noopener noreferrer" class="doc-link">
+                    {{ $t('agentEditor.im.yunzhijiaRobotDoc') }}
+                  </a>
+                </p>
               </div>
               <div class="form-item">
                 <label class="form-label">{{ $t('agentEditor.im.yunzhijiaSecret') }}</label>
                 <t-input v-model="formData.credentials.secret" type="password"
                   :placeholder="$t('agentEditor.im.yunzhijiaSecretPlaceholder')" />
                 <p class="form-desc">{{ $t('agentEditor.im.yunzhijiaSecretHint') }}</p>
+              </div>
+              <div class="form-item">
+                <label class="form-label">{{ $t('agentEditor.im.yunzhijiaAppId') }}</label>
+                <t-input v-model="formData.credentials.app_id"
+                  :placeholder="$t('agentEditor.im.yunzhijiaAppIdPlaceholder')" />
+                <p class="form-desc">
+                  {{ $t('agentEditor.im.yunzhijiaAppCredentialHint') }}
+                  <a href="https://www.yunzhijia.com/developers/" target="_blank" rel="noopener noreferrer"
+                    class="doc-link">
+                    {{ $t('agentEditor.im.yunzhijiaImageDoc') }}
+                  </a>
+                </p>
+              </div>
+              <div class="form-item">
+                <label class="form-label">{{ $t('agentEditor.im.yunzhijiaAppSecret') }}</label>
+                <t-input v-model="formData.credentials.app_secret" type="password"
+                  :placeholder="$t('agentEditor.im.yunzhijiaAppSecretPlaceholder')" />
               </div>
               <div class="form-item">
                 <label class="form-label">{{ $t('agentEditor.im.yunzhijiaTimeout') }}</label>
@@ -562,6 +584,7 @@
 import { ref, onMounted, watch, onUnmounted, computed } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { MessagePlugin } from 'tdesign-vue-next';
+import { copyWithToast } from '@/utils/clipboard';
 import {
   listIMChannels, createIMChannel, updateIMChannel, deleteIMChannel, toggleIMChannel,
   getWeChatQRCode, pollWeChatQRCodeStatus, listAllIMChannels, listAgents,
@@ -758,7 +781,7 @@ function resolvedChannelName(): string {
 }
 
 function platformSupportsThread(platform: string): boolean {
-  return ['slack', 'mattermost', 'feishu', 'lark', 'telegram'].includes(platform);
+  return ['slack', 'mattermost', 'feishu', 'lark', 'telegram', 'yunzhijia'].includes(platform);
 }
 
 watch(
@@ -810,6 +833,16 @@ function onPlatformChange(val: string | number | boolean) {
   }
   if (!channelNameTouched.value) {
     formData.value.name = defaultChannelName(String(val));
+  }
+}
+
+function normalizeYunzhijiaCredentials() {
+  if (formData.value.platform !== 'yunzhijia') return;
+  if (!formData.value.credentials.allowed_webhook_host_suffix) {
+    formData.value.credentials.allowed_webhook_host_suffix = 'yunzhijia.com';
+  }
+  if (!formData.value.credentials.timeout_seconds) {
+    formData.value.credentials.timeout_seconds = 10;
   }
 }
 
@@ -909,25 +942,7 @@ function getCallbackUrl(channel: IMChannel): string {
 }
 
 async function copyUrl(channel: IMChannel) {
-  const text = getCallbackUrl(channel);
-  try {
-    await navigator.clipboard.writeText(text);
-    MessagePlugin.success(t('common.copySuccess'));
-  } catch {
-    const el = document.createElement('textarea');
-    el.value = text;
-    el.style.cssText = 'position:fixed;top:-9999px;left:-9999px;opacity:0';
-    document.body.appendChild(el);
-    el.focus();
-    el.select();
-    const ok = document.execCommand('copy');
-    document.body.removeChild(el);
-    if (ok) {
-      MessagePlugin.success(t('common.copySuccess'));
-    } else {
-      MessagePlugin.error(t('common.copyFailed'));
-    }
-  }
+  await copyWithToast(getCallbackUrl(channel), 'common.copySuccess');
 }
 
 function openCreate() {
@@ -972,6 +987,7 @@ async function editChannel(channel: IMChannel | IMChannelOverview) {
     knowledge_base_id: fullChannel.knowledge_base_id || '',
     credentials: { ...fullChannel.credentials },
   };
+  normalizeYunzhijiaCredentials();
   showCreateDialog.value = true;
 }
 
@@ -1005,11 +1021,14 @@ async function handleSave() {
       MessagePlugin.warning(t('agentEditor.im.wechatScanBind'));
       return;
     }
-    if (formData.value.platform === 'yunzhijia' &&
-      (!String(formData.value.credentials.send_msg_url || '').trim() ||
-        !String(formData.value.credentials.allowed_webhook_host_suffix || '').trim())) {
-      MessagePlugin.warning(t('agentEditor.im.yunzhijiaRequiredCredentials'));
-      return;
+    if (formData.value.platform === 'yunzhijia') {
+      // normalize fills in the default allowed host suffix, so only the send URL
+      // needs explicit validation here.
+      normalizeYunzhijiaCredentials();
+      if (!String(formData.value.credentials.send_msg_url || '').trim()) {
+        MessagePlugin.warning(t('agentEditor.im.yunzhijiaSendMsgUrlRequired'));
+        return;
+      }
     }
 
     if (editingChannel.value) {
@@ -1246,6 +1265,11 @@ onUnmounted(() => {
   font-size: 12px;
   line-height: 1.45;
   color: var(--td-text-color-placeholder);
+
+  .doc-link {
+    margin-left: 4px;
+    color: var(--td-brand-color);
+  }
 }
 
 .option-chips {
@@ -1338,6 +1362,7 @@ onUnmounted(() => {
 .platform-link-hint {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 6px;
   font-size: 12px;
   line-height: 1.4;

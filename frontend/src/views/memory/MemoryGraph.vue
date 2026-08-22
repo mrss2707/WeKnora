@@ -369,20 +369,20 @@ function labelOpacity(node: SimNode): number {
   return 0.9
 }
 
-function edgeColor(relation: string): string {
+function edgeColor(relation: string | undefined): string {
   const map: Record<string, string> = {
     related_to: '#8c8c8c',
     justifies: '#1890ff',
     contradicts: '#e34d59',
   }
-  return map[relation] || '#8c8c8c'
+  return (relation && map[relation]) || '#8c8c8c'
 }
 
 function edgeWeight(edge: SimEdge): number {
   return Math.max(1, Math.min(3, edge.weight * 2))
 }
 
-function edgeDash(relation: string): string {
+function edgeDash(relation: string | undefined): string {
   if (relation === 'justifies') return '5,4'
   if (relation === 'contradicts') return '3,3'
   return 'none'
@@ -793,6 +793,19 @@ function onNodeMouseDown(e: MouseEvent, node: SimNode) {
 // ---------------------------------------------------------------------------
 // Node click (refocus center), skipped if user was dragging
 // ---------------------------------------------------------------------------
+function onNodeHover(node: SimNode) {
+  hoveredNodeId.value = node.id
+}
+
+function onNodeBlur() {
+  hoveredNodeId.value = null
+}
+
+function setCenterNode(id: string) {
+  centerNodeId.value = id
+  applyDepthFilter()
+}
+
 function onNodeClick(node: SimNode) {
   if (nodeDragMoved) return
   setCenterNode(node.id)

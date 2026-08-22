@@ -17,6 +17,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/handler/session"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/middleware"
+	"github.com/Tencent/WeKnora/internal/storageurl"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	secutils "github.com/Tencent/WeKnora/internal/utils"
@@ -366,9 +367,6 @@ func (h *EmbedChannelHandler) GetEmbedChunk(c *gin.Context) {
 		}
 		return
 	}
-	if chunk.Content != "" {
-		chunk.Content = secutils.SanitizeForDisplay(chunk.Content)
-	}
 	c.JSON(http.StatusOK, gin.H{"success": true, "data": chunk})
 }
 
@@ -382,13 +380,15 @@ func (h *EmbedChannelHandler) GetEmbedSuggestedQuestions(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"success": true, "data": gin.H{"questions": []types.SuggestedQuestion{}}})
 		return
 	}
-	limit := 6
+	// limit == 0 signals "unspecified" so the channel agent's starter count
+	// applies. A provided value is honored up to the embed cap.
+	limit := 0
 	if raw := c.Query("limit"); raw != "" {
 		if n, err := strconv.Atoi(raw); err == nil && n > 0 {
 			limit = n
-		}
-		if limit > 12 {
-			limit = 12
+			if limit > 12 {
+				limit = 12
+			}
 		}
 	}
 	questions, err := h.embedSvc.SuggestedQuestions(c.Request.Context(), ch, limit)
@@ -672,7 +672,14 @@ func (h *EmbedChannelHandler) ensureEmbedSession(c *gin.Context) error {
 		ctx = types.WithEmbedVisitorID(ctx, visitorID)
 	}
 	c.Set(types.PrincipalContextKey.String(), principal)
-	c.Request = c.Request.WithContext(types.WithPrincipal(ctx, principal))
+	// Embed visitors are anonymous, so every delegated handler must keep
+	// returning `resource://` handles: their images stay behind the
+	// channel-scoped /embed/:channel_id/files proxy instead of being handed out
+	// as shareable, credential-free URLs. Pinning it here covers both the
+	// `?resource_urls=public` query parameter and a deployment-wide
+	// RESOURCE_URL_MODE=public default.
+	ctx = storageurl.WithForcedHandleMode(types.WithPrincipal(ctx, principal))
+	c.Request = c.Request.WithContext(ctx)
 	return nil
 }
 

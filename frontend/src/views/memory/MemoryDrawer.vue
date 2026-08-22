@@ -151,7 +151,7 @@
         <div v-if="relations.length > 0" class="relations-list">
           <div v-for="rel in relations" :key="rel.id" class="relation-item">
             <div class="relation-info">
-              <span class="relation-type">{{ rel.relation }}</span>
+              <span class="relation-type">{{ rel.relation_type }}</span>
               <span class="relation-target-id">{{ rel.to_uuid }}</span>
             </div>
             <t-link
@@ -291,8 +291,8 @@ async function loadMemoryDetails() {
   loading.value = true
   try {
     const resp = await getMemory(props.memory.id)
-    if (resp.data?.data) {
-      localMemory.value = { ...resp.data.data }
+    if (resp.data) {
+      localMemory.value = { ...resp.data }
     } else {
       localMemory.value = { ...props.memory }
     }
