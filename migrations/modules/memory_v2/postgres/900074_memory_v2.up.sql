@@ -18,8 +18,11 @@ CREATE TABLE IF NOT EXISTS agent_memories (
     importance      INTEGER NOT NULL DEFAULT 0,
     tier            SMALLINT NOT NULL DEFAULT 1,
 
-    -- Embedding vector (pgvector)
-    embedding       vector(2048),
+    -- Embedding vector (pgvector). Width capped at 2000: pgvector rejects
+    -- ivfflat/hnsw indexes above 2000 dims. Embeddings from any model with
+    -- ≤2000 dims are zero-padded to exactly 2000 by the repository before
+    -- write/query (padding is cosine/L2-invariant); larger models are rejected.
+    embedding       vector(2000),
 
     -- Fingerprint for structural dedup (SHA256 first 200 normalized chars)
     fingerprint     VARCHAR(64),

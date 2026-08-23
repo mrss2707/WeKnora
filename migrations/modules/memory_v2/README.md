@@ -36,6 +36,21 @@ Memory V2 is the default runtime. The legacy cross-session memory engine from
 enabled, inside one gated block (`internal/container/cross_session_memory.go`).
 Data conversion between the two engines is **out of scope**.
 
+## Embedding dimensions
+
+The `agent_memories.embedding` column is declared `vector(2000)`: pgvector
+rejects ivfflat/hnsw indexes on columns wider than 2000 dims, so 2000 is the
+supported maximum. Any embedding model with **≤ 2000 dims** (e.g. 768, 1024,
+1536) works out of the box — the repository zero-pads every written and
+queried vector to exactly 2000 dims (padding leaves cosine/L2 distances
+unchanged). Models above 2000 dims are rejected with a clear error on write
+and search; the health checker flags them as `embedding_dimension_mismatch`.
+
+Existing databases whose rows were written at another width by an earlier
+build: re-run `./scripts/migrate.sh up` (idempotent) and re-ingest, or
+`ALTER TABLE agent_memories ALTER COLUMN embedding TYPE vector(2000)` after
+backing up if the column width must be normalized in place.
+
 ## Upgrading existing databases
 
 - Rows `76`..(module versions) already present in `schema_migrations` are kept

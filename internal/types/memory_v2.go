@@ -31,6 +31,14 @@ func (v MemoryVerdict) IsProtected() bool {
 	return v == VerdictDecision || v == VerdictFixed
 }
 
+// MemoryEmbeddingDim is the fixed dimensionality of the agent_memories.embedding
+// column (migration 900074 declares vector(MemoryEmbeddingDim)). pgvector
+// rejects ivfflat/hnsw indexes above 2000 dims, so the column is capped here.
+// The repository zero-pads every written/queried embedding from models with
+// ≤MemoryEmbeddingDim dims to exactly this width — pgvector typmods require an
+// exact match, and padding is cosine/L2-invariant. Larger models are rejected.
+const MemoryEmbeddingDim = 2000
+
 // ---------------------------------------------------------------------------
 // Custom types
 // ---------------------------------------------------------------------------
@@ -84,7 +92,7 @@ type AgentMemory struct {
 	Tier           int             `gorm:"column:tier;type:int;default:2" json:"tier"`
 	Verdict        MemoryVerdict   `gorm:"column:verdict;type:varchar(16);default:none" json:"verdict"`
 	HubScore       float64         `gorm:"column:hub_score;default:0" json:"hub_score"`
-	Embedding      pgvector.Vector `gorm:"column:embedding;type:vector(2048)" json:"embedding"`
+	Embedding      pgvector.Vector `gorm:"column:embedding;type:vector(2000)" json:"embedding"`
 	AccessCount    int             `gorm:"column:access_count;type:int;default:0" json:"access_count"`
 	SessionID      string          `gorm:"column:session_id;type:varchar(36);default:'';index:idx_agent_memories_session" json:"session_id"`
 	Fingerprint    *string         `gorm:"column:fingerprint;type:varchar(64);index:idx_agent_memories_fingerprint,where:fingerprint IS NOT NULL AND deleted_at IS NULL" json:"fingerprint,omitempty"`

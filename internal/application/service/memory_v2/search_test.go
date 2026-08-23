@@ -1417,8 +1417,8 @@ func TestIsDimensionMismatch(t *testing.T) {
 		expected bool
 	}{
 		{"nil error", nil, false},
-		{"exact PG message", fmt.Errorf("ERROR: different vector dimensions 768 and 2048 (SQLSTATE 22000)"), true},
-		{"substring match", fmt.Errorf("cosine search failed: ERROR: different vector dimensions 768 and 2048"), true},
+		{"exact PG message", fmt.Errorf("ERROR: different vector dimensions 768 and 2000 (SQLSTATE 22000)"), true},
+		{"substring match", fmt.Errorf("cosine search failed: ERROR: different vector dimensions 768 and 2000"), true},
 		{"unrelated error", fmt.Errorf("connection refused"), false},
 		{"empty error", fmt.Errorf(""), false},
 	}

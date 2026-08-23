@@ -327,7 +327,7 @@ func extractKeywordsFromQuery(query string) string {
 }
 
 // isDimensionMismatch detects pgvector dimension mismatch errors.
-// PG returns: "ERROR: different vector dimensions 768 and 2048 (SQLSTATE 22000)"
+// PG returns: "ERROR: different vector dimensions 768 and 2000 (SQLSTATE 22000)"
 func isDimensionMismatch(err error) bool {
 	if err == nil {
 		return false

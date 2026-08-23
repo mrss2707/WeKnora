@@ -1117,6 +1117,49 @@ func TestHealthChecker_EmbeddingDimension_Match(t *testing.T) {
 	assert.Empty(t, report.Issues, "matching dimensions should not produce a dimension issue")
 }
 
+func TestHealthChecker_EmbeddingDimension_PaddedStorageAcceptsAnySubWidthModel(t *testing.T) {
+	mem := freshMemory("m1", "tenant-1", "Memory padded at the column width",
+		[]string{"tag1"}, 3, 5)
+
+	repo := &mockHealthCheckerRepo{
+		searchFunc: func(ctx context.Context, filter *types.MemoryFilter) ([]*types.MemorySearchResult, int64, error) {
+			return []*types.MemorySearchResult{hcSearchResult(mem)}, 1, nil
+		},
+		getEmbeddingDimFunc: func(ctx context.Context, tenantID string) (int, error) {
+			return types.MemoryEmbeddingDim, nil // padded storage
+		},
+	}
+	hc := newTestHealthChecker(repo)
+
+	// stored=2000 (padded), embedder=1024 (their typical model) → compatible
+	report, err := hc.AssessHealth(context.Background(), "tenant-1", "", 1024)
+	require.NoError(t, err)
+	assert.Empty(t, report.Issues, "padded column width should accept any model ≤ %d dims", types.MemoryEmbeddingDim)
+}
+
+func TestHealthChecker_EmbeddingDimension_EmbedderExceedsColumnWidth(t *testing.T) {
+	mem := freshMemory("m1", "tenant-1", "Memory padded at the column width",
+		[]string{"tag1"}, 3, 5)
+
+	repo := &mockHealthCheckerRepo{
+		searchFunc: func(ctx context.Context, filter *types.MemoryFilter) ([]*types.MemorySearchResult, int64, error) {
+			return []*types.MemorySearchResult{hcSearchResult(mem)}, 1, nil
+		},
+		getEmbeddingDimFunc: func(ctx context.Context, tenantID string) (int, error) {
+			return types.MemoryEmbeddingDim, nil
+		},
+	}
+	hc := newTestHealthChecker(repo)
+
+	// stored=2000 (padded), embedder=2048 → exceeds the supported width
+	report, err := hc.AssessHealth(context.Background(), "tenant-1", "", 2048)
+	require.NoError(t, err)
+	require.Len(t, report.Issues, 1)
+	assert.Equal(t, "embedding_dimension_mismatch", report.Issues[0].Type)
+	assert.Equal(t, "critical", report.Issues[0].Severity)
+	assert.Contains(t, report.Issues[0].Description, "2048")
+}
+
 func TestHealthChecker_EmbeddingDimension_EmptyTable(t *testing.T) {
 	mem := freshMemory("m1", "tenant-1", "Memory with no stored dimensions",
 		[]string{"tag1"}, 3, 5)

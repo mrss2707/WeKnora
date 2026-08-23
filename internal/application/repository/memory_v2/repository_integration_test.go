@@ -54,7 +54,7 @@ CREATE TABLE agent_memories (
     tier SMALLINT NOT NULL DEFAULT 2,
     verdict VARCHAR(16) NOT NULL DEFAULT 'none',
     hub_score DOUBLE PRECISION NOT NULL DEFAULT 0,
-    embedding vector(3),
+    embedding vector(2000),
     access_count BIGINT NOT NULL DEFAULT 0,
     fingerprint VARCHAR(64),
     tags TEXT[] DEFAULT '{}',
@@ -98,6 +98,10 @@ CREATE TABLE dreamer_state (
 
 func createPostgresMemory(t *testing.T, db *gorm.DB, tenantID, kbID, content string, verdict types.MemoryVerdict, vector []float32) *types.AgentMemory {
 	t.Helper()
+	// Mirror the production repository boundary: the column is
+	// vector(MemoryEmbeddingDim) and every vector sits at exactly that width.
+	padded := make([]float32, types.MemoryEmbeddingDim)
+	copy(padded, vector)
 	mem := &types.AgentMemory{
 		ID:         uuid.New().String(),
 		TenantID:   tenantID,
@@ -107,7 +111,7 @@ func createPostgresMemory(t *testing.T, db *gorm.DB, tenantID, kbID, content str
 		Importance: 1,
 		Tier:       2,
 		Verdict:    verdict,
-		Embedding:  pgvector.NewVector(vector),
+		Embedding:  pgvector.NewVector(padded),
 		CreatedAt:  time.Now(),
 		UpdatedAt:  time.Now(),
 	}
@@ -162,7 +166,7 @@ func TestPostgresMemoryRepository_GetEmbeddingDimension(t *testing.T) {
 	dim, err := repo.GetEmbeddingDimension(context.Background(), "tenant-1")
 
 	require.NoError(t, err)
-	assert.Equal(t, 3, dim)
+	assert.Equal(t, types.MemoryEmbeddingDim, dim)
 }
 
 func TestPostgresMemoryRepository_FingerprintPartialUniqueAndSoftDelete(t *testing.T) {

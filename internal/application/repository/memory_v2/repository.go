@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"time"
 
@@ -44,13 +45,16 @@ func (r *MemoryRepository) Create(ctx context.Context, memory *types.AgentMemory
 	now := time.Now()
 	memory.CreatedAt = now
 	memory.UpdatedAt = now
-	// pgvector requires at least 1 dimension matching the column definition;
-	// use a zero vector of appropriate dimensionality when no embedding is available
-	if len(memory.Embedding.Slice()) == 0 {
-		// 2048 is the default embedding dimension for the column
-		zeroVec := make([]float32, 2048)
-		memory.Embedding = pgvector.NewVector(zeroVec)
+	// The embedding column is declared vector(MemoryEmbeddingDim) and pgvector
+	// typmods require an exact dimension match. Every embedding — from any
+	// model with ≤MemoryEmbeddingDim dims — is zero-padded to the declared
+	// width here (cosine/L2 distances are padding-invariant); larger models
+	// are rejected so the failure is a clear error instead of a PG insert error.
+	padded, err := padEmbedding(memory.Embedding.Slice())
+	if err != nil {
+		return err
 	}
+	memory.Embedding = pgvector.NewVector(padded)
 	return r.db.WithContext(ctx).Create(memory).Error
 }
 
@@ -374,7 +378,13 @@ type cosineRow struct {
 // cosine_score column (1 - cosine_distance). Tenant isolation and verdict
 // filtering are applied.
 func (r *MemoryRepository) CosineSearch(ctx context.Context, filter *types.MemoryFilter, embedding []float32, limit int) ([]*types.MemorySearchResult, error) {
-	vec := pgvector.NewVector(embedding)
+	// Pad the query vector to the column width so the <=> operator sees
+	// matching dimensions (padding does not change cosine/L2 distances).
+	padded, err := padEmbedding(embedding)
+	if err != nil {
+		return nil, err
+	}
+	vec := pgvector.NewVector(padded)
 	db := r.db.WithContext(ctx)
 
 	// Build the query using db.Table for raw column list control.
@@ -557,6 +567,25 @@ func (r *MemoryRepository) InvalidateResultCache(_ context.Context, tenantID str
 // ---------------------------------------------------------------------------
 
 func timePtr(t time.Time) *time.Time { return &t }
+
+// padEmbedding extends v to types.MemoryEmbeddingDim dimensions with trailing
+// zeros and rejects inputs that exceed the column width. Both written rows and
+// query vectors must sit exactly at the declared width because pgvector
+// typmods reject vectors of any other dimensionality.
+func padEmbedding(v []float32) ([]float32, error) {
+	if len(v) == 0 {
+		return make([]float32, types.MemoryEmbeddingDim), nil
+	}
+	if len(v) > types.MemoryEmbeddingDim {
+		return nil, fmt.Errorf("embedding dimension %d exceeds the maximum supported dimension %d", len(v), types.MemoryEmbeddingDim)
+	}
+	if len(v) == types.MemoryEmbeddingDim {
+		return v, nil
+	}
+	padded := make([]float32, types.MemoryEmbeddingDim)
+	copy(padded, v)
+	return padded, nil
+}
 
 // ensure MemoryRepository satisfies MemoryRepositoryV2 at compile time.
 var _ interfaces.MemoryRepositoryV2 = (*MemoryRepository)(nil)

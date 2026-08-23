@@ -287,12 +287,28 @@ func (h *HealthChecker) checkVerdictConsistency(memories []*types.AgentMemory) [
 	return issues
 }
 
-// checkEmbeddingDimension detects a mismatch between stored embedding
-// dimensions and the current embedder's output dimension.
+// checkEmbeddingDimension flags embedding configurations incompatible with
+// the stored rows. Rows written by the current schema sit zero-padded at
+// exactly types.MemoryEmbeddingDim, so any embedder with dims up to that
+// width is compatible; only larger embedders are flagged. Legacy rows stored
+// at the embedder's native width keep the plain stored-vs-embedder comparison.
 func (h *HealthChecker) checkEmbeddingDimension(storedDim, embedderDim int) []*types.MemoryHealthIssue {
 	if storedDim == 0 || embedderDim == 0 {
 		return nil
 	}
+	if storedDim == types.MemoryEmbeddingDim {
+		if embedderDim > types.MemoryEmbeddingDim {
+			return []*types.MemoryHealthIssue{{
+				Type:        "embedding_dimension_mismatch",
+				Severity:    "critical",
+				Description: fmt.Sprintf("Embedder produces %d dimensions but the memory embedding column only supports up to %d", embedderDim, types.MemoryEmbeddingDim),
+				Suggestion:  fmt.Sprintf("Switch to an embedding model with at most %d dimensions", types.MemoryEmbeddingDim),
+			}}
+		}
+		return nil
+	}
+	// Legacy rows stored at the embedder's own dimensionality: only a real
+	// model switch is a mismatch.
 	if storedDim != embedderDim {
 		return []*types.MemoryHealthIssue{{
 			Type:        "embedding_dimension_mismatch",

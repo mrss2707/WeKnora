@@ -903,6 +903,62 @@ func TestGetEmbeddingDimension_ReturnsStoredDimension(t *testing.T) {
 	assert.Equal(t, 3, dim)
 }
 
+func TestPadEmbedding_PadsToColumnWidth(t *testing.T) {
+	padded, err := padEmbedding([]float32{0.1, 0.2, 0.3})
+	require.NoError(t, err)
+	assert.Len(t, padded, types.MemoryEmbeddingDim)
+	assert.Equal(t, float32(0.1), padded[0])
+	assert.Equal(t, float32(0.3), padded[2])
+	assert.Equal(t, float32(0), padded[types.MemoryEmbeddingDim-1])
+}
+
+func TestPadEmbedding_EmptyBecomesZeroVector(t *testing.T) {
+	padded, err := padEmbedding(nil)
+	require.NoError(t, err)
+	assert.Len(t, padded, types.MemoryEmbeddingDim)
+	for i, v := range padded {
+		assert.Zero(t, v, "dimension %d should be zero", i)
+	}
+}
+
+func TestPadEmbedding_ExactWidthIsNoOp(t *testing.T) {
+	full := make([]float32, types.MemoryEmbeddingDim)
+	full[7] = 0.7
+	padded, err := padEmbedding(full)
+	require.NoError(t, err)
+	assert.Equal(t, float32(0.7), padded[7])
+}
+
+func TestPadEmbedding_RejectsOverWidth(t *testing.T) {
+	tooWide := make([]float32, types.MemoryEmbeddingDim+1)
+	_, err := padEmbedding(tooWide)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "exceeds the maximum supported dimension")
+}
+
+func TestCreate_PadsEmbeddingToColumnWidth(t *testing.T) {
+	repo, _ := newTestRepo(t)
+	ctx := context.Background()
+
+	mem := types.NewMemory("tenant-1", "padded content")
+	mem.Embedding = pgvector.NewVector([]float32{0.1, 0.2, 0.3})
+	require.NoError(t, repo.Create(ctx, mem))
+	assert.Len(t, mem.Embedding.Slice(), types.MemoryEmbeddingDim)
+	assert.Equal(t, float32(0.3), mem.Embedding.Slice()[2])
+	assert.Equal(t, float32(0), mem.Embedding.Slice()[types.MemoryEmbeddingDim-1])
+}
+
+func TestCreate_RejectsEmbeddingOverColumnWidth(t *testing.T) {
+	repo, _ := newTestRepo(t)
+	ctx := context.Background()
+
+	mem := types.NewMemory("tenant-1", "too-wide content")
+	mem.Embedding = pgvector.NewVector(make([]float32, types.MemoryEmbeddingDim+1))
+	err := repo.Create(ctx, mem)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "exceeds the maximum supported dimension")
+}
+
 func TestBM25Search_EmptyQueryReturnsNil(t *testing.T) {
 	repo, _ := newTestRepo(t)
 	results, err := repo.BM25Search(context.Background(), &types.MemoryFilter{TenantID: "t1"})
