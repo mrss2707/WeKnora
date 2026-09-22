@@ -433,8 +433,6 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(handler.NewWeKnoraCloudHandler))
 	logger.Debugf(ctx, "[Container] HTTP handlers registered")
 
-	logger.Debugf(ctx, "[Container] HTTP handlers registered")
-
 	// Wire the chat package's local image resolver so multimodal chat can read
 	// local:// images that live under a tenant's configured storage PathPrefix
 	// (which is not encoded in the local:// URL).

@@ -1,0 +1,12 @@
+-- TEMPLATE — do not run as-is.
+-- COPY this file, RENAME to 9NNNNN_<your_module_name>.down.sql (drop the
+-- .example suffix, matching the version chosen for the .up.sql file), then
+-- edit.
+--
+-- Down migrations for module directories only need to revert additive,
+-- idempotent changes — see migrations/modules/memory_v2/README.md
+-- "Rollback" section for the accepted pattern (down files are provided for
+-- development databases; manual rollback of a live DB uses
+-- `./scripts/migrate.sh force <version>` instead of a destructive DROP).
+
+ALTER TABLE some_existing_table DROP COLUMN IF EXISTS example_column;

@@ -56,7 +56,7 @@ type RouterParams struct {
 	MessageSuggestionHandler     *handler.MessageSuggestionHandler
 	ModelHandler                 *handler.ModelHandler
 	ModelCredentialsHandler      *handler.ModelCredentialsHandler
-ModelPreferenceHandler       *handler.ModelPreferenceHandler
+	ModelPreferenceHandler       *handler.ModelPreferenceHandler
 	SandboxConfigHandler         *handler.SandboxConfigHandler
 	EvaluationHandler            *handler.EvaluationHandler
 	AuthHandler                  *handler.AuthHandler
@@ -86,7 +86,7 @@ ModelPreferenceHandler       *handler.ModelPreferenceHandler
 	DataSourceCredentialsHandler *handler.DataSourceCredentialsHandler
 	WeKnoraCloudHandler          *handler.WeKnoraCloudHandler
 	WikiPageHandler              *handler.WikiPageHandler
-MemoryV2Handler              *handler.MemoryV2Handler
+	MemoryV2Handler              *handler.MemoryV2Handler
 	MemoryHandler                *handler.MemoryHandler
 }
 
@@ -299,7 +299,6 @@ func NewRouter(params RouterParams) *gin.Engine {
 
 	return r
 }
-
 
 // trustedProxies returns the proxy CIDRs/IPs whose X-Forwarded-For headers
 // gin should trust when resolving the client IP. Defaults to loopback and

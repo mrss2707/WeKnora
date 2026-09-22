@@ -1,0 +1,15 @@
+{
+  "_comment": "Copy this file to manifest.json inside your module directory and fill in every field. See migrations/modules/memory_v2/manifest.json and migrations/modules/model_preferences/manifest.json for real examples.",
+  "module": "<your_module_name>",
+  "owner": "<what owns this module, e.g. '<module> module (develop branch)'>",
+  "backend": "postgres",
+  "reserved_range": "900000-909999",
+  "migrations": [
+    "9NNNNN_<your_module_name>.up.sql"
+  ],
+  "prerequisites": [
+    "<list any required PostgreSQL extensions, minimum version, etc.>"
+  ],
+  "rollback_policy": "<describe what the down migration reverts, and the manual rollback command if any, e.g. './scripts/migrate.sh force <version>'>",
+  "upgrade_guide": "See README.md."
+}

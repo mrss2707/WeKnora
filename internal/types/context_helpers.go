@@ -11,13 +11,20 @@ func EnvLanguage() string {
 	return strings.TrimSpace(os.Getenv("WEKNORA_LANGUAGE"))
 }
 
+// fallbackDefaultLanguage is the single source of truth for the hardcoded
+// locale fallback used when WEKNORA_LANGUAGE is unset. Every other hardcoded
+// default-locale literal in the codebase (e.g. middleware.Language()) must
+// route through DefaultLanguage() instead of duplicating this value.
+const fallbackDefaultLanguage = "vi-VN"
+
 // DefaultLanguage returns the configured default language locale.
-// It reads the WEKNORA_LANGUAGE environment variable; if unset, falls back to "zh-CN".
+// It reads the WEKNORA_LANGUAGE environment variable; if unset, falls back to
+// fallbackDefaultLanguage.
 func DefaultLanguage() string {
 	if lang := EnvLanguage(); lang != "" {
 		return lang
 	}
-	return "zh-CN"
+	return fallbackDefaultLanguage
 }
 
 // TenantIDFromContext extracts the tenant ID from ctx.
@@ -337,14 +344,14 @@ func LanguageFromContextOrDefault(ctx context.Context) string {
 
 // LanguageNameFromContext returns the human-readable language name for use in prompts.
 // e.g. "zh-CN" -> "Chinese (Simplified)", "en-US" -> "English", "ko-KR" -> "Korean"
-// Falls back to DefaultLanguage() (WEKNORA_LANGUAGE env, then "zh-CN").
+// Falls back to DefaultLanguage() (WEKNORA_LANGUAGE env, then fallbackDefaultLanguage).
 func LanguageNameFromContext(ctx context.Context) string {
 	return ResolveLanguageName(ctx, "")
 }
 
 // AcceptLanguageHeader returns a well-formed Accept-Language header value
 // derived from the request context's language locale.
-// Falls back to "zh-CN,zh;q=0.9,en;q=0.8" when no locale is set.
+// Falls back to DefaultLanguage() when no locale is set.
 func AcceptLanguageHeader(ctx context.Context) string {
 	lang, ok := LanguageFromContext(ctx)
 	if !ok {

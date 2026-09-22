@@ -13,7 +13,7 @@ import (
 // Priority (highest to lowest):
 //  1. WEKNORA_LANGUAGE environment variable (deployment-level override for document processing language)
 //  2. Accept-Language HTTP header (first tag, e.g. "vi-VN,vi;q=0.9" → "vi-VN")
-//  3. "vi-VN" hardcoded fallback
+//  3. types.DefaultLanguage() fallback (single source of truth, see internal/types/context_helpers.go)
 //
 // WEKNORA_LANGUAGE takes precedence over Accept-Language because the UI locale (menu language)
 // and the document processing language (question/summary generation) are separate concerns.
@@ -39,9 +39,9 @@ func Language() gin.HandlerFunc {
 			lang = parseFirstLanguageTag(acceptLang)
 		}
 
-		// 3. Fallback to hardcoded default
+		// 3. Fallback to the single default-locale source of truth
 		if lang == "" {
-			lang = "vi-VN"
+			lang = types.DefaultLanguage()
 		}
 
 		// Inject into context

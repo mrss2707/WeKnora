@@ -1,0 +1,9 @@
+-- TEMPLATE — do not run as-is.
+-- COPY this file, RENAME to 9NNNNN_<your_module_name>.up.sql (drop the
+-- .example suffix, pick a real version in 900000-909999), then edit.
+--
+-- Every statement must be idempotent: re-running `up` on an
+-- already-migrated database must be a safe no-op.
+
+ALTER TABLE some_existing_table ADD COLUMN IF NOT EXISTS example_column TEXT;
+CREATE INDEX IF NOT EXISTS idx_some_existing_table_example_column ON some_existing_table(example_column);
