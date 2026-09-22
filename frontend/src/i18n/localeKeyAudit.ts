@@ -92,6 +92,10 @@ const EXTRA_PREFIXES = [
   'kbSettings.parser.engines.',
   'model.editor.description.',
   'integrations.tabs.',
+  'integrations.chrome.capabilities.',
+  'integrations.chrome.steps.',
+  'integrations.claw.capabilities.',
+  'integrations.claw.steps.',
   'knowledgeStages.stage.',
   'knowledgeStages.status.',
   'system.globalSettings.runtime.pools.',
@@ -514,7 +518,7 @@ export function findAllLocaleMessageCompileErrors(
 
 type LocaleTree = Record<string, unknown>
 
-const LOCALE_ORDER: LocaleName[] = ['en-US', 'zh-CN', 'ko-KR', 'ru-RU']
+const LOCALE_ORDER: LocaleName[] = ['en-US', 'zh-CN', 'ko-KR', 'ru-RU', 'vi-VN']
 const LOCALES_DIR = join(dirname(fileURLToPath(import.meta.url)), 'locales')
 
 function getLocaleValueAtPathParts(current: unknown, parts: string[]): unknown {

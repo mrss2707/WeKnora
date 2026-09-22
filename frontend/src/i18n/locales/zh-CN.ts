@@ -1120,7 +1120,8 @@ export default {
     syncMode: {
       incremental: '增量同步',
       full: '全量同步'
-    }
+    },
+    resumeFailed: '恢复同步失败'
   },
   ollama: {
     unknown: '未知',
@@ -2188,7 +2189,7 @@ export default {
     timeoutSec: '超时时间(秒)',
     retryCount: '重试次数',
     retryDelaySec: '重试延迟(秒)',
-    oauthRefreshable: 'Token 已过期，将在下次使用时自动刷新',
+    oauthRefreshable: 'Token 已过期，将自动刷新',
     codeImport: {
       toggle: '从代码导入',
       hint: '粘贴标准 mcpServers JSON 配置，自动填充表单',
@@ -2218,14 +2219,26 @@ export default {
       updated: 'MCP 服务已更新',
       createFailed: '创建 MCP 服务失败',
       updateFailed: '更新 MCP 服务失败',
-      oauthRequired: '该服务需要 OAuth 授权，已自动切换为 OAuth 2.0，请保存后点击「去授权」。'
+      oauthRequired: '该服务需要 OAuth 授权，已自动切换为 OAuth 2.0，请保存后点击「去授权」。',
+      authorizeFailed: 'OAuth 授权失败',
+      authorized: 'OAuth 授权成功',
+      revoked: 'OAuth 授权已撤销',
+      revokeFailed: '撤销 OAuth 授权失败'
     },
     rules: {
       nameRequired: '请输入服务名称',
       transportRequired: '请选择传输类型',
       urlRequired: '请输入服务 URL',
       urlInvalid: '请输入有效的 URL'
-    }
+    },
+    oauthScopes: 'Scopes（可选，空格分隔）',
+    oauthAuthorization: '授权状态',
+    oauthAuthorized: '已授权',
+    oauthUnauthorized: '未授权',
+    oauthAuthorize: '去授权',
+    oauthReauthorize: '重新授权',
+    oauthRevoke: '撤销授权',
+    testResultTitle: '测试结果'
   },
   ollamaSettings: {
     title: 'Ollama 配置',
@@ -2860,7 +2873,11 @@ export default {
       updateApiPrincipalConfigFailed: '更新 API 用户身份配置失败',
       createApiPrincipalTestTokenFailed: '生成 API 测试 Token 失败',
       updateFailed: '更新空间信息失败',
-      deleteFailed: '删除空间失败'
+      deleteFailed: '删除空间失败',
+      listApiKeysFailed: '获取 API Key 列表失败',
+      createApiKeyFailed: '创建 API Key 失败',
+      deleteApiKeyFailed: '删除 API Key 失败',
+      createFailed: '创建空间失败'
     },
     model: {
       createFailed: '创建模型失败',
@@ -3679,7 +3696,10 @@ export default {
     webFetchStatusSkipped: '已跳过',
     webFetchErrorCode: '错误码',
     webFetchRetryable: '可重试',
-    webFetchSummaryFailed: '摘要失败'
+    webFetchSummaryFailed: '摘要失败',
+    imageReadFailed: '读取图片失败',
+    emptyContentWarning: '请输入内容',
+    editorOpened: '已打开编辑器'
   },
   knowledgeEditor: {
     titleCreate: '新建知识库',
@@ -4615,7 +4635,18 @@ export default {
     webSearch: {
       toggleOn: '开启网络搜索',
       toggleOff: '关闭网络搜索',
-      notConfigured: '未配置网络搜索引擎'
+      notConfigured: '未配置网络搜索引擎',
+      label: '网络搜索'
+    },
+    imageUpload: {
+      tooltip: '上传图片',
+      label: '上传图片'
+    },
+    fileUpload: {
+      tooltip: '上传文档',
+      label: '上传文件',
+      tooMany: '上传文件数量超出限制',
+      tooLarge: '文件大小超出限制'
     }
   },
   manualEditor: {
@@ -4713,7 +4744,8 @@ export default {
     }
   },
   file: {
-    upload: '上传文件'
+    upload: '上传文件',
+    downloadFailed: '下载失败'
   },
   mentionDetail: {
     readOnlyFromAgent: '仅在此对话中只读，不显示在知识库列表中',
@@ -4772,7 +4804,11 @@ export default {
     expand: '展开',
     collapse: '收起',
     add: '添加',
-    updateSuccess: '更新成功'
+    updateSuccess: '更新成功',
+    operationFailed: '操作失败',
+    createSuccess: '创建成功',
+    avatar: '头像',
+    loadMore: '加载更多'
   },
   authStore: {
     errors: {
@@ -5397,7 +5433,8 @@ export default {
       parseMethodAuto: '自动识别（推荐）',
       parseMethodOCR: '强制 OCR',
       parseMethodText: '仅提取文本',
-      parseMethodHint: '自动模式会为扫描件启用 OCR，电子版 PDF 直接提取文本。'
+      parseMethodHint: '自动模式会为扫描件启用 OCR，电子版 PDF 直接提取文本。',
+      checking: '正在检查解析器连通性...'
     },
     weknoraCloud: {
       title: 'WeKnora Cloud',
@@ -6179,7 +6216,11 @@ export default {
       fromOrg: '来自空间',
       sharedAt: '共享于',
       lastUpdated: '最后更新'
-    }
+    },
+    createSessionFailed: '创建会话失败',
+    createSessionError: '无法启动对话会话',
+    selectKnowledgeBase: '选择知识库',
+    moreOptions: '更多选项'
   },
   resourceOrigin: {
     mine: '我创建',
@@ -6505,5 +6546,8 @@ export default {
     myChats: '我的对话',
     apiChats: 'API 会话',
     noSessions: '暂无对话'
+  },
+  knowledge: {
+    untitledDocument: '未命名文档'
   }
 }

@@ -1120,7 +1120,8 @@ export default {
     syncMode: {
       incremental: 'Инкрементная',
       full: 'Полная'
-    }
+    },
+    resumeFailed: 'Не удалось возобновить синхронизацию'
   },
   ollama: {
     unknown: 'Неизвестно',
@@ -2188,7 +2189,7 @@ export default {
     timeoutSec: 'Таймаут (с)',
     retryCount: 'Число попыток',
     retryDelaySec: 'Задержка (с)',
-    oauthRefreshable: 'Token expired; it will refresh automatically on next use',
+    oauthRefreshable: 'Токен истек, обновится автоматически',
     codeImport: {
       toggle: 'Импорт из кода',
       hint: 'Вставьте стандартную JSON-конфигурацию mcpServers для автозаполнения формы',
@@ -2218,14 +2219,26 @@ export default {
       updated: 'Сервис MCP обновлён',
       createFailed: 'Не удалось создать сервис MCP',
       updateFailed: 'Не удалось обновить сервис MCP',
-      oauthRequired: 'Сервис требует OAuth. Переключено на OAuth 2.0 — сохраните и нажмите «Авторизоваться».'
+      oauthRequired: 'Сервис требует OAuth. Переключено на OAuth 2.0 — сохраните и нажмите «Авторизоваться».',
+      authorizeFailed: 'Ошибка авторизации OAuth',
+      authorized: 'OAuth успешно авторизован',
+      revoked: 'Авторизация OAuth отозвана',
+      revokeFailed: 'Не удалось отозвать авторизацию OAuth'
     },
     rules: {
       nameRequired: 'Введите название сервиса',
       transportRequired: 'Выберите тип транспорта',
       urlRequired: 'Введите URL сервиса',
       urlInvalid: 'Введите корректный URL'
-    }
+    },
+    oauthScopes: 'Области OAuth (необязательно, через пробел)',
+    oauthAuthorization: 'Статус авторизации',
+    oauthAuthorized: 'Авторизовано',
+    oauthUnauthorized: 'Не авторизовано',
+    oauthAuthorize: 'Авторизовать',
+    oauthReauthorize: 'Повторно авторизовать',
+    oauthRevoke: 'Отозвать авторизацию',
+    testResultTitle: 'Результаты теста'
   },
   ollamaSettings: {
     title: 'Настройки Ollama',
@@ -2860,7 +2873,11 @@ export default {
       updateApiPrincipalConfigFailed: 'Не удалось обновить конфигурацию API principal',
       createApiPrincipalTestTokenFailed: 'Не удалось создать тестовый API Token',
       updateFailed: 'Не удалось обновить информацию о пространстве',
-      deleteFailed: 'Failed to delete workspace'
+      deleteFailed: 'Failed to delete workspace',
+      listApiKeysFailed: 'Не удалось загрузить список ключей API',
+      createApiKeyFailed: 'Не удалось создать ключ API',
+      deleteApiKeyFailed: 'Не удалось удалить ключ API',
+      createFailed: 'Не удалось создать рабочее пространство'
     },
     model: {
       createFailed: 'Не удалось создать модель',
@@ -3679,7 +3696,10 @@ export default {
     webFetchStatusSkipped: 'Skipped',
     webFetchErrorCode: 'Error code',
     webFetchRetryable: 'Retryable',
-    webFetchSummaryFailed: 'Summary failed'
+    webFetchSummaryFailed: 'Summary failed',
+    imageReadFailed: 'Не удалось прочитать изображение',
+    emptyContentWarning: 'Пожалуйста, введите сообщение',
+    editorOpened: 'Редактор открыт'
   },
   knowledgeEditor: {
     titleCreate: 'Создать базу знаний',
@@ -4615,7 +4635,18 @@ export default {
     webSearch: {
       toggleOn: 'Включить веб-поиск',
       toggleOff: 'Выключить веб-поиск',
-      notConfigured: 'Веб-поиск не настроен'
+      notConfigured: 'Веб-поиск не настроен',
+      label: 'Поиск в сети'
+    },
+    imageUpload: {
+      tooltip: 'Загрузить изображения',
+      label: 'Tải ảnh lên'
+    },
+    fileUpload: {
+      tooltip: 'Загрузить документы',
+      label: 'Загрузить файл',
+      tooMany: 'Слишком много загруженных файлов',
+      tooLarge: 'Размер файла превышает лимит'
     }
   },
   manualEditor: {
@@ -4713,7 +4744,8 @@ export default {
     }
   },
   file: {
-    upload: 'Загрузить файл'
+    upload: 'Загрузить файл',
+    downloadFailed: 'Не удалось скачать'
   },
   mentionDetail: {
     readOnlyFromAgent: 'Только чтение (от агента)',
@@ -4772,7 +4804,11 @@ export default {
     expand: 'Развернуть',
     collapse: 'Свернуть',
     add: 'Добавить',
-    updateSuccess: 'Успешно обновлено'
+    updateSuccess: 'Успешно обновлено',
+    operationFailed: 'Сбой операции',
+    createSuccess: 'Успешно создано',
+    avatar: 'Аватар',
+    loadMore: 'Загрузить еще'
   },
   authStore: {
     errors: {
@@ -5397,7 +5433,8 @@ export default {
       parseMethodAuto: 'Автоопределение (рекомендуется)',
       parseMethodOCR: 'Принудительное OCR',
       parseMethodText: 'Только извлечение текста',
-      parseMethodHint: 'Автоматический режим использует OCR для сканов и извлекает исходный текст из цифровых PDF.'
+      parseMethodHint: 'Автоматический режим использует OCR для сканов и извлекает исходный текст из цифровых PDF.',
+      checking: 'Проверка подключения парсера...'
     },
     weknoraCloud: {
       title: 'WeKnora Cloud',
@@ -6179,7 +6216,11 @@ export default {
       fromOrg: 'Из пространства',
       sharedAt: 'Дата общего доступа',
       lastUpdated: 'Последнее обновление'
-    }
+    },
+    createSessionFailed: 'Не удалось создать сессию',
+    createSessionError: 'Не удалось начать сессию разговора',
+    selectKnowledgeBase: 'Выберите базу знаний',
+    moreOptions: 'Дополнительные параметры'
   },
   resourceOrigin: {
     mine: 'Мои',
@@ -6505,5 +6546,8 @@ export default {
     myChats: 'Мои чаты',
     apiChats: 'Сессии API',
     noSessions: 'Пока нет диалогов'
+  },
+  knowledge: {
+    untitledDocument: 'Документ без названия'
   }
 }

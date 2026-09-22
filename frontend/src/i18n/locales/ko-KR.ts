@@ -1120,7 +1120,8 @@ export default {
     syncMode: {
       incremental: '증분 동기화',
       full: '전체 동기화'
-    }
+    },
+    resumeFailed: '동기화 재개 실패'
   },
   ollama: {
     unknown: '알 수 없음',
@@ -2188,7 +2189,7 @@ export default {
     timeoutSec: '타임아웃(초)',
     retryCount: '재시도 횟수',
     retryDelaySec: '재시도 지연(초)',
-    oauthRefreshable: 'Token expired; it will refresh automatically on next use',
+    oauthRefreshable: '토큰이 만료되었으며 자동으로 갱신됩니다',
     codeImport: {
       toggle: '코드에서 가져오기',
       hint: '표준 mcpServers JSON 설정을 붙여넣으면 양식이 자동으로 채워집니다',
@@ -2218,14 +2219,26 @@ export default {
       updated: 'MCP 서비스가 업데이트되었습니다',
       createFailed: 'MCP 서비스 생성 실패',
       updateFailed: 'MCP 서비스 업데이트 실패',
-      oauthRequired: '이 서비스는 OAuth 인증이 필요하여 OAuth 2.0으로 자동 전환했습니다. 저장 후 「인증하기」를 클릭하세요.'
+      oauthRequired: '이 서비스는 OAuth 인증이 필요하여 OAuth 2.0으로 자동 전환했습니다. 저장 후 「인증하기」를 클릭하세요.',
+      authorizeFailed: 'OAuth 인증 실패',
+      authorized: 'OAuth 인증 완료',
+      revoked: 'OAuth 인증이 해제되었습니다',
+      revokeFailed: 'OAuth 인증 해제 실패'
     },
     rules: {
       nameRequired: '서비스 이름을 입력해주세요',
       transportRequired: '전송 유형을 선택해주세요',
       urlRequired: '서비스 URL을 입력해주세요',
       urlInvalid: '유효한 URL을 입력해주세요'
-    }
+    },
+    oauthScopes: 'OAuth 스코프 (선택 사항, 공백으로 구분)',
+    oauthAuthorization: '인증 상태',
+    oauthAuthorized: '인증됨',
+    oauthUnauthorized: '인증되지 않음',
+    oauthAuthorize: '인증하기',
+    oauthReauthorize: '다시 인증하기',
+    oauthRevoke: '인증 해제',
+    testResultTitle: '테스트 결과'
   },
   ollamaSettings: {
     title: 'Ollama 설정',
@@ -2860,7 +2873,11 @@ export default {
       updateApiPrincipalConfigFailed: 'API principal config 업데이트 실패',
       createApiPrincipalTestTokenFailed: 'API 테스트 토큰 생성 실패',
       updateFailed: '워크스페이스 정보 업데이트 실패',
-      deleteFailed: 'Failed to delete workspace'
+      deleteFailed: 'Failed to delete workspace',
+      listApiKeysFailed: 'API 키 목록을 불러오지 못했습니다',
+      createApiKeyFailed: 'API 키를 생성하지 못했습니다',
+      deleteApiKeyFailed: 'API 키를 삭제하지 못했습니다',
+      createFailed: '워크스페이스 생성에 실패했습니다'
     },
     model: {
       createFailed: '모델 생성 실패',
@@ -3679,7 +3696,10 @@ export default {
     webFetchStatusSkipped: 'Skipped',
     webFetchErrorCode: 'Error code',
     webFetchRetryable: 'Retryable',
-    webFetchSummaryFailed: 'Summary failed'
+    webFetchSummaryFailed: 'Summary failed',
+    imageReadFailed: '이미지를 읽지 못했습니다',
+    emptyContentWarning: '내용을 입력해주세요',
+    editorOpened: '편집기가 열렸습니다'
   },
   knowledgeEditor: {
     titleCreate: '지식베이스 생성',
@@ -4615,7 +4635,18 @@ export default {
     webSearch: {
       toggleOn: '웹 검색 켜기',
       toggleOff: '웹 검색 끄기',
-      notConfigured: '웹 검색 엔진이 구성되지 않았습니다'
+      notConfigured: '웹 검색 엔진이 구성되지 않았습니다',
+      label: '웹 검색'
+    },
+    imageUpload: {
+      tooltip: '이미지 업로드',
+      label: '이미지 업로드'
+    },
+    fileUpload: {
+      tooltip: '문서 업로드',
+      label: '파일 업로드',
+      tooMany: '업로드된 파일 수가 너무 많습니다',
+      tooLarge: '파일 크기가 제한을 초과했습니다'
     }
   },
   manualEditor: {
@@ -4713,7 +4744,8 @@ export default {
     }
   },
   file: {
-    upload: '파일 업로드'
+    upload: '파일 업로드',
+    downloadFailed: '다운로드 실패'
   },
   mentionDetail: {
     readOnlyFromAgent: '이 대화에서는 읽기 전용이며 지식베이스 목록에는 표시되지 않습니다.',
@@ -4772,7 +4804,11 @@ export default {
     expand: '펼치기',
     collapse: '접기',
     add: '추가',
-    updateSuccess: '업데이트 성공'
+    updateSuccess: '업데이트 성공',
+    operationFailed: '작업 실패',
+    createSuccess: '생성 성공',
+    avatar: '아바타',
+    loadMore: '더 보기'
   },
   authStore: {
     errors: {
@@ -5397,7 +5433,8 @@ export default {
       parseMethodAuto: '자동 감지 (권장)',
       parseMethodOCR: 'OCR 강제 사용',
       parseMethodText: '텍스트만 추출',
-      parseMethodHint: '자동 모드는 스캔 PDF에는 OCR을 사용하고 디지털 PDF에서는 원본 텍스트를 추출합니다.'
+      parseMethodHint: '자동 모드는 스캔 PDF에는 OCR을 사용하고 디지털 PDF에서는 원본 텍스트를 추출합니다.',
+      checking: '파서 연결 확인 중...'
     },
     weknoraCloud: {
       title: 'WeKnora Cloud',
@@ -6179,7 +6216,11 @@ export default {
       fromOrg: '공유 스페이스에서',
       sharedAt: '공유일시',
       lastUpdated: '마지막 업데이트'
-    }
+    },
+    createSessionFailed: '세션 생성에 실패했습니다',
+    createSessionError: '대화 세션을 시작할 수 없습니다',
+    selectKnowledgeBase: '지식 베이스 선택',
+    moreOptions: '더 많은 옵션'
   },
   resourceOrigin: {
     mine: '내 생성',
@@ -6505,5 +6546,8 @@ export default {
     myChats: '내 대화',
     apiChats: 'API 세션',
     noSessions: '대화가 없습니다'
+  },
+  knowledge: {
+    untitledDocument: '제목 없는 문서'
   }
 }

@@ -646,7 +646,11 @@ export default {
     batchTagAvailableSection: 'Available',
     batchTagNoSelected: 'None selected',
     batchTagSuccess: 'Tags applied to {count} documents',
-    batchTagFailed: 'Batch tag failed'
+    batchTagFailed: 'Batch tag failed',
+    createSessionFailed: 'Failed to create session',
+    createSessionError: 'Could not start conversation session',
+    selectKnowledgeBase: 'Select knowledge base',
+    moreOptions: 'More options'
   },
   uploadConfirm: {
     title: 'Confirm Upload',
@@ -1166,7 +1170,8 @@ export default {
       parseMethodAuto: 'Auto-detect (Recommended)',
       parseMethodOCR: 'Force OCR',
       parseMethodText: 'Text extraction only',
-      parseMethodHint: 'Auto mode uses OCR for scanned PDFs and extracts the native text layer from digital PDFs.'
+      parseMethodHint: 'Auto mode uses OCR for scanned PDFs and extracts the native text layer from digital PDFs.',
+      checking: 'Checking parser connectivity...'
     },
     storageBackend: {
       description: 'Manage the storage instances used for files and images; multiple instances of the same type can be configured.',
@@ -1780,7 +1785,11 @@ export default {
     expand: 'Expand',
     collapse: 'Collapse',
     add: 'Add',
-    updateSuccess: 'Updated successfully'
+    updateSuccess: 'Updated successfully',
+    operationFailed: 'Operation failed',
+    createSuccess: 'Created successfully',
+    avatar: 'Avatar',
+    loadMore: 'Load more'
   },
   mentionDetail: {
     readOnlyFromAgent: 'Read-only in this conversation; not shown in Knowledge Base list',
@@ -1791,7 +1800,8 @@ export default {
     noCompatibleKbForAgent: 'This agent\'s tools don\'t match any knowledge base\'s capabilities in scope, so nothing can be referenced.'
   },
   file: {
-    upload: 'Upload File'
+    upload: 'Upload File',
+    downloadFailed: 'Download failed'
   },
   manualEditor: {
     placeholders: {
@@ -1909,7 +1919,8 @@ export default {
     webSearch: {
       toggleOn: 'Enable Web Search',
       toggleOff: 'Disable Web Search',
-      notConfigured: 'Web search engine not configured'
+      notConfigured: 'Web search engine not configured',
+      label: 'Web search'
     },
     knowledgeBase: 'Knowledge Base',
     knowledgeBaseWithCount: 'Knowledge Base ({count})',
@@ -1937,7 +1948,17 @@ export default {
     kbDisabledByAgent: 'Knowledge base is disabled by the current agent',
     modelLockedByAgent: 'Model selection is locked by the current agent',
     imageUploadDisabledByAgent: 'Image upload is not enabled for this agent',
-    goToAgentSettings: 'Go to agent settings'
+    goToAgentSettings: 'Go to agent settings',
+    imageUpload: {
+      tooltip: 'Upload images',
+      label: 'Upload image'
+    },
+    fileUpload: {
+      tooltip: 'Upload documents',
+      label: 'Upload file',
+      tooMany: 'Too many files uploaded',
+      tooLarge: 'File size exceeds limit'
+    }
   },
   createChat: {
     title: 'Hi, I am WeKnora — your knowledge, within reach',
@@ -2965,7 +2986,10 @@ export default {
     webFetchStatusSkipped: 'Skipped',
     webFetchErrorCode: 'Error code',
     webFetchRetryable: 'Retryable',
-    webFetchSummaryFailed: 'Summary failed'
+    webFetchSummaryFailed: 'Summary failed',
+    imageReadFailed: 'Failed to read image',
+    emptyContentWarning: 'Please enter a message',
+    editorOpened: 'Editor opened'
   },
   tenant: {
     title: 'Workspace Information',
@@ -3661,7 +3685,11 @@ export default {
       updateApiPrincipalConfigFailed: 'Failed to update API principal config',
       createApiPrincipalTestTokenFailed: 'Failed to create API test token',
       updateFailed: 'Failed to update workspace information',
-      deleteFailed: 'Failed to delete workspace'
+      deleteFailed: 'Failed to delete workspace',
+      listApiKeysFailed: 'Failed to load API keys',
+      createApiKeyFailed: 'Failed to create API key',
+      deleteApiKeyFailed: 'Failed to delete API key',
+      createFailed: 'Failed to create workspace'
     },
     initialization: {
       checkFailed: 'Check failed',
@@ -4320,7 +4348,11 @@ export default {
       updated: 'MCP service updated',
       createFailed: 'Failed to create MCP service',
       updateFailed: 'Failed to update MCP service',
-      oauthRequired: 'This server requires OAuth. Switched to OAuth 2.0 — save, then click "Authorize".'
+      oauthRequired: 'This server requires OAuth. Switched to OAuth 2.0 — save, then click "Authorize".',
+      authorizeFailed: 'OAuth authorization failed',
+      authorized: 'OAuth authorized successfully',
+      revoked: 'OAuth authorization revoked',
+      revokeFailed: 'Failed to revoke OAuth authorization'
     },
     customHeaders: {
       label: 'Custom Headers (optional)',
@@ -4346,7 +4378,15 @@ export default {
         multipleServers: 'Multiple services detected, imported the first one: {name}'
       }
     },
-    oauthRefreshable: 'Token expired; it will refresh automatically on next use'
+    oauthRefreshable: 'Token expired, will auto-refresh',
+    oauthScopes: 'OAuth scopes (optional, space-separated)',
+    oauthAuthorization: 'Authorization status',
+    oauthAuthorized: 'Authorized',
+    oauthUnauthorized: 'Unauthorized',
+    oauthAuthorize: 'Authorize',
+    oauthReauthorize: 'Reauthorize',
+    oauthRevoke: 'Revoke authorization',
+    testResultTitle: 'Test results'
   },
   promptTemplate: {
     noTemplates: 'No templates available',
@@ -5634,7 +5674,8 @@ export default {
     prereqStep2Desc_ima: 'Copy the ima-openapi-clientid and ima-openapi-apikey credentials from the agent-interface page',
     prereqStep3Brief_ima: 'Grant the credential access to the target knowledge bases',
     prereqStep3Desc_ima: 'In the IMA client, authorize the credential for the knowledge bases you want to sync; unauthorized bases will not appear in the list',
-    prereqOpenConsole_ima: 'Open Tencent IMA OpenAPI console'
+    prereqOpenConsole_ima: 'Open Tencent IMA OpenAPI console',
+    resumeFailed: 'Failed to resume sync'
   },
   integrations: {
     title: 'Publish & Integrations',
@@ -6505,5 +6546,8 @@ export default {
     capabilityRequired: 'Select at least one capability',
     loadFailed: 'Failed to load platform API keys',
     createFailed: 'Failed to create platform API key'
+  },
+  knowledge: {
+    untitledDocument: 'Untitled document'
   }
 }
