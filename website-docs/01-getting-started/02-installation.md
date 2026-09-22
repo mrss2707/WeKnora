@@ -40,6 +40,7 @@ flowchart TB
 ## 硬件与依赖要求
 
 - **标准 Docker 部署**：Docker 20.10+ 与 Docker Compose v2（v1 `docker-compose` 也兼容，`scripts/start_all.sh` 会自动探测）；建议 4 核 CPU / 8GB 内存起步（docreader 含 LibreOffice、Playwright，较吃内存），磁盘按知识库规模预留（Postgres 卷 + `/data/files` 文件卷）。启用 Milvus / OpenSearch / Langfuse 等可选组件需相应增加内存。
+- **macOS（OrbStack）**：macOS 上可选用 [OrbStack](https://orbstack.dev) 作为 Docker 运行时（`docker context use orbstack` 切换上下文），其余步骤与下文一致；容器内访问宿主机 Ollama 的 `host.docker.internal:11434` 同样可用，无需额外配置。
 - **模型服务**：本地推理需 [Ollama](https://ollama.com)（默认地址 `http://host.docker.internal:11434`，`OLLAMA_OPTIONAL=true` 时不可用仅告警不阻断）；或任意 OpenAI 兼容 API（DeepSeek、通义、智谱、硅基流动等）。
 - **源码编译**：Go 1.26（见 `docker/Dockerfile.app` builder 阶段 `golang:1.26-bookworm`）、CGO（依赖 `libsqlite3-dev`）、Node.js + npm（前端）、Python 3.10 + uv（docreader）。
 - **Kubernetes**：>= 1.25.0（`helm/Chart.yaml`）。

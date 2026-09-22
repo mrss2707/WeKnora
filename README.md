@@ -220,6 +220,10 @@ See [`cli/README.md`](./cli/README.md) for install + 5-minute quickstart and
 - [Docker](https://www.docker.com/) & [Docker Compose](https://docs.docker.com/compose/)
 - [Git](https://git-scm.com/)
 
+> On macOS, [OrbStack](https://orbstack.dev) is a drop-in Docker runtime: make it
+> active with `docker context use orbstack`, and the steps below work unchanged.
+> `host.docker.internal` (Ollama access from inside containers) is supported.
+
 ### 📦 Installation & Launch
 
 ```bash
