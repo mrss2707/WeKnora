@@ -18,8 +18,8 @@ templates:
         name: "ピュアエージェント"
         description: "ピュアエージェントモード用のシステムプロンプト（ナレッジベース不使用）"
       vi-VN:
-        name: "Trí tuệ thuần túy"
-        description: "Prompt hệ thống cho chế độ Trí tuệ thuần túy (không sử dụng Cơ sở tri thức)"
+        name: "Agent thuần túy"
+        description: "Prompt hệ thống cho chế độ Agent thuần túy (không sử dụng Cơ sở tri thức)"
     mode: "pure"
     content: |
       You are WeKnora, an assistant developed by Tencent. Help the user understand information and complete requested work using the capabilities available in this turn.
@@ -43,7 +43,7 @@ templates:
         name: "プログレッシブRAGエージェント"
         description: "ナレッジベースを使用するプログレッシブエージェンティックRAGモード用のシステムプロンプト"
       vi-VN:
-        name: "Trí tuệ RAG tiến dần"
+        name: "Agent RAG tiến dần"
         description: "Prompt hệ thống cho chế độ RAG tiến dần có sử dụng Cơ sở tri thức"
     default: true
     mode: "rag"
@@ -74,7 +74,7 @@ templates:
         description: "DuckDB SQLを用いた分析を行うデータ分析エージェント用のシステムプロンプト"
       vi-VN:
         name: "Phân tích dữ liệu"
-        description: "Prompt hệ thống cho Trí tuệ Phân tích dữ liệu với DuckDB SQL"
+        description: "Prompt hệ thống cho Agent Phân tích dữ liệu với DuckDB SQL"
     mode: "data_analyst"
     content: |
       You are WeKnora Data Analyst, specializing in analysis of the user's CSV and Excel data with DuckDB.
@@ -104,7 +104,7 @@ templates:
         description: "ナレッジグラフ探索を行うWikiリサーチャーエージェント用のシステムプロンプト"
       vi-VN:
         name: "Nghiên cứu viên Wiki"
-        description: "Prompt hệ thống cho Trí tuệ Nghiên cứu Wiki với khả năng duyệt đồ thị tri thức"
+        description: "Prompt hệ thống cho Agent Nghiên cứu Wiki với khả năng duyệt đồ thị tri thức"
     mode: "wiki_researcher"
     content: |
       You are WeKnora Wiki Researcher. The Wiki contains generated, linked summaries, entities, and concepts derived from source documents.
@@ -163,8 +163,8 @@ templates:
         name: "ハイブリッドRAG + Wikiエージェント"
         description: "Wikiとチャンク単位の検索を同時に有効化したナレッジベース用のシステムプロンプト"
       vi-VN:
-        name: "Trí tuệ RAG + Wiki lai"
-        description: "Prompt hệ thống cho các Cơ sở tri thức đồng thời bật Wiki và chỉ mục khối (vector/từ khóa)"
+        name: "Agent RAG + Wiki lai"
+        description: "Prompt hệ thống cho các Cơ sở tri thức đồng thời bật Wiki và chỉ mục đoạn (vector/từ khóa)"
     mode: "smart-reasoning"
     content: |
       You are WeKnora, an assistant that uses Wiki pages and original document chunks to answer questions and complete knowledge-based work.
@@ -191,6 +191,9 @@ templates:
       ja-JP:
         name: "スキルインストール用システムプロンプト"
         description: "アップロードされたスキルとその依存関係をサンドボックスイメージにインストールするためのシステムプロンプト"
+      vi-VN:
+        name: "Prompt hệ thống cài đặt Kỹ năng"
+        description: "Prompt hệ thống dùng để cài đặt một kỹ năng được tải lên cùng các thành phần phụ thuộc của nó vào image Sandbox"
     mode: "smart-reasoning"
     content: |
       <role>
