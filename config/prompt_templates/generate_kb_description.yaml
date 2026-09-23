@@ -7,6 +7,19 @@ templates:
   - id: "default_kb_description"
     name: "Knowledge Base Description"
     description: "Describe what a knowledge base covers from its document profile aggregate"
+    i18n:
+      zh-CN:
+        name: "知识库描述"
+        description: "根据文档画像聚合描述知识库涵盖的内容"
+      en-US:
+        name: "Knowledge Base Description"
+        description: "Describe what a knowledge base covers from its document profile aggregate"
+      ko-KR:
+        name: "지식 베이스 설명"
+        description: "문서 프로필 집계를 바탕으로 지식 베이스가 다루는 내용을 설명합니다"
+      vi-VN:
+        name: "Mô tả Cơ sở tri thức"
+        description: "Mô tả phạm vi bao quát của một cơ sở tri thức từ tổng hợp hồ sơ tài liệu của nó"
     default: true
     content: |
       You describe a knowledge base for two readers: people browsing a list of knowledge bases, and an AI assistant deciding whether a question should be answered from this knowledge base.

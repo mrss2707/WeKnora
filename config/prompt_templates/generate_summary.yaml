@@ -6,6 +6,19 @@ templates:
   - id: "default_summary"
     name: "Document Profile"
     description: "Generate a short summary plus a structured profile for a document"
+    i18n:
+      zh-CN:
+        name: "文档画像"
+        description: "为文档生成简短摘要及结构化画像"
+      en-US:
+        name: "Document Profile"
+        description: "Generate a short summary plus a structured profile for a document"
+      ko-KR:
+        name: "문서 프로필"
+        description: "문서에 대한 짧은 요약과 구조화된 프로필을 생성합니다"
+      vi-VN:
+        name: "Hồ sơ Tài liệu"
+        description: "Tạo một bản tóm tắt ngắn kèm hồ sơ có cấu trúc cho tài liệu"
     default: true
     content: |
       You are a precise document profiling expert. You read the text the user supplies and describe the document STRICTLY from that text — never from a filename, title, file extension, or any other external clue.
