@@ -1,4 +1,4 @@
-export const SUPPORTED_LOCALES = ['zh-CN', 'en-US', 'ru-RU', 'ko-KR', 'vi-VN'] as const
+export const SUPPORTED_LOCALES = ['zh-CN', 'en-US', 'ru-RU', 'ko-KR', 'ja-JP', 'vi-VN'] as const
 export type SupportedLocale = (typeof SUPPORTED_LOCALES)[number]
 
 export const BUILT_IN_DEFAULT: SupportedLocale = 'vi-VN'

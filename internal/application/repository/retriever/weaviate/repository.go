@@ -6,8 +6,6 @@ import (
 	"maps"
 	"slices"
 	"strings"
-	"unicode"
-	"unicode/utf8"
 
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -98,16 +96,16 @@ func (w *weaviateRepository) ensureCollection(ctx context.Context, dimension int
 			},
 			Properties: []*models.Property{
 				{
-					Name:         fieldContent,
-					DataType:     []string{"text"},
+					Name:     fieldContent,
+					DataType: []string{"text"},
 					// NOTE: "gse" is a CJK-oriented tokenizer. For non-CJK languages
-				// (Vietnamese, English, etc.) BM25 keyword search may be suboptimal
-				// because gse segmentation doesn't respect word boundaries in those
-				// languages. Vector (semantic) search is unaffected. Changing this
-				// requires dropping and recreating the collection — no migration path
-				// exists. The query tokenizer (tokenizeQuery) already dispatches
-				// non-CJK queries via whitespace split to mitigate search-side impact.
-				Tokenization: "gse",
+					// (Vietnamese, English, etc.) BM25 keyword search may be suboptimal
+					// because gse segmentation doesn't respect word boundaries in those
+					// languages. Vector (semantic) search is unaffected. Changing this
+					// requires dropping and recreating the collection — no migration path
+					// exists. The query tokenizer (tokenizeQuery) already dispatches
+					// non-CJK queries via whitespace split to mitigate search-side impact.
+					Tokenization: "gse",
 				},
 				{
 					Name:     fieldSourceID,
@@ -1042,48 +1040,4 @@ func fromWeaviateVectorEmbedding(id string,
 		Score:           embedding.Score,
 		MatchType:       matchType,
 	}
-}
-
-// containsCJK checks if the text contains CJK (Chinese/Japanese) or Korean characters.
-func containsCJK(text string) bool {
-	for _, r := range text {
-		if unicode.Is(unicode.Han, r) || unicode.Is(unicode.Hangul, r) {
-			return true
-		}
-	}
-	return false
-}
-
-// tokenizeQuery splits a query string into tokens for OR-based full-text search.
-// It uses jieba for CJK segmentation; for non-CJK queries it falls back to whitespace splitting.
-func tokenizeQuery(query string) []string {
-	query = strings.TrimSpace(query)
-	if query == "" {
-		return nil
-	}
-
-	var words []string
-
-	if containsCJK(query) {
-		// Use jieba for CJK segmentation (search mode for better recall)
-		words = types.Jieba.CutForSearch(query, true)
-	} else {
-		// Non-CJK: split on whitespace
-		words = strings.Fields(query)
-	}
-
-	// Filter and deduplicate
-	seen := make(map[string]bool)
-	result := make([]string, 0, len(words))
-	for _, word := range words {
-		word = strings.TrimSpace(strings.ToLower(word))
-		// Skip empty, single-char, and already seen words
-		if utf8.RuneCountInString(word) < 2 || seen[word] {
-			continue
-		}
-		seen[word] = true
-		result = append(result, word)
-	}
-
-	return result
 }

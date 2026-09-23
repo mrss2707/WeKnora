@@ -13,6 +13,8 @@ describe('resolveDefaultLocale', () => {
     assert.equal(resolveDefaultLocale(null, 'ru-RU'), 'ru-RU')
     assert.equal(resolveDefaultLocale(undefined, 'ko-KR'), 'ko-KR')
     assert.equal(resolveDefaultLocale('', 'zh-CN'), 'zh-CN')
+    assert.equal(resolveDefaultLocale('', 'ja-JP'), 'ja-JP')
+    assert.equal(resolveDefaultLocale(undefined, undefined), BUILT_IN_DEFAULT)
   })
 
   test('falls back to the built-in default when nothing is provided', () => {
@@ -32,7 +34,7 @@ describe('resolveDefaultLocale', () => {
   })
 
   test('every supported locale resolves to itself', () => {
-    for (const locale of ['zh-CN', 'en-US', 'ru-RU', 'ko-KR', 'vi-VN'] as const) {
+    for (const locale of ['zh-CN', 'en-US', 'ru-RU', 'ko-KR', 'ja-JP', 'vi-VN'] as const) {
       assert.equal(resolveDefaultLocale(locale), locale)
     }
   })

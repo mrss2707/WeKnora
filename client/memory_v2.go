@@ -13,21 +13,21 @@ import (
 // AgentMemory mirrors internal/types.AgentMemory. Kept in the client package
 // to avoid a cross-module dependency from cli/ → internal/.
 type AgentMemory struct {
-	ID             string   `json:"id"`
-	TenantID       string   `json:"tenant_id"`
-	KbID           string   `json:"kb_id"`
-	UserID         string   `json:"user_id"`
-	Content        string   `json:"content"`
-	MemoryType     string   `json:"memory_type"`
-	Importance     int      `json:"importance"`
-	Tier           int      `json:"tier"`
-	Verdict        string   `json:"verdict"`
-	HubScore       float64  `json:"hub_score"`
-	AccessCount    int      `json:"access_count"`
-	SessionID      string   `json:"session_id"`
-	Tags           []string `json:"tags,omitempty"`
-	CreatedAt      string   `json:"created_at"`
-	UpdatedAt      string   `json:"updated_at"`
+	ID          string   `json:"id"`
+	TenantID    string   `json:"tenant_id"`
+	KbID        string   `json:"kb_id"`
+	UserID      string   `json:"user_id"`
+	Content     string   `json:"content"`
+	MemoryType  string   `json:"memory_type"`
+	Importance  int      `json:"importance"`
+	Tier        int      `json:"tier"`
+	Verdict     string   `json:"verdict"`
+	HubScore    float64  `json:"hub_score"`
+	AccessCount int      `json:"access_count"`
+	SessionID   string   `json:"session_id"`
+	Tags        []string `json:"tags,omitempty"`
+	CreatedAt   string   `json:"created_at"`
+	UpdatedAt   string   `json:"updated_at"`
 }
 
 // MemorySearchResult wraps a memory with its relevance score.
@@ -113,8 +113,8 @@ type CreateMemoryRequest struct {
 	Verdict    string   `json:"verdict,omitempty"`
 }
 
-// memoryListResponse is the API envelope for ListMemories.
-type memoryListResponse struct {
+// memoryV2ListResponse is the API envelope for ListMemories.
+type memoryV2ListResponse struct {
 	Success bool `json:"success"`
 	Data    struct {
 		Items    []MemorySearchResult `json:"items"`
@@ -124,32 +124,32 @@ type memoryListResponse struct {
 	} `json:"data"`
 }
 
-// memoryResponse is the API envelope for GetMemory.
-type memoryResponse struct {
+// memoryV2Response is the API envelope for GetMemory.
+type memoryV2Response struct {
 	Success bool         `json:"success"`
 	Data    *AgentMemory `json:"data"`
 }
 
-// memorySaveResponse is the API envelope for CreateMemory / UpdateMemory.
-type memorySaveResponse struct {
+// memoryV2SaveResponse is the API envelope for CreateMemory / UpdateMemory.
+type memoryV2SaveResponse struct {
 	Success bool              `json:"success"`
 	Data    *SaveMemoryResult `json:"data"`
 }
 
-// memorySearchResponse is the API envelope for SearchMemories.
-type memorySearchResponse struct {
-	Success bool                  `json:"success"`
-	Data    []MemorySearchResult  `json:"data"`
+// memoryV2SearchResponse is the API envelope for SearchMemories.
+type memoryV2SearchResponse struct {
+	Success bool                 `json:"success"`
+	Data    []MemorySearchResult `json:"data"`
 }
 
-// memoryGraphResponse is the API envelope for GetMemoryGraph.
-type memoryGraphResponse struct {
-	Success bool             `json:"success"`
+// memoryV2GraphResponse is the API envelope for GetMemoryGraph.
+type memoryV2GraphResponse struct {
+	Success bool              `json:"success"`
 	Data    MemoryGraphResult `json:"data"`
 }
 
-// memoryStatsResponse is the API envelope for GetMemoryStats.
-type memoryStatsResponse struct {
+// memoryV2StatsResponse is the API envelope for GetMemoryStats.
+type memoryV2StatsResponse struct {
 	Success bool `json:"success"`
 	Data    struct {
 		TotalMemories int64            `json:"total_memories"`
@@ -157,15 +157,15 @@ type memoryStatsResponse struct {
 	} `json:"data"`
 }
 
-// memoryHealthResponse is the API envelope for GetHealthReport.
-type memoryHealthResponse struct {
+// memoryV2HealthResponse is the API envelope for GetHealthReport.
+type memoryV2HealthResponse struct {
 	Success bool         `json:"success"`
 	Data    HealthReport `json:"data"`
 }
 
-// memoryStatusResponse is the API envelope for GetMemoryStatus.
-type memoryStatusResponse struct {
-	Success bool              `json:"success"`
+// memoryV2StatusResponse is the API envelope for GetMemoryStatus.
+type memoryV2StatusResponse struct {
+	Success bool               `json:"success"`
 	Data    MemoryStatusResult `json:"data"`
 }
 
@@ -183,7 +183,7 @@ func (c *Client) ListMemories(ctx context.Context, kbID string, page, pageSize i
 		return nil, 0, err
 	}
 
-	var envelope memoryListResponse
+	var envelope memoryV2ListResponse
 	if err := parseResponse(resp, &envelope); err != nil {
 		return nil, 0, err
 	}
@@ -199,7 +199,7 @@ func (c *Client) GetMemory(ctx context.Context, id string) (*AgentMemory, error)
 		return nil, err
 	}
 
-	var envelope memoryResponse
+	var envelope memoryV2Response
 	if err := parseResponse(resp, &envelope); err != nil {
 		return nil, err
 	}
@@ -214,7 +214,7 @@ func (c *Client) CreateMemory(ctx context.Context, req *CreateMemoryRequest) (*S
 		return nil, err
 	}
 
-	var envelope memorySaveResponse
+	var envelope memoryV2SaveResponse
 	if err := parseResponse(resp, &envelope); err != nil {
 		return nil, err
 	}
@@ -230,7 +230,7 @@ func (c *Client) UpdateMemory(ctx context.Context, id string, req *CreateMemoryR
 		return nil, err
 	}
 
-	var envelope memorySaveResponse
+	var envelope memoryV2SaveResponse
 	if err := parseResponse(resp, &envelope); err != nil {
 		return nil, err
 	}
@@ -274,7 +274,7 @@ func (c *Client) SearchMemories(ctx context.Context, kbID, query string, limit i
 		return nil, err
 	}
 
-	var envelope memorySearchResponse
+	var envelope memoryV2SearchResponse
 	if err := parseResponse(resp, &envelope); err != nil {
 		return nil, err
 	}
@@ -294,7 +294,7 @@ func (c *Client) GetMemoryGraph(ctx context.Context, id, kbID string) (*MemoryGr
 		return nil, err
 	}
 
-	var envelope memoryGraphResponse
+	var envelope memoryV2GraphResponse
 	if err := parseResponse(resp, &envelope); err != nil {
 		return nil, err
 	}
@@ -313,7 +313,7 @@ func (c *Client) GetMemoryStats(ctx context.Context, kbID string) (map[string]in
 		return nil, 0, err
 	}
 
-	var envelope memoryStatsResponse
+	var envelope memoryV2StatsResponse
 	if err := parseResponse(resp, &envelope); err != nil {
 		return nil, 0, err
 	}
@@ -332,7 +332,7 @@ func (c *Client) GetHealthReport(ctx context.Context, kbID string) (*HealthRepor
 		return nil, err
 	}
 
-	var envelope memoryHealthResponse
+	var envelope memoryV2HealthResponse
 	if err := parseResponse(resp, &envelope); err != nil {
 		return nil, err
 	}
@@ -347,7 +347,7 @@ func (c *Client) GetMemoryStatus(ctx context.Context) (*MemoryStatusResult, erro
 		return nil, err
 	}
 
-	var envelope memoryStatusResponse
+	var envelope memoryV2StatusResponse
 	if err := parseResponse(resp, &envelope); err != nil {
 		return nil, err
 	}

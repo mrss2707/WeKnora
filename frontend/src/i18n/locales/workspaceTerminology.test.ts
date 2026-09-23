@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 
 import enUS from './en-US.ts'
+import jaJP from './ja-JP.ts'
 import koKR from './ko-KR.ts'
 import ruRU from './ru-RU.ts'
 import viVN from './vi-VN.ts'
@@ -36,6 +37,7 @@ const localeChecks = [
   { name: 'zh-CN', locale: zhCN, forbidden: /租户/ },
   { name: 'en-US', locale: enUS, forbidden: /\btenants?\b/i },
   { name: 'ko-KR', locale: koKR, forbidden: /테넌트/ },
+  { name: 'ja-JP', locale: jaJP, forbidden: /テナント/ },
   { name: 'ru-RU', locale: ruRU, forbidden: /(?:тенант|арендатор)/i },
   { name: 'vi-VN', locale: viVN, forbidden: /(?:người thuê|\btenants?\b)/i },
 ]

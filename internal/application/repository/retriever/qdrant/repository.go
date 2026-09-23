@@ -2,16 +2,20 @@ package qdrant
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/Tencent/WeKnora/internal/common"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/google/uuid"
 	"github.com/qdrant/go-client/qdrant"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 const (
@@ -52,22 +56,100 @@ func (q *qdrantRepository) getCollectionName(dimension int) string {
 	return fmt.Sprintf("%s_%d", q.collectionBaseName, dimension)
 }
 
+// collectionExists reports whether the dimension-specific collection is
+// present. Collections are created lazily on the first write for a dimension,
+// so callers that only need to know whether there is anything to act on must
+// tolerate "does not exist" instead of treating it as a failure.
+//
+// A dimension already registered as initialized in this process short-circuits
+// the RPC, which keeps the common path at one round-trip per delete. The cache
+// is only a hint: deletePoints still treats a missing collection on the Delete
+// RPC as a no-op and drops the cache, so a Qdrant wipe without restarting this
+// process cannot revive "Collection ... doesn't exist!" (#3337).
+func (q *qdrantRepository) collectionExists(ctx context.Context, dimension int) (bool, error) {
+	if _, ok := q.initializedCollections.Load(dimension); ok {
+		return true, nil
+	}
+
+	exists, err := q.client.CollectionExists(ctx, q.getCollectionName(dimension))
+	if err != nil {
+		return false, fmt.Errorf("failed to check collection existence: %w", err)
+	}
+	return exists, nil
+}
+
+// deleteTarget resolves the collection a delete should run against and reports
+// whether the delete is worth issuing. A dimension-specific collection that was
+// never created holds no points, so deleting from it is a no-op — the same rule
+// VectorRetrieve already applies to reads.
+//
+// This matters because the ingest paths re-index a chunk by deleting first and
+// writing second (see knowledgeService.updateChunkVector and
+// chunkService.syncChunkIndex). When that delete is the first touch of a
+// dimension, failing on the missing collection aborts the write that would have
+// created it, so ingestion fails with "Collection ... doesn't exist!" (#3337).
+// deletePoints is the second line of defence if this probe (or its cache)
+// disagrees with the store.
+func (q *qdrantRepository) deleteTarget(ctx context.Context, dimension int) (string, bool, error) {
+	collectionName := q.getCollectionName(dimension)
+
+	exists, err := q.collectionExists(ctx, dimension)
+	if err != nil {
+		return collectionName, false, err
+	}
+	if !exists {
+		logger.GetLogger(ctx).Infof(
+			"[Qdrant] Collection %s does not exist, nothing to delete", collectionName)
+		return collectionName, false, nil
+	}
+	return collectionName, true, nil
+}
+
+// isMissingCollectionErr reports whether err is Qdrant saying the dimension
+// collection is gone. The go-client wraps the gRPC status, and tests (and some
+// server paths) surface the issue's "Collection ... doesn't exist!" wording.
+func isMissingCollectionErr(err error) bool {
+	if err == nil {
+		return false
+	}
+	if status.Code(err) == codes.NotFound {
+		return true
+	}
+	return strings.Contains(err.Error(), "doesn't exist")
+}
+
+// deletePoints issues DeletePoints and treats a missing collection as a no-op.
+// When that happens the process-local initialized cache is dropped so the
+// following write (ensureCollection) will recreate the collection instead of
+// skipping create and failing the upsert.
+func (q *qdrantRepository) deletePoints(ctx context.Context, dimension int, collectionName string, points *qdrant.PointsSelector) error {
+	_, err := q.client.Delete(ctx, &qdrant.DeletePoints{
+		CollectionName: collectionName,
+		Points:         points,
+	})
+	if err == nil {
+		return nil
+	}
+	if !isMissingCollectionErr(err) {
+		return err
+	}
+	q.initializedCollections.Delete(dimension)
+	logger.GetLogger(ctx).Infof(
+		"[Qdrant] Collection %s does not exist, nothing to delete", collectionName)
+	return nil
+}
+
 // ensureCollection ensures the collection exists for the given dimension
 func (q *qdrantRepository) ensureCollection(ctx context.Context, dimension int) error {
 	collectionName := q.getCollectionName(dimension)
 
-	// Check cache first
-	if _, ok := q.initializedCollections.Load(dimension); ok {
-		return nil
-	}
-
 	log := logger.GetLogger(ctx)
 
-	// Check if collection exists
-	exists, err := q.client.CollectionExists(ctx, collectionName)
+	// Cached dimensions and existing collections need no creation work.
+	exists, err := q.collectionExists(ctx, dimension)
 	if err != nil {
 		log.Errorf("[Qdrant] Failed to check collection existence: %v", err)
-		return fmt.Errorf("failed to check collection existence: %w", err)
+		return err
 	}
 
 	if !exists {
@@ -280,17 +362,22 @@ func (q *qdrantRepository) DeleteByChunkIDList(ctx context.Context, chunkIDList 
 		return nil
 	}
 
-	collectionName := q.getCollectionName(dimension)
+	collectionName, ok, err := q.deleteTarget(ctx, dimension)
+	if err != nil {
+		log.Errorf("[Qdrant] Failed to check collection existence: %v", err)
+		return err
+	}
+	if !ok {
+		return nil
+	}
+
 	log.Infof("[Qdrant] Deleting indices by chunk IDs from %s, count: %d", collectionName, len(chunkIDList))
 
-	_, err := q.client.Delete(ctx, &qdrant.DeletePoints{
-		CollectionName: collectionName,
-		Points: qdrant.NewPointsSelectorFilter(&qdrant.Filter{
-			Must: []*qdrant.Condition{
-				qdrant.NewMatchKeywords(fieldChunkID, chunkIDList...),
-			},
-		}),
-	})
+	err = q.deletePoints(ctx, dimension, collectionName, qdrant.NewPointsSelectorFilter(&qdrant.Filter{
+		Must: []*qdrant.Condition{
+			qdrant.NewMatchKeywords(fieldChunkID, chunkIDList...),
+		},
+	}))
 	if err != nil {
 		log.Errorf("[Qdrant] Failed to delete by chunk IDs: %v", err)
 		return fmt.Errorf("failed to delete by chunk IDs: %w", err)
@@ -310,17 +397,22 @@ func (q *qdrantRepository) DeleteByKnowledgeIDList(ctx context.Context,
 		return nil
 	}
 
-	collectionName := q.getCollectionName(dimension)
+	collectionName, ok, err := q.deleteTarget(ctx, dimension)
+	if err != nil {
+		log.Errorf("[Qdrant] Failed to check collection existence: %v", err)
+		return err
+	}
+	if !ok {
+		return nil
+	}
+
 	log.Infof("[Qdrant] Deleting indices by knowledge IDs from %s, count: %d", collectionName, len(knowledgeIDList))
 
-	_, err := q.client.Delete(ctx, &qdrant.DeletePoints{
-		CollectionName: collectionName,
-		Points: qdrant.NewPointsSelectorFilter(&qdrant.Filter{
-			Must: []*qdrant.Condition{
-				qdrant.NewMatchKeywords(fieldKnowledgeID, knowledgeIDList...),
-			},
-		}),
-	})
+	err = q.deletePoints(ctx, dimension, collectionName, qdrant.NewPointsSelectorFilter(&qdrant.Filter{
+		Must: []*qdrant.Condition{
+			qdrant.NewMatchKeywords(fieldKnowledgeID, knowledgeIDList...),
+		},
+	}))
 	if err != nil {
 		log.Errorf("[Qdrant] Failed to delete by knowledge IDs: %v", err)
 		return fmt.Errorf("failed to delete by knowledge IDs: %w", err)
@@ -340,17 +432,22 @@ func (q *qdrantRepository) DeleteBySourceIDList(ctx context.Context,
 		return nil
 	}
 
-	collectionName := q.getCollectionName(dimension)
+	collectionName, ok, err := q.deleteTarget(ctx, dimension)
+	if err != nil {
+		log.Errorf("[Qdrant] Failed to check collection existence: %v", err)
+		return err
+	}
+	if !ok {
+		return nil
+	}
+
 	log.Infof("[Qdrant] Deleting indices by source IDs from %s, count: %d", collectionName, len(sourceIDList))
 
-	_, err := q.client.Delete(ctx, &qdrant.DeletePoints{
-		CollectionName: collectionName,
-		Points: qdrant.NewPointsSelectorFilter(&qdrant.Filter{
-			Must: []*qdrant.Condition{
-				qdrant.NewMatchKeywords(fieldSourceID, sourceIDList...),
-			},
-		}),
-	})
+	err = q.deletePoints(ctx, dimension, collectionName, qdrant.NewPointsSelectorFilter(&qdrant.Filter{
+		Must: []*qdrant.Condition{
+			qdrant.NewMatchKeywords(fieldSourceID, sourceIDList...),
+		},
+	}))
 	if err != nil {
 		log.Errorf("[Qdrant] Failed to delete by source IDs: %v", err)
 		return fmt.Errorf("failed to delete by source IDs: %w", err)
@@ -371,11 +468,15 @@ func (q *qdrantRepository) BatchUpdateChunkEnabledStatus(ctx context.Context, ch
 
 	log.Infof("[Qdrant] Batch updating chunk enabled status, count: %d", len(chunkStatusMap))
 
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
 	// Get all collections that match our base name pattern
 	collections, err := q.client.ListCollections(ctx)
 	if err != nil {
 		log.Errorf("[Qdrant] Failed to list collections: %v", err)
-		return fmt.Errorf("failed to list collections: %w", err)
+		return fmt.Errorf("failed to list collections: %w", errors.Join(err, ctx.Err()))
 	}
 
 	// Group chunks by enabled status for batch updates
@@ -390,6 +491,7 @@ func (q *qdrantRepository) BatchUpdateChunkEnabledStatus(ctx context.Context, ch
 		}
 	}
 
+	var updateErr error
 	// Update in all matching collections
 	for _, collectionName := range collections {
 		// Only process collections that start with our base name
@@ -400,9 +502,12 @@ func (q *qdrantRepository) BatchUpdateChunkEnabledStatus(ctx context.Context, ch
 
 		// Update enabled chunks
 		if len(enabledChunkIDs) > 0 {
+			if err := ctx.Err(); err != nil {
+				return errors.Join(updateErr, err)
+			}
 			_, err := q.client.SetPayload(ctx, &qdrant.SetPayloadPoints{
 				CollectionName: collectionName,
-				Payload:        qdrant.NewValueMap(map[string]any{fieldIsEnabled: true}),
+				Payload:        newQdrantValueMap(map[string]any{fieldIsEnabled: true}),
 				PointsSelector: qdrant.NewPointsSelectorFilter(&qdrant.Filter{
 					Must: []*qdrant.Condition{
 						qdrant.NewMatchKeywords(fieldChunkID, enabledChunkIDs...),
@@ -411,14 +516,18 @@ func (q *qdrantRepository) BatchUpdateChunkEnabledStatus(ctx context.Context, ch
 			})
 			if err != nil {
 				log.Warnf("[Qdrant] Failed to update enabled chunks in %s: %v", collectionName, err)
+				updateErr = errors.Join(updateErr, fmt.Errorf("enable chunks in collection %s: %w", collectionName, err))
 			}
 		}
 
 		// Update disabled chunks
 		if len(disabledChunkIDs) > 0 {
+			if err := ctx.Err(); err != nil {
+				return errors.Join(updateErr, err)
+			}
 			_, err := q.client.SetPayload(ctx, &qdrant.SetPayloadPoints{
 				CollectionName: collectionName,
-				Payload:        qdrant.NewValueMap(map[string]any{fieldIsEnabled: false}),
+				Payload:        newQdrantValueMap(map[string]any{fieldIsEnabled: false}),
 				PointsSelector: qdrant.NewPointsSelectorFilter(&qdrant.Filter{
 					Must: []*qdrant.Condition{
 						qdrant.NewMatchKeywords(fieldChunkID, disabledChunkIDs...),
@@ -427,8 +536,13 @@ func (q *qdrantRepository) BatchUpdateChunkEnabledStatus(ctx context.Context, ch
 			})
 			if err != nil {
 				log.Warnf("[Qdrant] Failed to update disabled chunks in %s: %v", collectionName, err)
+				updateErr = errors.Join(updateErr, fmt.Errorf("disable chunks in collection %s: %w", collectionName, err))
 			}
 		}
+	}
+
+	if err := errors.Join(updateErr, ctx.Err()); err != nil {
+		return err
 	}
 
 	log.Infof("[Qdrant] Batch update chunk enabled status completed")
@@ -445,11 +559,15 @@ func (q *qdrantRepository) BatchUpdateChunkTagID(ctx context.Context, chunkTagMa
 
 	log.Infof("[Qdrant] Batch updating chunk tag ID, count: %d", len(chunkTagMap))
 
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
 	// Get all collections that match our base name pattern
 	collections, err := q.client.ListCollections(ctx)
 	if err != nil {
 		log.Errorf("[Qdrant] Failed to list collections: %v", err)
-		return fmt.Errorf("failed to list collections: %w", err)
+		return fmt.Errorf("failed to list collections: %w", errors.Join(err, ctx.Err()))
 	}
 
 	// Group chunks by tag ID for batch updates
@@ -458,6 +576,7 @@ func (q *qdrantRepository) BatchUpdateChunkTagID(ctx context.Context, chunkTagMa
 		tagGroups[tagID] = append(tagGroups[tagID], chunkID)
 	}
 
+	var updateErr error
 	// Update in all matching collections
 	for _, collectionName := range collections {
 		// Only process collections that start with our base name
@@ -468,9 +587,12 @@ func (q *qdrantRepository) BatchUpdateChunkTagID(ctx context.Context, chunkTagMa
 
 		// Update chunks for each tag ID
 		for tagID, chunkIDs := range tagGroups {
+			if err := ctx.Err(); err != nil {
+				return errors.Join(updateErr, err)
+			}
 			_, err := q.client.SetPayload(ctx, &qdrant.SetPayloadPoints{
 				CollectionName: collectionName,
-				Payload:        qdrant.NewValueMap(map[string]any{fieldTagID: tagID}),
+				Payload:        newQdrantValueMap(map[string]any{fieldTagID: tagID}),
 				PointsSelector: qdrant.NewPointsSelectorFilter(&qdrant.Filter{
 					Must: []*qdrant.Condition{
 						qdrant.NewMatchKeywords(fieldChunkID, chunkIDs...),
@@ -479,8 +601,14 @@ func (q *qdrantRepository) BatchUpdateChunkTagID(ctx context.Context, chunkTagMa
 			})
 			if err != nil {
 				log.Warnf("[Qdrant] Failed to update chunks with tag_id %s in %s: %v", tagID, collectionName, err)
+				updateErr = errors.Join(updateErr,
+					fmt.Errorf("set chunk tag_id %q in collection %s: %w", tagID, collectionName, err))
 			}
 		}
+	}
+
+	if err := errors.Join(updateErr, ctx.Err()); err != nil {
+		return err
 	}
 
 	log.Infof("[Qdrant] Batch update chunk tag ID completed")
@@ -809,7 +937,7 @@ func (q *qdrantRepository) CopyIndices(ctx context.Context,
 			if v, ok := payload[fieldIsEnabled]; ok {
 				isEnabled = v.GetBoolValue()
 			}
-			newPayload := qdrant.NewValueMap(map[string]any{
+			newPayload := newQdrantValueMap(map[string]any{
 				fieldContent:         payload[fieldContent].GetStringValue(),
 				fieldSourceID:        targetSourceID,
 				fieldSourceType:      payload[fieldSourceType].GetIntegerValue(),
@@ -880,7 +1008,20 @@ func createPayload(embedding *QdrantVectorEmbedding) map[string]*qdrant.Value {
 		fieldTagID:           embedding.TagID,
 		fieldIsEnabled:       embedding.IsEnabled,
 	}
-	return qdrant.NewValueMap(payload)
+	return newQdrantValueMap(payload)
+}
+
+func newQdrantValueMap(payload map[string]any) map[string]*qdrant.Value {
+	sanitizedPayload := make(map[string]any, len(payload))
+	for key, value := range payload {
+		if stringValue, ok := value.(string); ok {
+			if strings.IndexByte(stringValue, 0) != -1 || !utf8.ValidString(stringValue) {
+				value = common.CleanInvalidUTF8(stringValue)
+			}
+		}
+		sanitizedPayload[key] = value
+	}
+	return qdrant.NewValueMap(sanitizedPayload)
 }
 
 func buildRetrieveResult(results []*types.IndexWithScore, retrieverType types.RetrieverType) []*types.RetrieveResult {

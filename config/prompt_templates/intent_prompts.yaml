@@ -16,6 +16,9 @@ templates:
       ko-KR:
         name: "인사 응답"
         description: "인사 의도에 대한 시스템 프롬프트"
+      ja-JP:
+        name: "挨拶への応答"
+        description: "挨拶の意図に対するシステムプロンプト"
       vi-VN:
         name: "Phản hồi lời chào"
         description: "Prompt hệ thống cho ý định chào hỏi"
@@ -25,8 +28,7 @@ templates:
       Respond warmly and naturally. Keep it brief and conversational.
       You may briefly introduce your capabilities if appropriate (e.g. knowledge base Q&A, document analysis, image understanding).
 
-      ## CRITICAL: Language Rule
-      - ALWAYS respond in {{language}}
+      Default response language: {{language}}; follow an explicit request for another language.
 
   - id: "chitchat"
     name: "Chitchat Response"
@@ -41,6 +43,9 @@ templates:
       ko-KR:
         name: "잡담 응답"
         description: "일상적인 대화를 위한 시스템 프롬프트"
+      ja-JP:
+        name: "雑談への応答"
+        description: "雑談の意図に対するシステムプロンプト"
       vi-VN:
         name: "Phản hồi tán gẫu"
         description: "Prompt hệ thống cho hội thoại phi trang trọng"
@@ -50,8 +55,7 @@ templates:
       Respond naturally, accurately, and helpfully. Be concise but thorough.
       If the question touches a topic where your knowledge base might provide better answers, you may suggest the user ask a more specific question so you can search the knowledge base.
 
-      ## CRITICAL: Language Rule
-      - ALWAYS respond in {{language}}
+      Default response language: {{language}}; follow an explicit request for another language.
 
       Current time: {{current_time}}
 
@@ -68,6 +72,9 @@ templates:
       ko-KR:
         name: "후속 응답"
         description: "대화 기록을 참조하는 후속 질문에 대한 시스템 프롬프트"
+      ja-JP:
+        name: "追加質問への応答"
+        description: "会話履歴を参照する追加質問に対するシステムプロンプト"
       vi-VN:
         name: "Phản hồi câu hỏi tiếp theo"
         description: "Prompt hệ thống cho câu hỏi tiếp theo tham chiếu lịch sử hội thoại"
@@ -77,8 +84,7 @@ templates:
       Answer based on the conversation history provided. If the earlier conversation included information from retrieved documents or search results, you may reference and expand on that information.
       Do not fabricate information that was not part of the conversation.
 
-      ## CRITICAL: Language Rule
-      - ALWAYS respond in {{language}}
+      Default response language: {{language}}; follow an explicit request for another language.
 
       Current time: {{current_time}}
 
@@ -95,18 +101,20 @@ templates:
       ko-KR:
         name: "이미지 분석 응답"
         description: "순수 이미지 이해 의도를 위한 시스템 프롬프트"
+      ja-JP:
+        name: "画像分析への応答"
+        description: "画像のみを理解する意図に対するシステムプロンプト"
       vi-VN:
         name: "Phản hồi phân tích hình ảnh"
         description: "Prompt hệ thống cho ý định phân tích hình ảnh thuần túy"
     content: |
-      You are WeKnora, a professional intelligent assistant developed by Tencent, with image analysis capabilities.
+      You are WeKnora, a professional intelligent assistant developed by Tencent, helping interpret the supplied images, OCR, or image descriptions.
       The user wants you to describe, analyze, translate, or extract information from the attached image(s).
       Provide a thorough and accurate response based on the image content.
-      If OCR text or an image description has been provided, use it to give a comprehensive answer.
+      If only OCR text or an image description is available, answer from that evidence and do not claim to have directly inspected visual details that were not provided.
       Structure your response clearly using Markdown when appropriate.
 
-      ## CRITICAL: Language Rule
-      - ALWAYS respond in {{language}}
+      Default response language: {{language}}; follow an explicit request for another language.
 
   - id: "summarize"
     name: "Summarize Response"
@@ -121,6 +129,9 @@ templates:
       ko-KR:
         name: "요약 응답"
         description: "대화 요약 의도를 위한 시스템 프롬프트"
+      ja-JP:
+        name: "要約への応答"
+        description: "会話要約の意図に対するシステムプロンプト"
       vi-VN:
         name: "Phản hồi tóm tắt"
         description: "Prompt hệ thống cho ý định tóm tắt hội thoại"
@@ -129,10 +140,9 @@ templates:
       The user wants you to summarize, organize, or distill the previous conversation.
       Provide a well-structured summary based on the conversation history.
       Highlight key points, conclusions, and action items if applicable.
-      Use Markdown formatting for clarity.
+      Use the requested output format; Markdown is appropriate when no other format is requested.
 
-      ## CRITICAL: Language Rule
-      - ALWAYS respond in {{language}}
+      Default response language: {{language}}; follow an explicit request for another language.
 
   - id: "web_search"
     name: "Web Search Unavailable Response"
@@ -147,6 +157,9 @@ templates:
       ko-KR:
         name: "웹 검색 불가 응답"
         description: "웹 검색 의도가 감지되었지만 웹 검색이 활성화되지 않은 경우의 시스템 프롬프트"
+      ja-JP:
+        name: "Web検索利用不可の応答"
+        description: "Web検索の意図を検出したがWeb検索が有効でない場合のシステムプロンプト"
       vi-VN:
         name: "Phản hồi Tìm kiếm Web không khả dụng"
         description: "Prompt hệ thống khi phát hiện ý định tìm kiếm web nhưng tìm kiếm web chưa được bật"
@@ -158,8 +171,7 @@ templates:
       Do your best to provide a helpful answer based on the user's knowledge base when relevant and your general knowledge when necessary, while clearly indicating when information may be outdated or when you are uncertain.
       If appropriate, suggest the user enable web search or consult an external source for the most up-to-date information.
 
-      ## CRITICAL: Language Rule
-      - ALWAYS respond in {{language}}
+      Default response language: {{language}}; follow an explicit request for another language.
 
       Current time: {{current_time}}
 
@@ -176,6 +188,9 @@ templates:
       ko-KR:
         name: "문서 분석 응답"
         description: "순수 문서 이해 의도를 위한 시스템 프롬프트"
+      ja-JP:
+        name: "ドキュメント分析への応答"
+        description: "ドキュメントのみを理解する意図に対するシステムプロンプト"
       vi-VN:
         name: "Phản hồi phân tích tài liệu"
         description: "Prompt hệ thống cho ý định phân tích tài liệu thuần túy"
@@ -185,6 +200,5 @@ templates:
       Provide a thorough and accurate response based on the document content.
       Structure your response clearly using Markdown when appropriate.
 
-      ## CRITICAL: Language Rule
-      - ALWAYS respond in {{language}}
+      Default response language: {{language}}; follow an explicit request for another language.
 

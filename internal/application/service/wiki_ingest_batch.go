@@ -292,7 +292,7 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 	}
 	if !kb.IsWikiEnabled() {
 		exitStatus = "kb_not_wiki_enabled"
-		return fmt.Errorf("wiki ingest: KB %s is not wiki type", kb.ID)
+		return s.releaseIngestForUnavailableWiki(ctx, kb.ID, "wiki disabled")
 	}
 
 	var synthesisModelID string
@@ -304,9 +304,13 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 	}
 	if synthesisModelID == "" {
 		exitStatus = "missing_synthesis_model"
-		return fmt.Errorf("wiki ingest: no synthesis model configured for KB %s", kb.ID)
+		return s.releaseIngestForUnavailableWiki(ctx, kb.ID, "no synthesis model configured")
 	}
 	chatModel, err := s.modelService.GetChatModel(ctx, synthesisModelID)
+	if errors.Is(err, ErrModelNotFound) {
+		exitStatus = "synthesis_model_not_found"
+		return s.releaseIngestForUnavailableWiki(ctx, kb.ID, "synthesis model "+synthesisModelID+" not found")
+	}
 	if err != nil {
 		exitStatus = "get_chat_model_failed"
 		return fmt.Errorf("wiki ingest: get chat model: %w", err)
@@ -561,6 +565,11 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 		})
 	}
 	_ = eg.Wait()
+
+	// Re-read identity claims after every map worker has chosen a slug so
+	// concurrent romanizations of the same title collapse before taxonomy
+	// planning and Reduce lock by slug.
+	slugUpdates = s.remapSlugUpdatesByIdentity(ctx, payload.KnowledgeBaseID, slugUpdates, batchCtx)
 
 	// Plan the directory once for the whole batch BEFORE reduce. Reduce writes
 	// pages in parallel, so it can't converge on shared folders on its own; this
@@ -1364,6 +1373,9 @@ func (s *wikiIngestService) mapOneDocument(
 	// citations simply keep their Description+Details fallback).
 	var uncited int
 	extractedEntities, extractedConcepts, uncited = mergeCitationsIntoItems(extractedEntities, extractedConcepts, citations, newSlugs)
+	extractedEntities, extractedConcepts = s.reclaimExtractedIdentities(
+		ctx, payload.KnowledgeBaseID, extractedEntities, extractedConcepts, batchCtx,
+	)
 
 	// Rebuild slugItems so stale entries (for slugs that did not survive the
 	// merge) and brand-new slugs discovered by the citation pass are both
@@ -1644,7 +1656,7 @@ func (s *wikiIngestService) extractEntitiesAndConceptsNoUpsert(
 	// safe default — the LLM merge call simply doesn't get a candidate
 	// list and the items pass through unchanged.
 	result.Entities, result.Concepts = s.deduplicateExtractedBatch(
-		ctx, chatModel, kbID, result.Entities, result.Concepts,
+		ctx, chatModel, kbID, result.Entities, result.Concepts, batchCtx,
 	)
 
 	slugItems := make(map[string]extractedItem)
@@ -1871,14 +1883,14 @@ func (s *wikiIngestService) reduceSlugUpdates(
 		}
 
 		for _, ref := range page.SourceRefs {
-			pipeIdx := strings.Index(ref, "|")
-			var refKnowledgeID, refTitle string
-			if pipeIdx > 0 {
-				refKnowledgeID = ref[:pipeIdx]
-				refTitle = ref[pipeIdx+1:]
-			} else {
-				refKnowledgeID = ref
-				refTitle = ref
+			refKnowledgeID, refTitle := types.ParseWikiSourceRef(ref)
+			if refKnowledgeID == "" {
+				continue
+			}
+			if refTitle == "" {
+				// Legacy bare refs carry no title; the ID is the only label
+				// available for the retract prompt.
+				refTitle = refKnowledgeID
 			}
 
 			if retractKIDs[refKnowledgeID] {
@@ -1897,12 +1909,7 @@ func (s *wikiIngestService) reduceSlugUpdates(
 
 		newRefs := types.StringArray{}
 		for _, ref := range page.SourceRefs {
-			pipeIdx := strings.Index(ref, "|")
-			refKnowledgeID := ref
-			if pipeIdx > 0 {
-				refKnowledgeID = ref[:pipeIdx]
-			}
-			if !retractKIDs[refKnowledgeID] {
+			if !retractKIDs[types.WikiSourceKnowledgeID(ref)] {
 				newRefs = append(newRefs, ref)
 			}
 		}
