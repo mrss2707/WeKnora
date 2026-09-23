@@ -18,3 +18,16 @@ cli/acceptance/testdata/**/*.json text eol=lf
 
 # Unified diffs use a space to mark empty context lines.
 patches/browserskill/*.patch whitespace=-blank-at-eol
+
+# Patches are applied by git inside the Linux build container; CRLF line
+# endings from Windows checkouts make `git apply` fail there.
+patches/browserskill/*.patch text eol=lf
+
+# License source manifest is checksum-verified with sha256sum inside the
+# Linux build container; a CRLF checksum column breaks the regex and the
+# hash comparison.
+licenses/sources/*.tsv text eol=lf
+
+# go.mod is awk-parsed inside the Linux build container (check-license-bundle);
+# a trailing CR on the version column makes the comparison fail.
+go.mod go.sum text eol=lf
