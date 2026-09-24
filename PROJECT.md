@@ -56,4 +56,5 @@ mcp-server/                    Python MCP server
 - **Active work**: Vietnamese (vi-VN) i18n across full stack — chunker, tokenizer, metrics, prompts, agent tools, locale files. All 5 locales complete (5800+ lines each).
 - **Recent**: MCP OAuth support (migration 000062), wiki page hierarchy (000061)
 - **Testing**: 379 Go test files, 104 frontend test files, acceptance/e2e suite
+- **Ops note**: `conversation.summary.max_completion_tokens` = 4096 (raised from 1024) — reasoning models (deepseek-v4-flash-0731 via Anthropic gateway) burn the whole 1024 budget on `thinking` blocks over long inputs, yielding no `text` block and "summary model returned empty output". Root fix would send `thinking: {type: disabled}` for non-reasoning calls.
 - **Ship**: Docker images (wechatopenai/weknora-*), Helm charts, pre-built CLI binaries

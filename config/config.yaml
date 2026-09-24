@@ -29,7 +29,11 @@ conversation:
     max_input_chars: 8192
     repeat_penalty: 1.0
     temperature: 0.3
-    max_completion_tokens: 1024
+    # Raised 1024 -> 4096: reasoning models (e.g. deepseek-v4-flash-0731 via
+    # Anthropic protocol) spend the whole budget on thinking blocks when the
+    # input is long, leaving no text block -> "summary model returned empty
+    # output". Extra headroom lets thinking finish and text follow.
+    max_completion_tokens: 4096
     no_match_prefix: |-
       <think>
       </think>
