@@ -788,6 +788,25 @@ func TestFindTagOverlapMemories_LessThanTwoTags(t *testing.T) {
 // Test: Different tenants not cross-linked
 // ---------------------------------------------------------------------------
 
+func TestFindTagOverlapMemoriesScopesSearchToKnowledgeBase(t *testing.T) {
+	var got *types.MemoryFilter
+	repo := &mockAutoLinkerRepo{searchFunc: func(_ context.Context, filter *types.MemoryFilter) ([]*types.MemorySearchResult, int64, error) {
+		copy := *filter
+		got = &copy
+		return nil, 0, nil
+	}}
+	a := newTestAutoLinker(repo, &mockAutoLinkerEmbedder{})
+	memory := makeLinkerMemory("mem-1", "tenant-1", "Memory", []string{"tag1", "tag2"}, types.VerdictNone)
+	memory.KbID = "kb-1"
+
+	_, err := a.findTagOverlapMemories(context.Background(), memory)
+
+	require.NoError(t, err)
+	require.NotNil(t, got)
+	assert.Equal(t, "tenant-1", got.TenantID)
+	assert.Equal(t, "kb-1", got.KbID)
+}
+
 func TestAutoLinker_DifferentTenantsNotLinked(t *testing.T) {
 	candidate := makeLinkerMemory("cand-1", "tenant-2", "Candidate in other tenant",
 		[]string{"tag1", "tag2", "tag4"}, types.VerdictNone)

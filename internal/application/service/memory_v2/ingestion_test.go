@@ -168,6 +168,14 @@ func TestComputeFingerprintUsesStableSHA256(t *testing.T) {
 	assert.NotEqual(t, computeFingerprint("hello"), computeFingerprint("hello "))
 }
 
+func TestComputeScopedFingerprintSeparatesTenantAndKnowledgeBase(t *testing.T) {
+	first := computeScopedFingerprint("tenant-1", "kb-1", "hello")
+	assert.Equal(t, first, computeScopedFingerprint("tenant-1", "kb-1", "hello"))
+	assert.NotEqual(t, first, computeScopedFingerprint("tenant-2", "kb-1", "hello"))
+	assert.NotEqual(t, first, computeScopedFingerprint("tenant-1", "kb-2", "hello"))
+	assert.NotEqual(t, first, computeScopedFingerprint("tenant-1", "kb-1", "hello "))
+}
+
 func TestIngestionClassifiersAndScoring(t *testing.T) {
 	typeCases := []struct {
 		content string
@@ -256,15 +264,21 @@ func TestCheckSemanticDedupSearchErrorIsWrapped(t *testing.T) {
 }
 
 func TestCheckSemanticDedupNearDuplicateMergesAndTruncates(t *testing.T) {
-	existing := &types.AgentMemory{ID: "existing-1", TenantID: "tenant-1", Content: "Existing memory content", Importance: 1}
+	existing := &types.AgentMemory{
+		ID: "existing-1", TenantID: "tenant-1", KbID: "kb-1",
+		Content: "Existing memory content", Importance: 1, Tags: types.TagsArray{"preserved"},
+	}
 	repo := newIngestionRepo()
-	repo.cosineResults = []*types.MemorySearchResult{{Memory: existing, Score: 0.95}}
+	repo.memories[existing.ID] = existing
+	// Cosine search deliberately returns a compact projection. The service must
+	// reload the complete row before updating it.
+	repo.cosineResults = []*types.MemorySearchResult{{Memory: &types.AgentMemory{ID: existing.ID}, Score: 0.95}}
 	svc := newIngestionService(repo)
 	svc.config.SemanticDedup.ExactThreshold = 0.99
 	svc.config.SemanticDedup.NearThreshold = 0.93
 	svc.config.SemanticDedup.MergeMaxChars = 45
 
-	result, err := svc.checkSemanticDedup(context.Background(), &types.AgentMemory{TenantID: "tenant-1", Content: "New memory content with extra details", Importance: 4}, []float32{0.1})
+	result, err := svc.checkSemanticDedup(context.Background(), &types.AgentMemory{TenantID: "tenant-1", KbID: "kb-1", Content: "New memory content with extra details", Importance: 4}, []float32{0.1})
 
 	require.NoError(t, err)
 	require.NotNil(t, result)
@@ -274,6 +288,8 @@ func TestCheckSemanticDedupNearDuplicateMergesAndTruncates(t *testing.T) {
 	assert.LessOrEqual(t, len(existing.Content), 45)
 	assert.Contains(t, existing.Content, "Existing memory content")
 	assert.Equal(t, 4, existing.Importance)
+	assert.Equal(t, "kb-1", existing.KbID)
+	assert.Equal(t, types.TagsArray{"preserved"}, existing.Tags)
 }
 
 func TestMergeMemoryUpdateErrorIsWrapped(t *testing.T) {
@@ -290,8 +306,8 @@ func TestMergeMemoryUpdateErrorIsWrapped(t *testing.T) {
 
 func TestSaveMemoryExactFingerprintDuplicateSkipsEmbeddingAndCreate(t *testing.T) {
 	content := "valid duplicate memory content"
-	fingerprint := computeFingerprint(content)
-	existing := &types.AgentMemory{ID: "existing-1", TenantID: "tenant-1", Content: content, Fingerprint: &fingerprint}
+	fingerprint := computeScopedFingerprint("tenant-1", "kb-1", content)
+	existing := &types.AgentMemory{ID: "existing-1", TenantID: "tenant-1", KbID: "kb-1", Content: content, Fingerprint: &fingerprint}
 	repo := newIngestionRepo()
 	repo.memories[existing.ID] = existing
 	svc := newIngestionService(repo)
@@ -300,7 +316,7 @@ func TestSaveMemoryExactFingerprintDuplicateSkipsEmbeddingAndCreate(t *testing.T
 		return nil, nil
 	}}
 
-	result, err := svc.SaveMemory(context.Background(), &types.AgentMemory{TenantID: "tenant-1", Content: content})
+	result, err := svc.SaveMemory(context.Background(), &types.AgentMemory{TenantID: "tenant-1", KbID: "kb-1", Content: content})
 
 	require.NoError(t, err)
 	require.NotNil(t, result)
@@ -308,6 +324,51 @@ func TestSaveMemoryExactFingerprintDuplicateSkipsEmbeddingAndCreate(t *testing.T
 	assert.Same(t, existing, result.Memory)
 	assert.Zero(t, repo.createCalls)
 	assert.Zero(t, repo.cosineCalls)
+}
+
+func TestSaveMemoryLegacyFingerprintFallbackIsKnowledgeBaseScoped(t *testing.T) {
+	content := "valid legacy duplicate memory content"
+	legacyFingerprint := computeFingerprint(content)
+
+	t.Run("same knowledge base deduplicates", func(t *testing.T) {
+		existing := &types.AgentMemory{
+			ID: "legacy-1", TenantID: "tenant-1", KbID: "kb-1",
+			Content: content, Fingerprint: &legacyFingerprint,
+		}
+		repo := newIngestionRepo()
+		repo.memories[existing.ID] = existing
+		svc := newIngestionService(repo)
+		svc.embedder = &mockEmbedder{embedFunc: func(context.Context, string) ([]float32, error) {
+			t.Fatal("legacy exact duplicate should not call embedder")
+			return nil, nil
+		}}
+
+		result, err := svc.SaveMemory(context.Background(), &types.AgentMemory{
+			TenantID: "tenant-1", KbID: "kb-1", Content: content,
+		})
+
+		require.NoError(t, err)
+		assert.False(t, result.Created)
+		assert.Same(t, existing, result.Memory)
+	})
+
+	t.Run("different knowledge base does not deduplicate", func(t *testing.T) {
+		existing := &types.AgentMemory{
+			ID: "legacy-other", TenantID: "tenant-1", KbID: "kb-2",
+			Content: content, Fingerprint: &legacyFingerprint,
+		}
+		repo := newIngestionRepo()
+		repo.memories[existing.ID] = existing
+		svc := newIngestionService(repo)
+
+		result, err := svc.SaveMemory(context.Background(), &types.AgentMemory{
+			TenantID: "tenant-1", KbID: "kb-1", Content: content,
+		})
+
+		require.NoError(t, err)
+		assert.True(t, result.Created)
+		assert.NotEqual(t, existing.ID, result.Memory.ID)
+	})
 }
 
 func TestSaveMemoryValidationAndLookupErrors(t *testing.T) {
@@ -393,7 +454,7 @@ func TestSaveMemoryUniqueMemoryPopulatesDerivedFieldsAndStores(t *testing.T) {
 	assert.Equal(t, 1, memory.Tier)
 	assert.Equal(t, types.VerdictNone, memory.Verdict)
 	require.NotNil(t, memory.Fingerprint)
-	assert.Equal(t, computeFingerprint(memory.Content), *memory.Fingerprint)
+	assert.Equal(t, computeScopedFingerprint(memory.TenantID, memory.KbID, memory.Content), *memory.Fingerprint)
 	assert.False(t, memory.CreatedAt.IsZero())
 	assert.False(t, memory.UpdatedAt.IsZero())
 	assert.Equal(t, "tenant-1", repo.lastCosineFilter.TenantID)

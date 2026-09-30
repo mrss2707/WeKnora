@@ -91,6 +91,7 @@ func lintContradiction(ctx context.Context, memory *types.AgentMemory, repo inte
 
 	filter := &types.MemoryFilter{
 		TenantID: memory.TenantID,
+		KbID:     memory.KbID,
 		Limit:    5,
 	}
 	similar, err := repo.CosineSearch(ctx, filter, embedding, 5)
@@ -138,6 +139,7 @@ func lintDuplication(ctx context.Context, memory *types.AgentMemory, repo interf
 
 	filter := &types.MemoryFilter{
 		TenantID: memory.TenantID,
+		KbID:     memory.KbID,
 		Limit:    3,
 	}
 	similar, err := repo.CosineSearch(ctx, filter, embedding, 3)

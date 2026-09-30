@@ -31,8 +31,8 @@ func (s *MemoryServiceV2Impl) SearchMemories(ctx context.Context, query string, 
 	if filter == nil {
 		return nil, fmt.Errorf("filter is required")
 	}
-	if s.repo == nil {
-		return nil, fmt.Errorf("memory V2 not ready: %s", types.MemoryV2ReasonRepoUnavailable)
+	if reason := s.notReadyReason(); reason != "" {
+		return nil, fmt.Errorf("memory V2 not ready: %s", reason)
 	}
 	if filter.Limit <= 0 {
 		filter.Limit = s.config.MaxSearchResults

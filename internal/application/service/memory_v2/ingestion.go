@@ -60,13 +60,26 @@ func (s *MemoryServiceV2Impl) SaveMemory(ctx context.Context, memory *types.Agen
 		return nil, fmt.Errorf("memory V2 not ready: %s", reason)
 	}
 
-	// Step 2: SHA256 fingerprint dedup
-	fingerprint := computeFingerprint(memory.Content)
+	// Step 2: SHA256 fingerprint dedup. The fingerprint is domain-separated by
+	// tenant and knowledge base because the database uniqueness index is global.
+	fingerprint := computeScopedFingerprint(memory.TenantID, memory.KbID, memory.Content)
 	fingerprintStr := fingerprint // capture for use in memory struct
 	memory.Fingerprint = &fingerprintStr
 	existing, err := s.findByFingerprint(ctx, memory.TenantID, fingerprint)
 	if err != nil {
 		return nil, fmt.Errorf("fingerprint lookup failed: %w", err)
+	}
+	if existing == nil {
+		// Rows created before scoped fingerprints used SHA256(content). Preserve
+		// exact deduplication for those rows, but only inside the requested KB.
+		legacyFingerprint := computeFingerprint(memory.Content)
+		legacy, legacyErr := s.findByFingerprint(ctx, memory.TenantID, legacyFingerprint)
+		if legacyErr != nil {
+			return nil, fmt.Errorf("legacy fingerprint lookup failed: %w", legacyErr)
+		}
+		if legacy != nil && legacy.KbID == memory.KbID {
+			existing = legacy
+		}
 	}
 	if existing != nil {
 		// Exact duplicate found — no error, just report it
@@ -179,6 +192,12 @@ func computeFingerprint(content string) string {
 	return hex.EncodeToString(h[:])
 }
 
+// computeScopedFingerprint domain-separates exact deduplication by tenant and
+// knowledge base while remaining compatible with the existing global index.
+func computeScopedFingerprint(tenantID, kbID, content string) string {
+	return computeFingerprint(tenantID + "\x00" + kbID + "\x00" + content)
+}
+
 // findByFingerprint looks up a memory by its content fingerprint.
 func (s *MemoryServiceV2Impl) findByFingerprint(ctx context.Context, tenantID, fingerprint string) (*types.AgentMemory, error) {
 	return s.repo.GetByFingerprint(ctx, tenantID, fingerprint)
@@ -224,8 +243,16 @@ func (s *MemoryServiceV2Impl) checkSemanticDedup(ctx context.Context, memory *ty
 			}
 
 		case score > s.config.SemanticDedup.NearThreshold:
-			// Near-duplicate: merge content
-			return s.mergeMemory(ctx, memory, sr.Memory, score)
+			// CosineSearch returns a compact projection. Reload the complete row
+			// before merging so repository.Update cannot clear omitted fields.
+			existing, err := s.repo.GetByID(ctx, memory.TenantID, sr.Memory.ID)
+			if err != nil {
+				return nil, fmt.Errorf("load duplicate memory failed: %w", err)
+			}
+			if existing == nil || existing.KbID != memory.KbID {
+				continue
+			}
+			return s.mergeMemory(ctx, memory, existing, score)
 		}
 	}
 
@@ -274,11 +301,11 @@ func detectMemoryType(content string) string {
 	preferenceKeywords := []string{"prefer", "like", "dislike", "favorite", "better", "rather", "would rather", "opinion"}
 
 	score := map[string]int{
-		"episodic":    0,
-		"semantic":    0,
-		"procedural":  0,
-		"decision":    0,
-		"preference":  0,
+		"episodic":   0,
+		"semantic":   0,
+		"procedural": 0,
+		"decision":   0,
+		"preference": 0,
 	}
 
 	for _, kw := range episodicKeywords {

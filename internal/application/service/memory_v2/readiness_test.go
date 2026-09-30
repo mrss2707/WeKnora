@@ -199,9 +199,26 @@ func TestMemoryV2AssessHealth_NotReadyOrEmptyTenant(t *testing.T) {
 	})
 }
 
-func TestMemoryV2SearchMemories_NilRepositoryNotReady(t *testing.T) {
-	svc := &MemoryServiceV2Impl{config: enabledMemoryConfig()}
+func TestMemoryV2SearchMemories_NotReady(t *testing.T) {
+	tests := []struct {
+		name   string
+		svc    *MemoryServiceV2Impl
+		reason string
+	}{
+		{name: "nil repository", svc: &MemoryServiceV2Impl{config: enabledMemoryConfig()}, reason: types.MemoryV2ReasonRepoUnavailable},
+		{name: "disabled", svc: &MemoryServiceV2Impl{repo: &serviceLifecycleRepoFake{}, config: disabledMemoryConfig()}, reason: types.MemoryV2ReasonConfigDisabled},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := tt.svc.SearchMemories(context.Background(), "query", &types.MemoryFilter{TenantID: "tenant-A"})
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tt.reason)
+		})
+	}
+
+	svc := &MemoryServiceV2Impl{repo: &serviceLifecycleRepoFake{}, config: enabledMemoryConfig()}
+	svc.SetReadinessReason(types.MemoryV2ReasonLiteMode)
 	_, err := svc.SearchMemories(context.Background(), "query", &types.MemoryFilter{TenantID: "tenant-A"})
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "not ready")
+	assert.Contains(t, err.Error(), types.MemoryV2ReasonLiteMode)
 }

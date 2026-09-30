@@ -135,7 +135,9 @@ func TestPostgresMemoryRepository_CosineSearchRanksAndFilters(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, results, 2)
 	assert.Equal(t, best.ID, results[0].Memory.ID)
+	assert.Equal(t, "kb-1", results[0].Memory.KbID)
 	assert.Equal(t, second.ID, results[1].Memory.ID)
+	assert.Equal(t, "kb-1", results[1].Memory.KbID)
 	assert.GreaterOrEqual(t, results[0].Score, results[1].Score)
 }
 

@@ -280,19 +280,21 @@ func (r *MemoryRepository) BM25Search(ctx context.Context, filter *types.MemoryF
 
 // bm25Row is a scan target for BM25 search results.
 type bm25Row struct {
-	ID          string            `gorm:"column:id"`
-	TenantID    string            `gorm:"column:tenant_id"`
-	Content     string            `gorm:"column:content"`
-	MemoryType  string            `gorm:"column:memory_type"`
-	Importance  int               `gorm:"column:importance"`
-	Tier        int               `gorm:"column:tier"`
+	ID          string              `gorm:"column:id"`
+	TenantID    string              `gorm:"column:tenant_id"`
+	KbID        string              `gorm:"column:kb_id"`
+	Content     string              `gorm:"column:content"`
+	MemoryType  string              `gorm:"column:memory_type"`
+	Importance  int                 `gorm:"column:importance"`
+	Tier        int                 `gorm:"column:tier"`
 	Verdict     types.MemoryVerdict `gorm:"column:verdict"`
-	HubScore    float64           `gorm:"column:hub_score"`
-	AccessCount int               `gorm:"column:access_count"`
-	SessionID   string            `gorm:"column:session_id"`
-	CreatedAt   time.Time         `gorm:"column:created_at"`
-	UpdatedAt   time.Time         `gorm:"column:updated_at"`
-	BM25Score   float64           `gorm:"column:bm25_score"`
+	HubScore    float64             `gorm:"column:hub_score"`
+	AccessCount int                 `gorm:"column:access_count"`
+	SessionID   string              `gorm:"column:session_id"`
+	Tags        types.TagsArray     `gorm:"column:tags"`
+	CreatedAt   time.Time           `gorm:"column:created_at"`
+	UpdatedAt   time.Time           `gorm:"column:updated_at"`
+	BM25Score   float64             `gorm:"column:bm25_score"`
 }
 
 // bm25Raw executes the BM25 query (ParadeDB or tsvector path).
@@ -335,6 +337,7 @@ func (r *MemoryRepository) bm25Raw(ctx context.Context, filter *types.MemoryFilt
 			Memory: &types.AgentMemory{
 				ID:          row.ID,
 				TenantID:    row.TenantID,
+				KbID:        row.KbID,
 				Content:     row.Content,
 				MemoryType:  row.MemoryType,
 				Importance:  row.Importance,
@@ -343,6 +346,7 @@ func (r *MemoryRepository) bm25Raw(ctx context.Context, filter *types.MemoryFilt
 				HubScore:    row.HubScore,
 				AccessCount: row.AccessCount,
 				SessionID:   row.SessionID,
+				Tags:        row.Tags,
 				CreatedAt:   row.CreatedAt,
 				UpdatedAt:   row.UpdatedAt,
 			},
@@ -360,17 +364,19 @@ func (r *MemoryRepository) bm25Raw(ctx context.Context, filter *types.MemoryFilt
 type cosineRow struct {
 	ID          string
 	TenantID    string
+	KbID        string `gorm:"column:kb_id"`
 	Content     string
-	MemoryType  string             `gorm:"column:memory_type"`
+	MemoryType  string `gorm:"column:memory_type"`
 	Importance  int
 	Tier        int
 	Verdict     types.MemoryVerdict
-	HubScore    float64            `gorm:"column:hub_score"`
-	AccessCount int                `gorm:"column:access_count"`
-	SessionID   string             `gorm:"column:session_id"`
-	CreatedAt   time.Time          `gorm:"column:created_at"`
-	UpdatedAt   time.Time          `gorm:"column:updated_at"`
-	CosineScore float64            `gorm:"column:cosine_score"`
+	HubScore    float64         `gorm:"column:hub_score"`
+	AccessCount int             `gorm:"column:access_count"`
+	SessionID   string          `gorm:"column:session_id"`
+	Tags        types.TagsArray `gorm:"column:tags"`
+	CreatedAt   time.Time       `gorm:"column:created_at"`
+	UpdatedAt   time.Time       `gorm:"column:updated_at"`
+	CosineScore float64         `gorm:"column:cosine_score"`
 }
 
 // CosineSearch performs vector similarity search using pgvector's cosine
@@ -389,7 +395,7 @@ func (r *MemoryRepository) CosineSearch(ctx context.Context, filter *types.Memor
 
 	// Build the query using db.Table for raw column list control.
 	query := db.Table("agent_memories").
-		Select("id, tenant_id, content, memory_type, importance, tier, verdict, hub_score, access_count, session_id, created_at, updated_at, 1 - (embedding <=> ?) AS cosine_score", vec).
+		Select("id, tenant_id, kb_id, content, memory_type, importance, tier, verdict, hub_score, access_count, session_id, tags, created_at, updated_at, 1 - (embedding <=> ?) AS cosine_score", vec).
 		Where("tenant_id = ?", filter.TenantID).
 		Where("deleted_at IS NULL")
 
@@ -398,8 +404,8 @@ func (r *MemoryRepository) CosineSearch(ctx context.Context, filter *types.Memor
 	}
 
 	query = query.Clauses(clause.OrderBy{
-			Expression: clause.Expr{SQL: "embedding <=> ?", Vars: []interface{}{vec}},
-		}).
+		Expression: clause.Expr{SQL: "embedding <=> ?", Vars: []interface{}{vec}},
+	}).
 		Limit(limit)
 
 	// Default: exclude refuted
@@ -420,6 +426,7 @@ func (r *MemoryRepository) CosineSearch(ctx context.Context, filter *types.Memor
 			Memory: &types.AgentMemory{
 				ID:          row.ID,
 				TenantID:    row.TenantID,
+				KbID:        row.KbID,
 				Content:     row.Content,
 				MemoryType:  row.MemoryType,
 				Importance:  row.Importance,
@@ -428,6 +435,7 @@ func (r *MemoryRepository) CosineSearch(ctx context.Context, filter *types.Memor
 				HubScore:    row.HubScore,
 				AccessCount: row.AccessCount,
 				SessionID:   row.SessionID,
+				Tags:        row.Tags,
 				CreatedAt:   row.CreatedAt,
 				UpdatedAt:   row.UpdatedAt,
 			},

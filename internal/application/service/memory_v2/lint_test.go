@@ -87,6 +87,7 @@ func lintTestMemory() *types.AgentMemory {
 	return &types.AgentMemory{
 		ID:         "mem-1",
 		TenantID:   "tenant-1",
+		KbID:       "kb-1",
 		Content:    "memory content",
 		Verdict:    types.VerdictNone,
 		CreatedAt:  now,
@@ -194,6 +195,7 @@ func TestLintContradiction(t *testing.T) {
 		issues := lintContradiction(context.Background(), memory, repo, types.LintOnWriteConfig{}, []float32{0.1})
 		assert.Nil(t, issues)
 		assert.Equal(t, "tenant-1", repo.filters[0].TenantID)
+		assert.Equal(t, "kb-1", repo.filters[0].KbID)
 		assert.Equal(t, 5, repo.filters[0].Limit)
 		assert.Equal(t, 5, repo.limits[0])
 	})
@@ -247,6 +249,7 @@ func TestLintDuplication(t *testing.T) {
 		issues := lintDuplication(context.Background(), memory, repo, types.LintOnWriteConfig{}, []float32{0.1})
 		assert.Nil(t, issues)
 		assert.Equal(t, "tenant-1", repo.filters[0].TenantID)
+		assert.Equal(t, "kb-1", repo.filters[0].KbID)
 		assert.Equal(t, 3, repo.filters[0].Limit)
 		assert.Equal(t, 3, repo.limits[0])
 	})

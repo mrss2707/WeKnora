@@ -61,27 +61,27 @@ func (a *AutoLinker) LinkMemory(ctx context.Context, memory *types.AgentMemory) 
 		if similarity > 0.65 {
 			// Create related_to relation
 			relation := &types.MemoryRelation{
-				TenantID:  memory.TenantID,
-				FromUUID:  memory.ID,
-				ToUUID:    candidate.ID,
+				TenantID:     memory.TenantID,
+				FromUUID:     memory.ID,
+				ToUUID:       candidate.ID,
 				RelationType: "related_to",
-				Weight:    similarity,
-				CreatedAt: time.Now(),
+				Weight:       similarity,
+				CreatedAt:    time.Now(),
 			}
 			// Store using repo
-				if err := a.repo.CreateRelation(ctx, relation); err != nil {
-					logger.Errorf(ctx, "auto-linker: failed to create relation: %v", err)
-				}
+			if err := a.repo.CreateRelation(ctx, relation); err != nil {
+				logger.Errorf(ctx, "auto-linker: failed to create relation: %v", err)
+			}
 
 			// If the candidate has a decision verdict, it justifies this memory
 			if candidate.Verdict == types.VerdictDecision {
 				justifiesRel := &types.MemoryRelation{
-					TenantID:  memory.TenantID,
-					FromUUID:  candidate.ID,
-					ToUUID:    memory.ID,
+					TenantID:     memory.TenantID,
+					FromUUID:     candidate.ID,
+					ToUUID:       memory.ID,
 					RelationType: "justifies",
-					Weight:    similarity,
-					CreatedAt: time.Now(),
+					Weight:       similarity,
+					CreatedAt:    time.Now(),
 				}
 				if err := a.repo.CreateRelation(ctx, justifiesRel); err != nil {
 					logger.Errorf(ctx, "auto-linker: failed to create justifies relation: %v", err)
@@ -101,6 +101,7 @@ func (a *AutoLinker) findTagOverlapMemories(ctx context.Context, memory *types.A
 	// Search for memories with similar tag sets
 	filter := &types.MemoryFilter{
 		TenantID: memory.TenantID,
+		KbID:     memory.KbID,
 		Limit:    50,
 	}
 
