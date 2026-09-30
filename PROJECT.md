@@ -57,4 +57,5 @@ mcp-server/                    Python MCP server
 - **Recent**: MCP OAuth support (migration 000062), wiki page hierarchy (000061)
 - **Testing**: 379 Go test files, 104 frontend test files, acceptance/e2e suite
 - **Ops note**: `conversation.summary.max_completion_tokens` = 4096 (raised from 1024) — reasoning models (deepseek-v4-flash-0731 via Anthropic gateway) burn the whole 1024 budget on `thinking` blocks over long inputs, yielding no `text` block and "summary model returned empty output". Root fix would send `thinking: {type: disabled}` for non-reasoning calls.
+- **Ops note**: VLM completion budget (`internal/models/vlm/remote_api.go`) = 16000 (raised from 5000, env `VLM_MAX_TOKENS`) — reasoning vision models (mimo-v2.5) burned 5000 on thinking, yielding "VLM returned no content: completion truncated". Unlike config.yaml, this is compiled in, so a bump requires rebuilding the app image (a restart alone re-reads the env override only).
 - **Ship**: Docker images (wechatopenai/weknora-*), Helm charts, pre-built CLI binaries

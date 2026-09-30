@@ -21,7 +21,13 @@ const (
 	// over a minute on slow endpoints, so this is intentionally generous and
 	// can be raised further via VLM_HTTP_TIMEOUT_SECONDS.
 	defaultTimeout = 180 * time.Second
-	defaultMaxToks = 5000
+	// defaultMaxToks bounds the VLM completion budget. Reasoning-style vision
+	// models (e.g. mimo-v2.5) spend part of the budget on thinking blocks; the
+	// old 5000 could be exhausted before any visible OCR/caption text, yielding
+	// "completion truncated at N tokens (finish_reason=length)". 16000 leaves
+	// headroom for thinking to finish and the visible text to follow. Can be
+	// overridden via VLM_MAX_TOKENS.
+	defaultMaxToks = 16000
 	defaultTemp    = float32(0.1)
 )
 
@@ -35,6 +41,18 @@ func vlmHTTPTimeout() time.Duration {
 		}
 	}
 	return defaultTimeout
+}
+
+// vlmMaxTokens returns the completion budget for VLM requests, read from the
+// VLM_MAX_TOKENS env var when set (and positive), falling back to
+// defaultMaxToks otherwise.
+func vlmMaxTokens() int {
+	if v := strings.TrimSpace(os.Getenv("VLM_MAX_TOKENS")); v != "" {
+		if toks, err := strconv.Atoi(v); err == nil && toks > 0 {
+			return toks
+		}
+	}
+	return defaultMaxToks
 }
 
 // RemoteAPIVLM implements VLM on top of the catalog-driven chat client: a
@@ -111,9 +129,10 @@ func (v *RemoteAPIVLM) Predict(ctx context.Context, imgBytesList [][]byte, promp
 
 	ctx, cancel := context.WithTimeout(ctx, vlmHTTPTimeout())
 	defer cancel()
+	maxToks := vlmMaxTokens()
 	resp, err := v.chat.Chat(ctx, []chat.Message{{Role: "user", MultiContent: parts}}, &chat.ChatOptions{
 		Temperature: v.temperature,
-		MaxTokens:   defaultMaxToks,
+		MaxTokens:   maxToks,
 	})
 	if err != nil {
 		return "", fmt.Errorf("VLM request: %w", err)
@@ -126,7 +145,7 @@ func (v *RemoteAPIVLM) Predict(ctx context.Context, imgBytesList [][]byte, promp
 		// "no_extracted_content" and look identical to an image with no text.
 		return "", fmt.Errorf(
 			"VLM returned no content: completion truncated at %d tokens (finish_reason=length)",
-			defaultMaxToks,
+			maxToks,
 		)
 	}
 	logger.Infof(ctx, "[VLM] response received, len=%d", len(content))
