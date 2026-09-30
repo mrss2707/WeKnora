@@ -2,6 +2,7 @@ package types
 
 import (
 	"reflect"
+	"slices"
 	"testing"
 )
 
@@ -16,7 +17,8 @@ func TestNormalizeMCPEndpointToolsDropsUnknownAndOrders(t *testing.T) {
 }
 
 func TestDefaultMCPEndpointToolsExcludesDestructive(t *testing.T) {
-	for _, name := range DefaultMCPEndpointTools() {
+	defaults := DefaultMCPEndpointTools()
+	for _, name := range defaults {
 		def, ok := LookupMCPEndpointTool(name)
 		if !ok {
 			t.Fatalf("default tool %q missing from catalog", name)
@@ -27,6 +29,19 @@ func TestDefaultMCPEndpointToolsExcludesDestructive(t *testing.T) {
 	}
 	if _, ok := LookupMCPEndpointTool(MCPEndpointToolDeleteDocument); !ok {
 		t.Fatal("delete_document must be in the catalog")
+	}
+	for _, name := range []string{
+		MCPEndpointToolMemoryRecall,
+		MCPEndpointToolMemoryGraph,
+		MCPEndpointToolMemoryDetail,
+		MCPEndpointToolMemoryStatus,
+	} {
+		if !slices.Contains(defaults, name) {
+			t.Fatalf("read-only memory tool %q must be enabled by default", name)
+		}
+	}
+	if slices.Contains(defaults, MCPEndpointToolMemorySave) {
+		t.Fatal("memory_save must remain opt-in")
 	}
 }
 
@@ -40,6 +55,9 @@ func TestMCPEndpointCapabilitiesForTools(t *testing.T) {
 		{"wiki only", []string{MCPEndpointToolWikiIndex}, []string{"retrieve"}},
 		{"ask", []string{MCPEndpointToolAsk}, []string{"retrieve", "chat", "read_agents"}},
 		{"ingest", []string{MCPEndpointToolAddDocument}, []string{"ingest"}},
+		{"memory read", []string{MCPEndpointToolMemoryRecall, MCPEndpointToolMemoryStatus}, []string{"retrieve"}},
+		{"memory save", []string{MCPEndpointToolMemorySave}, []string{"ingest"}},
+		{"memory read and save", []string{MCPEndpointToolMemoryDetail, MCPEndpointToolMemorySave}, []string{"retrieve", "ingest"}},
 		{"none", nil, []string{}},
 	}
 	for _, tc := range cases {

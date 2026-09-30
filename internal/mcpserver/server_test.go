@@ -23,6 +23,27 @@ type recordingEndpointRepo struct {
 	touched chan string
 }
 
+type stubScopedMemoryV2 struct{}
+
+func (stubScopedMemoryV2) Readiness() types.MemoryV2Readiness {
+	return types.MemoryV2Readiness{Ready: true, Reason: types.MemoryV2ReasonEnabled}
+}
+func (stubScopedMemoryV2) Recall(context.Context, interfaces.MemoryV2Scope, string, int) ([]*types.MemorySearchResult, error) {
+	return nil, nil
+}
+func (stubScopedMemoryV2) Save(context.Context, interfaces.MemoryV2Scope, string, string) (*types.SaveMemoryResult, error) {
+	return nil, nil
+}
+func (stubScopedMemoryV2) Detail(context.Context, interfaces.MemoryV2Scope, string) (*types.AgentMemory, error) {
+	return nil, nil
+}
+func (stubScopedMemoryV2) Graph(context.Context, interfaces.MemoryV2Scope, string, int) (*interfaces.MemoryV2Graph, error) {
+	return nil, nil
+}
+func (stubScopedMemoryV2) Status(context.Context, string) types.MemoryStatusResponse {
+	return types.MemoryStatusResponse{Backend: "v2", Available: true, Status: "enabled"}
+}
+
 func (r *recordingEndpointRepo) TouchLastUsed(_ context.Context, id string) error {
 	select {
 	case r.touched <- id:
@@ -45,6 +66,9 @@ func newTestEngineWithRepo(t *testing.T, ep *types.MCPEndpoint) (*gin.Engine, *r
 	gin.SetMode(gin.TestMode)
 	repo := &recordingEndpointRepo{touched: make(chan string, 8)}
 	srv := NewServer(nil, nil, nil, nil, nil, nil, nil, nil, nil, repo, nil, nil, nil)
+	if err := RegisterMemoryV2Tools(srv, stubScopedMemoryV2{}); err != nil {
+		t.Fatalf("register Memory V2 tools: %v", err)
+	}
 	r := gin.New()
 	inject := func(c *gin.Context) {
 		if ep != nil {

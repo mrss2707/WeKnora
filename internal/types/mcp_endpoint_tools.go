@@ -12,6 +12,7 @@ const (
 	MCPEndpointToolGroupRetrieve MCPEndpointToolGroup = "retrieve"
 	MCPEndpointToolGroupChat     MCPEndpointToolGroup = "chat"
 	MCPEndpointToolGroupWiki     MCPEndpointToolGroup = "wiki"
+	MCPEndpointToolGroupMemory   MCPEndpointToolGroup = "memory"
 	MCPEndpointToolGroupIngest   MCPEndpointToolGroup = "ingest"
 )
 
@@ -28,6 +29,11 @@ const (
 	MCPEndpointToolWikiSearch         = "wiki_search"
 	MCPEndpointToolWikiReadPage       = "wiki_read_page"
 	MCPEndpointToolWikiIndex          = "wiki_index"
+	MCPEndpointToolMemoryRecall       = "memory_recall"
+	MCPEndpointToolMemoryGraph        = "memory_graph"
+	MCPEndpointToolMemoryDetail       = "memory_detail"
+	MCPEndpointToolMemoryStatus       = "memory_status"
+	MCPEndpointToolMemorySave         = "memory_save"
 	MCPEndpointToolAddDocument        = "add_document"
 	MCPEndpointToolUpdateDocument     = "update_document"
 	MCPEndpointToolDeleteDocument     = "delete_document"
@@ -55,6 +61,11 @@ var mcpEndpointToolCatalog = []MCPEndpointToolDefinition{
 	{Name: MCPEndpointToolWikiSearch, Group: MCPEndpointToolGroupWiki},
 	{Name: MCPEndpointToolWikiReadPage, Group: MCPEndpointToolGroupWiki},
 	{Name: MCPEndpointToolWikiIndex, Group: MCPEndpointToolGroupWiki},
+	{Name: MCPEndpointToolMemoryRecall, Group: MCPEndpointToolGroupMemory},
+	{Name: MCPEndpointToolMemoryGraph, Group: MCPEndpointToolGroupMemory},
+	{Name: MCPEndpointToolMemoryDetail, Group: MCPEndpointToolGroupMemory},
+	{Name: MCPEndpointToolMemoryStatus, Group: MCPEndpointToolGroupMemory},
+	{Name: MCPEndpointToolMemorySave, Group: MCPEndpointToolGroupMemory, Destructive: true},
 	{Name: MCPEndpointToolAddDocument, Group: MCPEndpointToolGroupIngest, Destructive: true},
 	{Name: MCPEndpointToolUpdateDocument, Group: MCPEndpointToolGroupIngest, Destructive: true},
 	{Name: MCPEndpointToolDeleteDocument, Group: MCPEndpointToolGroupIngest, Destructive: true},
@@ -73,6 +84,7 @@ func MCPEndpointToolGroups() []MCPEndpointToolGroup {
 		MCPEndpointToolGroupRetrieve,
 		MCPEndpointToolGroupChat,
 		MCPEndpointToolGroupWiki,
+		MCPEndpointToolGroupMemory,
 		MCPEndpointToolGroupIngest,
 	}
 }
@@ -124,19 +136,28 @@ func NormalizeMCPEndpointTools(in []string) []string {
 // endpoint needs so its calls pass the same scope checks as a scoped API key.
 func MCPEndpointCapabilitiesForTools(tools []string) []string {
 	groups := map[MCPEndpointToolGroup]bool{}
+	memoryRead := false
+	memoryWrite := false
 	for _, name := range tools {
 		if def, ok := LookupMCPEndpointTool(name); ok {
 			groups[def.Group] = true
+			if def.Group == MCPEndpointToolGroupMemory {
+				if def.Name == MCPEndpointToolMemorySave {
+					memoryWrite = true
+				} else {
+					memoryRead = true
+				}
+			}
 		}
 	}
 	caps := []string{}
-	if groups[MCPEndpointToolGroupRetrieve] || groups[MCPEndpointToolGroupWiki] || groups[MCPEndpointToolGroupChat] {
+	if groups[MCPEndpointToolGroupRetrieve] || groups[MCPEndpointToolGroupWiki] || groups[MCPEndpointToolGroupChat] || memoryRead {
 		caps = append(caps, string(APIKeyCapabilityRetrieve))
 	}
 	if groups[MCPEndpointToolGroupChat] {
 		caps = append(caps, string(APIKeyCapabilityChat), string(APIKeyCapabilityReadAgents))
 	}
-	if groups[MCPEndpointToolGroupIngest] {
+	if groups[MCPEndpointToolGroupIngest] || memoryWrite {
 		caps = append(caps, string(APIKeyCapabilityIngest))
 	}
 	return caps
