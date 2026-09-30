@@ -32,14 +32,21 @@ OAuth 服务按调用者分别授权。工具需要审批时，在对话中检�
 
 一个空间可以创建多个端点。例如给客服团队一个只开检索和问答、只看两个知识库的端点，给内容团队另一个开了写入工具的端点。令牌可随时轮换，端点可随时停用，删除端点后使用它的客户端立即断开。
 
-端点暴露的工具按四组勾选，默认只开只读工具：
+端点暴露的工具按五组勾选，默认开启只读工具；会修改内容的 `memory_save` 和文档写入工具默认关闭：
 
 | 组 | 工具 | 说明 |
 |---|---|---|
 | 检索与阅读 | `list_knowledge_bases`、`search_knowledge`、`grep_chunks`、`list_documents`、`read_document` | 知识库参数同时接受 ID 或名称；`search_knowledge` 用 `mode`（hybrid / semantic / keyword）选择检索方式并可设 `limit`（默认 10，上限 30）；`grep_chunks` 保持大小写不敏感的正则语义：从模式里提取字面词作为关键词索引的检索词（没有关键词索引的库改用语义索引取候选），再逐条用正则校验，返回的分块都匹配该模式；不含任何字面词的模式（如 `^\d+$`）会被拒绝；`read_document` 按 `offset` / `limit` 翻页，或用 `query` 在文档内查找短语 |
 | 问答 | `ask` | 只运行端点配置的默认 Agent（客户端不能自选 Agent），服务端自动建会话，返回带引用的完整回答和 `session_id`，续聊时传回即可；不开启联网搜索 |
 | Wiki | `wiki_search`、`wiki_read_page`、`wiki_index` | 只对开启了 Wiki 的知识库生效；`wiki_search` 的 `query` 保持原有的正则语义（大小写不敏感），不是合法正则的文本按字面匹配；`regex=false` 强制字面匹配，`regex=true` 要求合法正则 |
+| Memory | `memory_recall`、`memory_graph`、`memory_detail`、`memory_status`、`memory_save` | 前四个只读工具对新端点默认开启；`memory_save` 会写入内容，因此默认关闭。除 `memory_status` 外，每次调用都必须用 `knowledge_base_id` 指定一个已授权知识库（同时接受 ID 或精确名称） |
 | 写入 | `add_document`、`update_document`、`delete_document` | 默认关闭；支持 Markdown 文本或 URL 导入 |
+
+Memory 工具使用 Memory V2，并按当前空间与单个知识库共享记忆，而不是按 MCP 端点或连接它的个人用户隔离。`memory_recall` 在指定知识库内混合检索记忆；`memory_detail` 读取完整内容；`memory_graph` 返回持久化的记忆关系；`memory_save` 经过嵌入、去重、分类、分层和 lint 流程保存内容；`memory_status` 不需要知识库参数，用于查看当前空间的 Memory V2 可用性和记忆总数。Memory 结果不会暴露租户 ID、用户 ID、embedding、fingerprint 或内部 metadata。
+
+首个版本不允许 Memory 工具操作由其他空间拥有、仅通过组织分享进来的知识库。文档分享并不自动代表所有者空间也愿意分享对话生成的记忆；这类调用会明确拒绝，而普通文档检索仍按原有共享知识库规则工作。Memory V2 依赖 PostgreSQL/pgvector，在 SQLite/Lite 模式中不可用，工具会返回具体的 not-ready 原因。
+
+只读 Memory 工具换算为 `retrieve` 能力，`memory_save` 换算为 `ingest` 能力。因此受限 API Key 不能创建或轮换一个超出自身能力的 MCP 端点。现有端点的工具白名单不会在升级后自动增加 Memory 工具，需要管理员编辑端点后手动勾选；只有新建端点采用上述默认值。
 
 > **`grep_chunks` 的召回有上限。** 它基于索引取候选，每次最多 30 条，再用正则筛选，所以返回的每条都匹配模式，但不保证穷尽：库里存在的匹配也可能没进候选池。容易漏的情况有三类：`foo.*bar` 这类组合模式，候选按 foo、bar 的相关度排序，真正相邻出现的分块可能排不进前 30；`C++` 这类几乎只剩符号的模式，抽出的字面词只有 `C`，在索引里几乎没有区分度；没有关键词索引的库改用语义索引取候选，字面匹配更依赖运气。旧实现对 chunks 表做全表正则扫描，能保证"有就能找到"，但数据量大时代价过高，已经移除。需要在某篇文档里穷尽查找时，用 `read_document` 的 `query`，它会顺序扫完整篇文档。
 
