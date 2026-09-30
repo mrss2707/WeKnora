@@ -13,9 +13,17 @@ import (
 	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/handler"
 	"github.com/Tencent/WeKnora/internal/logger"
+	"github.com/Tencent/WeKnora/internal/mcpserver"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 )
+
+type memoryV2MCPRegistrationParams struct {
+	dig.In
+
+	Server *mcpserver.Server `optional:"true"`
+	Memory interfaces.ScopedMemoryV2Service
+}
 
 // registerMemoryV2 wires the Memory V2 module (repository, lazy service, chat
 // pipeline plugin, HTTP handler) into the DI container. Memory V2 is the
@@ -55,6 +63,10 @@ func registerMemoryV2(container *dig.Container) error {
 		return err
 	}
 
+	if err := container.Provide(memoryServiceV2.NewScopedMemoryV2Service); err != nil {
+		return err
+	}
+
 	if err := container.Invoke(func(
 		eventManager *chatpipeline.EventManager,
 		memV2 interfaces.MemoryServiceV2,
@@ -82,6 +94,15 @@ func registerMemoryV2(container *dig.Container) error {
 		if readiness := memV2.Readiness(); !readiness.Ready {
 			logger.Warnf(context.Background(), "[MemoryV2] not ready: %s", readiness.Reason)
 		}
+	}); err != nil {
+		return err
+	}
+
+	if err := container.Invoke(func(params memoryV2MCPRegistrationParams) error {
+		if params.Server == nil {
+			return nil
+		}
+		return mcpserver.RegisterMemoryV2Tools(params.Server, params.Memory)
 	}); err != nil {
 		return err
 	}

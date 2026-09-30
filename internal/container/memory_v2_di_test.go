@@ -38,10 +38,11 @@ func TestRegisterMemoryV2WiresFullGraph(t *testing.T) {
 	err := c.Invoke(func(
 		repo interfaces.MemoryRepositoryV2,
 		svc interfaces.MemoryServiceV2,
+		scoped interfaces.ScopedMemoryV2Service,
 		h *handler.MemoryV2Handler,
 	) {
-		if repo == nil || svc == nil || h == nil {
-			t.Fatalf("resolved nil from Memory V2 graph: repo=%v svc=%v handler=%v", repo, svc, h)
+		if repo == nil || svc == nil || scoped == nil || h == nil {
+			t.Fatalf("resolved nil from Memory V2 graph: repo=%v svc=%v scoped=%v handler=%v", repo, svc, scoped, h)
 		}
 	})
 	if err != nil {
