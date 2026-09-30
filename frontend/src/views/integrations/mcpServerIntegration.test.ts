@@ -47,11 +47,13 @@ test('claude code command uses the http transport', () => {
 })
 
 test('groupTools keeps backend order and drops empty groups', () => {
-  const grouped = groupTools(['retrieve', 'chat', 'wiki', 'ingest'], [
+  const grouped = groupTools(['retrieve', 'chat', 'wiki', 'memory', 'ingest'], [
     { name: 'ask', group: 'chat', destructive: false },
+    { name: 'memory_recall', group: 'memory', destructive: false },
     { name: 'search_knowledge', group: 'retrieve', destructive: false },
     { name: 'delete_document', group: 'ingest', destructive: true },
   ])
-  assert.deepEqual(grouped.map((g) => g.group), ['retrieve', 'chat', 'ingest'])
+  assert.deepEqual(grouped.map((g) => g.group), ['retrieve', 'chat', 'memory', 'ingest'])
   assert.deepEqual(grouped[0].tools.map((t) => t.name), ['search_knowledge'])
+  assert.deepEqual(grouped[2].tools.map((t) => t.name), ['memory_recall'])
 })
