@@ -42,7 +42,7 @@ func readAll(t *testing.T, r io.ReadCloser) string {
 }
 
 // validFixture returns a well-formed postgres+sqlite fixture:
-// core 1..3, module alpha 900001-900002, sqlite 0.
+// core 1..3, module alpha 900001-900002 (postgres) + 900001 (sqlite), sqlite 0.
 func validFixture(t *testing.T, roots *migrationRoots) {
 	testFiles := map[string]string{
 		"versioned/000001_init.up.sql":                    "core up 1",
@@ -56,8 +56,8 @@ func validFixture(t *testing.T, roots *migrationRoots) {
 		"modules/alpha/postgres/900001_alpha.down.sql":    "mod down 900001",
 		"modules/alpha/postgres/900002_beta.up.sql":       "mod up 900002",
 		"modules/alpha/postgres/900002_beta.down.sql":     "mod down 900002",
-		"modules/alpha/sqlite/000001_alpha_lite.up.sql":   "must be ignored for postgres",
-		"modules/alpha/sqlite/000001_alpha_lite.down.sql": "must be ignored for postgres",
+		"modules/alpha/sqlite/900001_alpha_lite.up.sql":   "must be ignored for postgres",
+		"modules/alpha/sqlite/900001_alpha_lite.down.sql": "must be ignored for postgres",
 		"sqlite/000000_init.up.sql":                       "sqlite up 0",
 		"sqlite/000000_init.down.sql":                     "sqlite down 0",
 	}
@@ -216,7 +216,7 @@ func TestCompositeSourceRejectsModuleOutsideReservedRange(t *testing.T) {
 	}
 }
 
-func TestCompositeSourceSQLiteExcludesModules(t *testing.T) {
+func TestCompositeSourceSQLiteIncludesSQLiteModulesOnly(t *testing.T) {
 	var roots migrationRoots
 	validFixture(t, &roots)
 
@@ -226,11 +226,35 @@ func TestCompositeSourceSQLiteExcludesModules(t *testing.T) {
 	}
 	cs := src.(*compositeSource)
 	got := cs.Versions()
-	if len(got) != 1 || got[0] != 0 {
-		t.Fatalf("sqlite versions = %v, want [0] only", got)
+	if len(got) != 2 || got[0] != 0 || got[1] != 900001 {
+		t.Fatalf("sqlite versions = %v, want [0 900001] (core sqlite + module sqlite, no postgres module SQL)", got)
 	}
-	if _, _, err := src.ReadUp(900001); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("sqlite ReadUp(module version) err = %v, want os.ErrNotExist", err)
+	r, id, err := src.ReadUp(900001)
+	if err != nil {
+		t.Fatalf("sqlite ReadUp(module version): %v", err)
+	}
+	defer r.Close()
+	if !strings.Contains(id, "/alpha/sqlite/") {
+		t.Fatalf("sqlite module up read from %q, want the module's sqlite dir", id)
+	}
+	if _, _, err := src.ReadUp(900002); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("sqlite ReadUp(postgres-only module version) err = %v, want os.ErrNotExist", err)
+	}
+}
+
+func TestCompositeSourceSQLiteModuleRejectsOutOfRange(t *testing.T) {
+	roots, _ := buildFixture(t, map[string]string{
+		"sqlite/000000_init.up.sql":                  "s",
+		"sqlite/000000_init.down.sql":                "s d",
+		"modules/alpha/sqlite/000030_alpha.up.sql":   "u",
+		"modules/alpha/sqlite/000030_alpha.down.sql": "d",
+	})
+	_, err := assembleSource(BackendSQLite, roots)
+	if !errors.Is(err, ErrInvalidMigrationSet) {
+		t.Fatalf("err = %v, want ErrInvalidMigrationSet", err)
+	}
+	if !strings.Contains(err.Error(), "outside the reserved module range") {
+		t.Fatalf("error %q does not explain the range violation", err)
 	}
 }
 
@@ -373,11 +397,14 @@ var realLayoutInvariantTable = []struct {
 		},
 	},
 	{
-		name: "sqlite stream carries no module SQL",
+		name: "sqlite stream keeps module SQL inside the reserved range and ascending",
 		check: func(t *testing.T, pg, lite []uint) {
-			for _, v := range lite {
-				if v >= moduleRangeMin {
-					t.Fatalf("sqlite version %d leaks module-range SQL into Lite mode", v)
+			for i, v := range lite {
+				if v > moduleRangeMax {
+					t.Fatalf("sqlite version %d exceeds the reserved module range", v)
+				}
+				if i > 0 && v <= lite[i-1] {
+					t.Fatalf("sqlite versions not strictly ascending at %d: %d then %d", i, lite[i-1], v)
 				}
 			}
 		},
@@ -387,7 +414,7 @@ var realLayoutInvariantTable = []struct {
 // TestRealLayoutInvariantTable drives the merge-safe invariant table against
 // the repository's actual migration files: the module anchors stay in
 // postgres, nothing crosses the reserved range, ordering holds, and Lite mode
-// never receives module SQL.
+// only receives module SQL from modules/*/sqlite.
 func TestRealLayoutInvariantTable(t *testing.T) {
 	root := repoRoot(t)
 	roots := migrationRoots{

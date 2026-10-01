@@ -22,7 +22,8 @@ const (
 	// BackendPostgres assembles core migrations/versioned plus every
 	// migrations/modules/<name>/postgres module directory.
 	BackendPostgres MigrationBackend = "postgres"
-	// BackendSQLite assembles only migrations/sqlite — PostgreSQL SQL must
+	// BackendSQLite assembles migrations/sqlite plus every
+	// migrations/modules/<name>/sqlite module directory — PostgreSQL SQL must
 	// never reach SQLite/Lite mode.
 	BackendSQLite MigrationBackend = "sqlite"
 )
@@ -186,7 +187,7 @@ func assembleSource(backend MigrationBackend, roots migrationRoots) (source.Driv
 			case "sqlite":
 				if version >= uint64(moduleRangeMin) {
 					problems = append(problems, fmt.Sprintf(
-						"sqlite migration %q uses version %d from the module range (%d-%d); PostgreSQL module SQL must never enter the sqlite stream",
+						"sqlite migration %q uses version %d from the module range (%d-%d); put it under migrations/modules/<name>/sqlite (PostgreSQL module SQL must never enter the sqlite stream)",
 						rel, version, moduleRangeMin, moduleRangeMax))
 					continue
 				}
@@ -195,7 +196,7 @@ func assembleSource(backend MigrationBackend, roots migrationRoots) (source.Driv
 		}
 	}
 
-	scanModules := func() {
+	scanModules := func(b MigrationBackend) {
 		entries, err := os.ReadDir(roots.modules)
 		if err != nil {
 			if os.IsNotExist(err) {
@@ -208,20 +209,21 @@ func assembleSource(backend MigrationBackend, roots migrationRoots) (source.Driv
 			if !e.IsDir() {
 				continue
 			}
-			pgDir := filepath.Join(roots.modules, e.Name(), string(BackendPostgres))
-			if _, err := os.Stat(pgDir); err != nil {
-				continue // module without a postgres dir is simply not applicable to this backend
+			modDir := filepath.Join(roots.modules, e.Name(), string(b))
+			if _, err := os.Stat(modDir); err != nil {
+				continue // module without a dir for this backend is simply not applicable to it
 			}
-			scanDir(pgDir, "module")
+			scanDir(modDir, "module")
 		}
 	}
 
 	switch backend {
 	case BackendPostgres:
 		scanDir(roots.versioned, "core")
-		scanModules()
+		scanModules(BackendPostgres)
 	case BackendSQLite:
 		scanDir(roots.sqlite, "sqlite")
+		scanModules(BackendSQLite)
 	default:
 		problems = append(problems, fmt.Sprintf("unsupported migration backend %q", backend))
 	}

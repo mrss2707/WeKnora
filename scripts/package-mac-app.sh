@@ -86,6 +86,13 @@ fi
 if [ -d migrations/sqlite ]; then
     cp -r migrations/sqlite/* "${RESOURCES_DIR}/migrations/sqlite/"
 fi
+# develop-only module migrations for Lite mode (migrations/modules/<name>/sqlite)
+for d in migrations/modules/*/sqlite; do
+    [ -d "$d" ] || continue
+    mod="$(basename "$(dirname "$d")")"
+    mkdir -p "${RESOURCES_DIR}/migrations/modules/${mod}/sqlite"
+    cp -r "$d"/* "${RESOURCES_DIR}/migrations/modules/${mod}/sqlite/"
+done
 if [ -d config ]; then
     cp -r config/* "${RESOURCES_DIR}/config/"
 fi

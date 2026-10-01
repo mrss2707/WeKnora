@@ -4,12 +4,14 @@
 
 **Migrations** — never in `migrations/versioned/` (main's stream; develop DB is already ≥900076, so lower core numbers are silently skipped).
 - Postgres: `migrations/modules/<name>/postgres/9NNNNN_<name>.{up,down}.sql`, range 900000-909999 (next free: 900078), plus `manifest.json` + `README.md` (copy `migrations/modules/TEMPLATE/`). Fail-closed check in `internal/database/migration_source.go`.
-- All SQL idempotent (`IF NOT EXISTS`). SQLite has no module range: mirror in `migrations/sqlite/0000NN_*` and bump `expectedSQLiteMigrationVersion` in `internal/database/migration_sqlite_versioned_schema_test.go`.
+- All SQL idempotent (`IF NOT EXISTS`). SQLite (Lite) uses the SAME range and numbers: mirror in `migrations/modules/<name>/sqlite/9NNNNN_*.{up,down}.sql`; NEVER add to `migrations/sqlite/` (main's stream, rejected ≥900000 and collides with main's next number). Bump `expectedSQLiteMigrationVersion` + `versionedSQLiteColumns` in `internal/database/migration_sqlite_versioned_schema_test.go`.
 - Run `./scripts/migrate.sh validate postgres` (and `sqlite`). After deploy verify with `docker logs WeKnora-app | grep migrat`.
 
 **DI** — one `register<Name>(c *dig.Container) error` in `internal/container/<name>.go`; `container.go` gets one line `must(register<Name>(container))`. Never add scattered `Provide` calls there. Add a DI test (full resolve, duplicate registration fails, missing provider named). Config-gated feature that overlaps something main will ship: no-op when off, return an error when on but not wired (see `cross_session_memory.go`).
 
 **Routes** — one nil-safe `Register<Name>Routes(v1, handler, g)` in `internal/router/<name>.go`; `router.go` gets one `RouterParams` field + one call. Document role floors; test: floors enforced, each route registered once, nil handler registers nothing (see `memory_v2_test.go`).
+
+**Interfaces** — never add methods to a core interface (e.g. `MCPEndpointService`); define a new optional interface in `internal/types/interfaces/<name>.go` and type-assert it (see `MCPEndpointTokenRetriever`).
 
 **Types** — new types in `internal/types/<name>.go` (+ `internal/types/interfaces/<name>.go`). Adding a field to a shared struct is OK. Never splice into order-sensitive shared literals (e.g. `types.Pipeline["chat_history_stream"]`); use an `append`/builder helper the module owns.
 
