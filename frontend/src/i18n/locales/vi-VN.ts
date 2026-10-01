@@ -242,7 +242,8 @@ export default {
       failed: 'Đổi mật khẩu thất bại. Hãy kiểm tra mật khẩu hiện tại có đúng không.',
       policyFailed: 'Mật khẩu mới phải có 8-32 ký tự và bao gồm cả chữ cái và số',
       sameAsCurrent: 'Mật khẩu mới phải khác mật khẩu hiện tại',
-      oidcOnlyDescription: 'Tài khoản của bạn được tạo qua đăng nhập OIDC và chưa có mật khẩu cục bộ.'
+      oidcOnlyDescription: 'Tài khoản của bạn được tạo qua đăng nhập OIDC và chưa có mật khẩu cục bộ.',
+      "oidcOnlyNotice": "Hãy nhờ quản trị viên hệ thống đặt lại mật khẩu của bạn, hoặc tiếp tục đăng nhập bằng OIDC. Tự thay đổi mật khẩu yêu cầu mật khẩu hiện tại của bạn."
     }
   },
   credential: {
@@ -955,7 +956,16 @@ export default {
     syncMode: {
       incremental: 'Tăng dần',
       full: 'Toàn bộ'
-    }
+    },
+    "confluence": {
+      "cloudFolderLimitation": "Confluence Cloud không thể liệt kê các trang nằm trực tiếp dưới thư mục cấp cao nhất trong space này; chọn toàn bộ space vẫn sẽ đồng bộ chúng."
+    },
+    "yuqueFolderModeLabel": "Cấu trúc thư mục",
+    "yuqueFolderModeToc": "Phản chiếu mục lục Yuque",
+    "yuqueFolderModeNone": "Giữ mọi thứ ở dạng phẳng",
+    "yuqueFolderModeHint": "Sắp xếp tài liệu theo đường dẫn mục lục Yuque của chúng. Lưu ý: các thao tác di chuyển thư mục thực hiện trong cơ sở tri thức sau đó sẽ bị cấu trúc Yuque ghi đè vào lần đồng bộ tiếp theo của tài liệu đó.",
+    "yuqueTOCOnly": "Chỉ đồng bộ các tài liệu hiển thị trong mục lục Yuque",
+    "yuqueTOCOnlyHint": "Yêu cầu bố cục \"Phản chiếu mục lục Yuque\". Các tài liệu đã có trong cơ sở tri thức không bị ảnh hưởng — tài liệu mà mục lục Yuque không liệt kê chỉ đơn giản là không được thêm nữa, không bao giờ bị xóa."
   },
   ollama: {
     unknown: 'Không xác định',
@@ -1191,7 +1201,10 @@ export default {
       sectionSession: 'Phiên Trò chuyện',
       sectionCallback: 'URL Callback',
       sectionKnowledge: 'Lưu trữ Tệp',
-      sectionStatus: 'Trạng thái'
+      sectionStatus: 'Trạng thái',
+      "replyLanguage": "Ngôn ngữ Phản hồi",
+      "replyLanguageDefault": "Dùng mặc định của hệ thống",
+      "replyLanguageHint": "Cố định ngôn ngữ phản hồi của Agent cho kênh này. Để trống để dùng mặc định của bản triển khai."
     },
     embed: {
       title: 'Nhúng Web',
@@ -1253,7 +1266,17 @@ export default {
       statusInactive: 'Có {count} công cụ đã chọn không hoạt động với cấu hình hiện tại',
       effectiveLabel: 'Công cụ khả dụng thực tế',
       effectiveDesc: 'Được tính toán từ cấu hình hiện tại — đây là bộ công cụ mà Agent thực sự có thể gọi',
-      effectiveEmpty: 'Không có công cụ khả dụng — Agent sẽ chuyển về chế độ chat thuần bằng mô hình'
+      effectiveEmpty: 'Không có công cụ khả dụng — Agent sẽ chuyển về chế độ chat thuần bằng mô hình',
+      "grepChunks": "Tìm kiếm Từ khóa",
+      "grepChunksDesc": "Nhanh chóng xác định các tài liệu và đoạn chứa từ khóa cụ thể",
+      "knowledgeSearch": "Tìm kiếm Ngữ nghĩa",
+      "knowledgeSearchDesc": "Hiểu câu hỏi và tìm nội dung liên quan về mặt ngữ nghĩa",
+      "listChunks": "Xem Các đoạn Tài liệu",
+      "listChunksDesc": "Lấy toàn bộ nội dung các đoạn của một tài liệu",
+      "getDocInfo": "Lấy Thông tin Tài liệu",
+      "getDocInfoDesc": "Xem siêu dữ liệu của tài liệu",
+      "wikiReadSourceDoc": "Đọc sâu Tài liệu Nguồn",
+      "wikiReadSourceDocDesc": "Đi sâu vào các tài liệu gốc mà một trang Wiki được xây dựng từ đó"
     },
     desc: {
       name: 'Đặt tên dễ nhận biết cho Agent',
@@ -1410,6 +1433,9 @@ export default {
         error: 'Lỗi',
         needs_auth: 'Cần xác thực',
         not_loaded: 'Chưa tải',
+        "loading": "Đang tải",
+        "disabled": "Đã tắt",
+        "unavailable": "Không khả dụng",
       },
       discoverTools: 'Khám phá công cụ MCP',
       listServers: 'Liệt kê dịch vụ MCP',
@@ -1497,7 +1523,8 @@ export default {
       truncated: 'Danh sách đã bị cắt bớt',
       wrote: 'Đã ghi',
       replacements: 'Đã thay thế {count} chỗ',
-      moreLines: 'Thêm {count} dòng'
+      moreLines: 'Thêm {count} dòng',
+      "edited": "Đã chỉnh sửa"
     },
     skillFiles: {
       heading: 'Tệp Kỹ năng',
@@ -1738,7 +1765,9 @@ export default {
     htmlSource: 'Xem mã nguồn',
     audioLoading: 'Đang tải âm thanh…',
     audioNotSupported: 'Trình duyệt của bạn không hỗ trợ phát âm thanh',
-    videoNotSupported: 'Trình duyệt của bạn không hỗ trợ phát video'
+    videoNotSupported: 'Trình duyệt của bạn không hỗ trợ phát video',
+    "zoomIn": "Phóng to",
+    "zoomOut": "Thu nhỏ"
   },
   organization: {
     title: 'Không gian Chia sẻ',
@@ -2023,14 +2052,29 @@ export default {
       noSearchResult: 'Không tìm thấy không gian phù hợp',
       noSearchableSpaces: 'Chưa có không gian nào có thể khám phá, hoặc thử tìm kiếm',
       memberLimitReached: 'Đầy',
-      backToSearch: 'Quay lại tìm kiếm'
+      backToSearch: 'Quay lại tìm kiếm',
+      "joining": "Đang tham gia không gian chia sẻ...",
+      "success": "Đã tham gia không gian chia sẻ thành công!",
+      "failed": "Không tham gia được không gian chia sẻ",
+      "noCode": "Không tìm thấy mã mời",
+      "goToOrganizations": "Đến Không gian Chia sẻ",
+      "confirmTitle": "Xác nhận tham gia Không gian Chia sẻ",
+      "confirm": "Xác nhận tham gia",
+      "preview": "Xem trước & Tham gia",
+      "memberCount": "{count} thành viên",
+      "shareCount": "{count} cơ sở tri thức được chia sẻ",
+      "agentShareCount": "{count} Agent",
+      "alreadyMember": "Bạn đã là thành viên của không gian chia sẻ này",
+      "invalidCode": "Mã mời không hợp lệ"
     },
     rbac: {
       needTenantAdminTip: 'Hành động này yêu cầu vai trò quản trị (hoặc cao hơn) trong không gian làm việc hiện tại. Vui lòng liên hệ chủ sở hữu.',
       cannotCreate: 'Vai trò trong không gian làm việc của bạn không đủ để tạo không gian chia sẻ',
       cannotJoin: 'Vai trò trong không gian làm việc của bạn không đủ để tham gia hoặc yêu cầu tham gia không gian chia sẻ',
       cannotManage: 'Vai trò trong không gian làm việc của bạn không đủ để quản lý khu vực chia sẻ này'
-    }
+    },
+    "joinSuccess": "Đã tham gia không gian chia sẻ thành công",
+    "joinFailed": "Không tham gia được không gian chia sẻ"
   },
   promptTemplate: {
     noTemplates: 'Không có mẫu khả dụng',
@@ -2107,14 +2151,21 @@ export default {
       authorized: 'Ủy quyền OAuth thành công',
       authorizeFailed: 'Ủy quyền OAuth thất bại',
       revoked: 'Đã thu hồi ủy quyền OAuth',
-      revokeFailed: 'Thu hồi ủy quyền OAuth thất bại'
+      revokeFailed: 'Thu hồi ủy quyền OAuth thất bại',
+      "created": "Đã tạo dịch vụ MCP",
+      "createFailed": "Không tạo được dịch vụ MCP",
+      "oauthRequired": "Máy chủ này yêu cầu OAuth. Đã chuyển sang OAuth 2.0 — hãy lưu, rồi nhấp \"Ủy quyền\"."
     },
     rules: {
       nameRequired: 'Vui lòng nhập tên dịch vụ',
       transportRequired: 'Vui lòng chọn loại truyền tải',
       urlRequired: 'Vui lòng nhập URL dịch vụ',
       urlInvalid: 'Vui lòng nhập URL hợp lệ'
-    }
+    },
+    "addDesc": "Kết nối một dịch vụ MCP bên ngoài để các Agent có thể gọi các công cụ của nó.",
+    "testAfterSaveHint": "Hãy lưu trước để kiểm tra kết nối",
+    "description": "Mô tả",
+    "descriptionPlaceholder": "Nhập mô tả dịch vụ"
   },
   mcpMetadata: {
     searchTools: 'Tìm kiếm tên hoặc mô tả công cụ',
@@ -2157,7 +2208,13 @@ export default {
     generateHint: 'Tạo hướng dẫn ngắn gọn từ các công cụ đã đồng bộ và đang bật. Chỉnh sửa kết quả rồi lưu để áp dụng.',
     instructionsRequired: 'Hướng dẫn sử dụng là bắt buộc',
     generated: 'Đã tạo. Hãy xem lại rồi lưu để áp dụng.',
-    generateFailed: 'Tạo thất bại. Hãy kiểm tra công cụ đã được đồng bộ và đã cấu hình mô hình chat khả dụng, sau đó thử lại.'
+    generateFailed: 'Tạo thất bại. Hãy kiểm tra công cụ đã được đồng bộ và đã cấu hình mô hình chat khả dụng, sau đó thử lại.',
+    "refresh": "Làm mới công cụ",
+    "needsRefresh": "Cần làm mới",
+    "saved": "Danh mục đã lưu",
+    "summary": "Tóm tắt cách dùng",
+    "summaryPlaceholder": "Ví dụ: Tra cứu trạng thái đơn hàng, tiến độ giao hàng và hoàn tiền.",
+    "saveNext": "Lưu và tiếp tục"
   },
   ollamaSettings: {
     title: 'Cài đặt Ollama',
@@ -2366,7 +2423,15 @@ export default {
       disabled: 'Đã tắt dịch vụ MCP',
       updateStateFailed: 'Cập nhật trạng thái dịch vụ MCP thất bại',
       deleted: 'Đã xóa dịch vụ MCP',
-      deleteFailed: 'Xóa dịch vụ MCP thất bại'
+      deleteFailed: 'Xóa dịch vụ MCP thất bại',
+      "testing": "Đang kiểm tra {name}...",
+      "noResponse": "Kiểm tra thất bại: máy chủ không phản hồi",
+      "testFailed": "Không kiểm tra được dịch vụ MCP"
+    },
+    "configuredServices": "Các dịch vụ đã cấu hình",
+    "manageAndTest": "Quản lý và kiểm tra kết nối dịch vụ MCP",
+    "actions": {
+      "test": "Kiểm tra kết nối"
     }
   },
   conversationSettings: {
@@ -2494,7 +2559,11 @@ export default {
       seconds: '{n} giây',
       minutes: '{n} phút',
       hours: '{n} giờ'
-    }
+    },
+    "phaseParsing": "Đang phân tích",
+    "phaseFinalizing": "Đã có thể tìm kiếm, vẫn đang tối ưu hóa",
+    "phaseUploadFailed": "Tải lên thất bại",
+    "phaseDeleted": "Đã xóa"
   },
   upload: {
     uploadDocument: 'Tải lên Tài liệu',
@@ -2732,7 +2801,8 @@ export default {
           placeholder: '{\'{\'} "max_tokens_field": "max_tokens" {\'}\'}',
           desc: 'Các công tắc tương thích được hợp nhất vào mặc định của danh mục cho giao thức đã phân giải; xem catalog/compat.go ở backend. Để trống nếu không ghi đè.',
           invalid: 'JSON không hợp lệ',
-          mustBeObject: 'Phải là một đối tượng JSON'
+          mustBeObject: 'Phải là một đối tượng JSON',
+          "docLink": "Tham chiếu trường"
         },
         legacyThinking: {
           label: 'Định dạng tham số suy nghĩ (cũ)',
@@ -2768,7 +2838,8 @@ export default {
         reasoning: 'Suy luận',
         vision: 'Thị giác',
         hint: 'Chọn mô hình từ danh mục của nhà cung cấp hoặc nhập tên mô hình tùy chỉnh.'
-      }
+      },
+      "remoteDimensionDetected": "Phát hiện số chiều vector: {value}"
     }
   },
   error: {
@@ -2810,11 +2881,26 @@ export default {
       refreshTokenFailed: 'Làm mới token thất bại',
       logoutFailed: 'Đăng xuất thất bại',
       validateTokenFailed: 'Xác minh token thất bại'
-    }
+    },
+    "requestTimeout": "Yêu cầu hết thời gian chờ. Tệp lớn hoặc kết nối chậm có thể cần thử lại.",
+    "invalidFileType": "Loại tệp không hợp lệ!"
   },
   mcp: {
     testResult: {
-      title: 'Kết quả kiểm thử: {name}'
+      title: 'Kết quả kiểm thử: {name}',
+      "connectionSuccess": "Kết nối thành công",
+      "connectionFailed": "Kết nối thất bại",
+      "toolsTitle": "Công cụ khả dụng",
+      "resourcesTitle": "Tài nguyên khả dụng",
+      "descriptionLabel": "Mô tả",
+      "schemaLabel": "Schema tham số",
+      "emptyDescription": "Dịch vụ này không cung cấp công cụ hoặc tài nguyên",
+      "requireApproval": "Yêu cầu phê duyệt của con người",
+      "requireApprovalTip": "Khi bật, Agent sẽ tạm dừng trước khi gọi công cụ này cho đến khi bạn phê duyệt — dùng cho thao tác ghi DB, xóa, v.v.",
+      "approvalSaveFailed": "Không lưu được cài đặt phê duyệt",
+      "toolEnabled": "Bật công cụ",
+      "toolEnabledTip": "Khi tắt, Agent sẽ không thấy hoặc gọi công cụ này",
+      "toolEnabledSaveFailed": "Không lưu được cài đặt công cụ"
     }
   },
   system: {
@@ -2977,7 +3063,11 @@ export default {
           emailRequired: 'Vui lòng nhập địa chỉ email',
           emailInvalid: 'Nhập địa chỉ email hợp lệ',
           confirmRequired: 'Nhập lại mật khẩu mới',
-          passwordMismatch: 'Mật khẩu không khớp'
+          passwordMismatch: 'Mật khẩu không khớp',
+          "passwordRequired": "Nhập mật khẩu mới",
+          "passwordLength": "Mật khẩu phải có 8-32 ký tự",
+          "passwordLetter": "Mật khẩu phải chứa một chữ cái",
+          "passwordNumber": "Mật khẩu phải chứa một chữ số"
         }
       },
       passwordReset: {
@@ -3060,7 +3150,8 @@ export default {
           },
           registration_mode: {
             self_serve: 'Tự phục vụ (bất kỳ ai cũng có thể đăng ký)',
-            invite_only: 'Chỉ theo lời mời (tắt đăng ký công khai)'
+            invite_only: 'Chỉ theo lời mời (tắt đăng ký công khai)',
+            "invite_register": "Đăng ký bằng lời mời (cần liên kết hợp lệ)"
           }
         }
       },
@@ -3660,7 +3751,10 @@ export default {
       failed: 'Quay lại thất bại. Vui lòng thử lại',
       skipped: 'Cuộc trò chuyện đã được quay lại; không gian làm việc không thay đổi',
       skipNoSandbox: 'Cuộc trò chuyện đã được quay lại; không gian làm việc không thay đổi (không có Sandbox liên kết)',
-      skipNoCheckpoint: 'Cuộc trò chuyện đã được quay lại; không gian làm việc không thay đổi (không có điểm kiểm tra để khôi phục)'
+      skipNoCheckpoint: 'Cuộc trò chuyện đã được quay lại; không gian làm việc không thay đổi (không có điểm kiểm tra để khôi phục)',
+      "busy": "Hãy đợi lượt này kết thúc trước khi quay lại",
+      "noCheckpoint": "Không thể quay lại: phiên này có không gian làm việc đang hoạt động nhưng không có điểm kiểm tra nào truy cập được",
+      "sandboxReplaced": "Không thể quay lại: Sandbox đã bị thay thế nên điểm kiểm tra cũ không thể truy cập"
     },
     sandbox: {
       panelTitle: 'Sandbox',
@@ -3697,14 +3791,31 @@ export default {
       retry: 'Kết nối lại',
       sessionEnded: 'Phiên terminal đã kết thúc',
       idleDisconnected: 'Terminal đã ngắt kết nối do không hoạt động. Sandbox sẽ tự tạm dừng theo TTL của không gian làm việc. Bạn có thể kết nối lại.',
-      authRevoked: 'Phiên của bạn không còn hợp lệ nên terminal đã bị ngắt kết nối. Hãy đăng nhập lại rồi kết nối lại.'
+      authRevoked: 'Phiên của bạn không còn hợp lệ nên terminal đã bị ngắt kết nối. Hãy đăng nhập lại rồi kết nối lại.',
+      "notStarted": "Terminal chưa chạy. Khởi động sẽ kết nối tới Sandbox của cuộc trò chuyện này, tạo hoặc tiếp tục một Sandbox nếu chưa có."
     },
     conversationTime: {
       today: 'Hôm nay {time}',
       yesterday: 'Hôm qua {time}',
       thisYear: '{month}/{day} {time}',
       otherYear: '{month}/{day}/{year} {time}'
-    }
+    },
+    "referenceSourceBack": "Tất cả nguồn",
+    "referenceSourceView": "Xem trong bản gốc",
+    "referenceSourceRelocate": "Định vị lại",
+    "referenceSourceLocating": "Đang định vị đoạn được trích dẫn…",
+    "referenceSourceExact": "Đã định vị được đoạn nguồn",
+    "referenceSourcePartial": "Các đoạn nguồn đã xác minh được đánh dấu; một phần trích dẫn vẫn chưa khớp",
+    "referenceSourceBlock": "Đã định vị được vùng nguồn; chưa xác nhận được văn bản chính xác",
+    "referenceSourceAmbiguous": "Có nhiều đoạn khớp; vị trí chưa rõ ràng",
+    "referenceSourceStale": "Nguồn hoặc nội dung đã thay đổi; không thể định vị chính xác trích dẫn này",
+    "referenceSourcePrevious": "Vị trí trích dẫn trước",
+    "referenceSourceNext": "Vị trí trích dẫn tiếp theo",
+    "referenceSourceFoundPage": "Tìm thấy ở trang {page}",
+    "referenceSourceNotFound": "Không xác định được đoạn được trích dẫn; bản gốc đang được mở",
+    "referenceSourceOpenWeb": "Mở trang web tại đoạn này",
+    "promptLabel": "Prompt",
+    "enterDescription": "Nhập mô tả"
   },
   knowledgeEditor: {
     titleCreate: 'Tạo Cơ sở Tri thức',
@@ -3723,7 +3834,16 @@ export default {
         descriptionLanguageAuto: 'Theo ngôn ngữ tài liệu',
         customInstructionsLabel: 'Yêu cầu phân tích hình ảnh',
         customInstructionsDescription: 'Bổ sung các ưu tiên thị giác trong khi quy ước đầu ra OCR và Markdown được giữ cố định',
-        customInstructionsPlaceholder: 'Ví dụ: ưu tiên biển tên, mã kiểu máy, mã cảnh báo và đơn vị trong bảng…'
+        customInstructionsPlaceholder: 'Ví dụ: ưu tiên biển tên, mã kiểu máy, mã cảnh báo và đơn vị trong bảng…',
+        "imageAttrsLabel": "Quan sát thuộc tính hình ảnh",
+        "imageAttrsDescription": "Khi bật, mỗi hình ảnh trước tiên được quan sát thuộc tính và mô tả, sau đó các thuộc tính quyết định có chạy một lượt OCR cho văn bản trong ảnh hay không. Khi tắt, áp dụng chế độ cơ bản: mọi hình ảnh đều được mô tả và OCR chạy cho tất cả",
+        "imageAttrsSchemaLabel": "Các thuộc tính hình ảnh có thể quan sát",
+        "imageAttrsSchemaDescription": "Mô hình quan sát các thuộc tính bên dưới (do registry backend định nghĩa) để điều khiển chính sách OCR",
+        "imageAttrsOcrConditions": "Kích hoạt OCR dựa trên điều kiện của thuộc tính đã quan sát",
+        "imageAttrsOcrConditionsDesc": "Khi các thuộc tính đã quan sát khớp với điều kiện bên dưới, OCR sẽ chạy trên hình ảnh",
+        "imageAttrsOcrOnUnobserved": "Chạy OCR khi quan sát thuộc tính hình ảnh thất bại",
+        "imageAttrsOcrOnUnobservedDesc": "Khi mô hình không quan sát đúng các thuộc tính hình ảnh, OCR chạy theo mặc định để không bao giờ mất văn bản chính; tắt để bỏ qua. (Mô hình thị giác nhỏ như 4B, hoặc prompt hướng dẫn hình ảnh tùy chỉnh xung đột với system prompt, có thể làm việc quan sát thất bại; từ 8B trở lên hiếm khi thất bại, nên khuyến nghị để bật)",
+        "imagePipelineKbNote": "Mặc định theo cài đặt cơ sở tri thức; hãy điều chỉnh cho tác vụ này"
       },
       tableMetadataInstructions: {
         label: 'Yêu cầu siêu dữ liệu bảng',
@@ -3973,10 +4093,18 @@ export default {
         questionAnswer: 'Câu hỏi + câu trả lời',
         combined: 'Kết hợp',
         separate: 'Riêng biệt'
-      }
+      },
+      "matchTypeEmbedding": "Khớp vector",
+      "matchTypeKeywords": "Khớp từ khóa",
+      "recommended": "Đề xuất",
+      "recommendedEnabled": "Đã bật đề xuất",
+      "recommendedDisabled": "Đã tắt đề xuất",
+      "recommendedDisableSuccess": "Đã tắt đề xuất cho mục FAQ",
+      "recommendedUpdateFailed": "Không cập nhật được trạng thái đề xuất"
     },
     document: {
-      title: 'Quản lý tài liệu'
+      title: 'Quản lý tài liệu',
+      "subtitle": "Nhấp hoặc kéo thả để tải tài liệu lên; nhiều định dạng được phân tích tự động với việc chia đoạn thông minh để tạo cơ sở tri thức có thể tìm kiếm"
     },
     messages: {
       loadModelsFailed: 'Tải danh sách mô hình thất bại',
@@ -4011,7 +4139,8 @@ export default {
     },
     buttons: {
       create: 'Tạo Cơ sở Tri thức',
-      saveAndClose: 'Lưu và đóng'
+      saveAndClose: 'Lưu và đóng',
+      "save": "Lưu cấu hình"
     },
     wikiBrowser: {
       editBtn: 'Chỉnh sửa',
@@ -4180,7 +4309,82 @@ export default {
       issueFixSingle: 'Sửa',
       fixStartError: 'Khởi động trợ lý sửa chữa thất bại',
       issueFixPromptSingle: 'Vui lòng sửa vấn đề (ID: {id}) trên trang [[{slug}]].',
-      issueFixPromptAutoStart: 'Vui lòng sửa các vấn đề sau trên trang [[{slug}]]:'
+      issueFixPromptAutoStart: 'Vui lòng sửa các vấn đề sau trên trang [[{slug}]]:',
+      "revisionCurrentHint": "Đây là phiên bản hiện tại. Hãy chọn một phiên bản lịch sử ở bên trái để so sánh hoặc hoàn nguyên.",
+      "revisionDiff": "So sánh với hiện tại",
+      "revisionDiffCaption": "v{from} → v{to} (đỏ = phiên bản đó, xanh lá = hiện tại)",
+      "revisionDiffBasisLabel": "Chế độ so sánh",
+      "revisionDiffIncrementalCaption": "v{from} → v{to} (các phiên bản liền kề; đỏ = cũ, xanh lá = mới)",
+      "revisionDiffCumulativeCaption": "v{from} → v{to} (thay đổi tích lũy đến hiện tại)",
+      "revisionFirstVersionHint": "Đây là phiên bản đầu tiên — không có phiên bản trước để so sánh.",
+      "tabGallery": "Thư viện ảnh",
+      "tabDocumentsTip": "Tải lên và quản lý các tài liệu nguồn",
+      "tabWikiTip": "Các trang Wiki được biên soạn tự động từ tài liệu",
+      "tabGalleryTip": "Duyệt mọi hình ảnh được trích xuất từ tài liệu",
+      "viewTabs": "Các chế độ xem của cơ sở tri thức",
+      "gallery": {
+        "title": "Thư viện ảnh",
+        "allImages": "Tất cả hình ảnh",
+        "count": "{count} hình ảnh",
+        "countFiltered": "{count} phù hợp",
+        "searchPlaceholder": "Tìm theo chú thích hoặc văn bản trong ảnh",
+        "filters": "Bộ lọc",
+        "clearFilters": "Xóa bộ lọc",
+        "searchIn": "Tìm trong",
+        "searchInHint": "Từ khóa chỉ khớp với nội dung đã đánh dấu",
+        "attrSection": "Thuộc tính hình ảnh",
+        "attrHint": "\"Ẩn\" loại bỏ các hình ảnh có giá trị đó; \"Luôn hiển thị\" giữ chúng ngay cả khi quy tắc khác ẩn chúng",
+        "verdictDefault": "Bất kỳ",
+        "verdictOff": "Ẩn",
+        "verdictOn": "Luôn hiển thị",
+        "keywordsPlaceholder": "Phân tách các từ khóa bằng dấu phẩy",
+        "noAttrs": "Không có thuộc tính để lọc",
+        "sort": "Sắp xếp",
+        "sortField": "Sắp xếp theo",
+        "sortOrder": "Thứ tự",
+        "orderAsc": "Tăng dần",
+        "orderDesc": "Giảm dần",
+        "empty": "Chưa có hình ảnh nào để duyệt",
+        "emptyHint": "Hình ảnh trong tài liệu của bạn sẽ xuất hiện ở đây sau khi phân tích xong",
+        "emptyFiltered": "Không có hình ảnh nào khớp với các bộ lọc này",
+        "imageLoadError": "Không tải được hình ảnh",
+        "noCaption": "Không có chú thích",
+        "noOcr": "Không nhận dạng được văn bản",
+        "caption": "Chú thích",
+        "ocr": "Văn bản trong ảnh (OCR)",
+        "attributes": "Thuộc tính",
+        "source": "Tài liệu nguồn",
+        "details": "Chi tiết",
+        "dimensions": "Kích thước",
+        "status": "Trạng thái",
+        "openSource": "Mở tài liệu nguồn",
+        "copy": "Sao chép",
+        "zoomIn": "Phóng to (+)",
+        "zoomOut": "Thu nhỏ (-)",
+        "zoomReset": "Vừa với cửa sổ (0)",
+        "actualSize": "Kích thước thực",
+        "rotate": "Xoay (R)",
+        "download": "Tải xuống",
+        "openOriginal": "Mở trong thẻ mới",
+        "toggleInfo": "Thông tin hình ảnh (I)",
+        "viewerClose": "Đóng (Esc)",
+        "prev": "Trước (←)",
+        "next": "Tiếp (→)",
+        "attr": {
+          "builtin_caption": "Chú thích",
+          "builtin_caption_description": "Mô tả hình ảnh do mô hình tạo ra.",
+          "builtin_ocr_text": "Văn bản OCR",
+          "builtin_ocr_text_description": "Văn bản được trích xuất từ hình ảnh bằng OCR.",
+          "builtin_created_at": "Thời gian tạo",
+          "builtin_created_at_description": "Thời điểm đoạn tài liệu chứa ảnh được tạo.",
+          "builtin_updated_at": "Thời gian cập nhật",
+          "builtin_updated_at_description": "Thời điểm đoạn tài liệu chứa ảnh được cập nhật lần cuối.",
+          "builtin_is_enabled": "Đã bật",
+          "builtin_is_enabled_description": "Đoạn tài liệu chứa ảnh có tham gia truy xuất hay không.",
+          "builtin_is_enabled_value_true": "Đã bật",
+          "builtin_is_enabled_value_false": "Đã tắt"
+        }
+      }
     },
     indexing: {
       title: 'Chiến lược lập chỉ mục',
@@ -4195,7 +4399,9 @@ export default {
       rebuildConfirmTitle: 'Xây lại chỉ mục',
       rebuildConfirmBody: 'Chiến lược lập chỉ mục đã thay đổi. Xử lý lại {count} tài liệu hiện có? Việc này có thể mất một lúc.',
       rebuildSuccess: 'Đã gửi tác vụ xây lại cho {count} tài liệu',
-      rebuildSkip: 'Bạn có thể tự kích hoạt việc xây lại sau, từ mục Nguồn dữ liệu'
+      rebuildSkip: 'Bạn có thể tự kích hoạt việc xây lại sau, từ mục Nguồn dữ liệu',
+      "graphTitle": "Đồ thị tri thức",
+      "graphDesc": "Trích xuất thực thể và quan hệ để xây dựng đồ thị tri thức phục vụ truy xuất dựa trên đồ thị"
     },
     wiki: {
       title: 'Cài đặt Wiki',
@@ -4585,7 +4791,8 @@ export default {
     },
     delete: {
       confirmTitle: 'Xác nhận xóa',
-      confirmMessage: 'Bạn có chắc chắn muốn xóa Cơ sở tri thức "{name}"? Thao tác này không thể hoàn tác.'
+      confirmMessage: 'Bạn có chắc chắn muốn xóa Cơ sở tri thức "{name}"? Thao tác này không thể hoàn tác.',
+      "confirmButton": "Xóa"
     },
     empty: {
       title: 'Chưa có Cơ sở tri thức',
@@ -4604,7 +4811,10 @@ export default {
     messages: {
       createFailed: 'Tạo phiên thất bại',
       createError: 'Tạo phiên thất bại, vui lòng thử lại sau'
-    }
+    },
+    "openProject": "Chọn dự án",
+    "clearProject": "Xóa",
+    "pickFailed": "Không thể mở đường dẫn đã chọn"
   },
   input: {
     addModel: 'Thêm Mô hình',
@@ -4657,13 +4867,17 @@ export default {
       sessionMissing: 'ID phiên không tồn tại',
       messageMissing: 'Không thể lấy ID tin nhắn. Vui lòng làm mới trang và thử lại.',
       stopSuccess: 'Đã dừng tạo',
-      stopFailed: 'Dừng thất bại. Vui lòng thử lại.'
+      stopFailed: 'Dừng thất bại. Vui lòng thử lại.',
+      "steerNoActiveRun": "Hiện không có câu trả lời nào đang chạy. Vui lòng gửi tin nhắn trực tiếp."
     },
     webSearch: {
       toggleOn: 'Bật Tìm kiếm Web',
       toggleOff: 'Tắt Tìm kiếm Web',
       notConfigured: 'Công cụ tìm kiếm web chưa được cấu hình'
-    }
+    },
+    "steerCurrent": "Bổ sung cho tác vụ hiện tại",
+    "steerAccepted": "Đã thêm trong tác vụ này",
+    "steerQueueInjecting": "Đang chờ áp dụng cập nhật"
   },
   manualEditor: {
     defaultTitlePrefix: 'Tài liệu mới',
@@ -5121,7 +5335,18 @@ export default {
     clear: 'Xóa giá trị của tôi',
     clearConfirm: 'Xóa giá trị của bạn cho {name}? Giá trị của Không gian làm việc (nếu có) sẽ được áp dụng lại sau đó.',
     clearSuccess: 'Đã xóa giá trị của bạn.',
-    updatedAt: 'Bạn đã đặt giá trị này vào {time}'
+    updatedAt: 'Bạn đã đặt giá trị này vào {time}',
+    "host": {
+      "title": "Biến môi trường",
+      "description": "Khóa cá nhân cho các Kỹ năng trên máy tính này, không phải cài đặt hệ thống hay triển khai của WeKnora.",
+      "helpAria": "Giới thiệu về biến môi trường",
+      "introRuntimeBody": "Được chèn khi một Kỹ năng chạy trên máy tính này. Bạn cũng có thể cung cấp giá trị trong cuộc trò chuyện. Các giá trị đã lưu sẽ không được hiển thị lại.",
+      "loadFailed": "Không thể tải biến môi trường.",
+      "sandboxTitle": "Luôn được bao gồm trên máy tính này",
+      "sandboxHint": "Chỉ được gửi cùng các lệnh chạy trên máy tính này. Hãy để trống trừ khi bạn cần. Bạn cũng có thể cung cấp giá trị trong cuộc trò chuyện.",
+      "nameInvalid": "Không thể dùng tên này. Các tên dành riêng (ví dụ PATH, hoặc tên bắt đầu bằng WEKNORA_) sẽ bị từ chối.",
+      "deleteConfirm": "Xóa {name}? Các lần chạy sau trên máy tính này sẽ không còn bao gồm nó."
+    }
   },
   memorySettings: {
     title: 'Ký ức của tôi',
@@ -5274,7 +5499,8 @@ export default {
           text: 'Hồ sơ, sở thích và bất cứ điều gì bạn yêu cầu ghi nhớ'
         }
       }
-    }
+    },
+    "consolidateNothing": "Không có gì cần dọn dẹp"
   },
   memory: {
     subtabBrowse: 'Duyệt',
@@ -5577,7 +5803,74 @@ export default {
       engineLocal: 'Cục bộ',
       engineCos: 'Tencent Cloud COS',
       engineTos: 'Volcengine TOS',
-      engineOss: 'Alibaba Cloud OSS'
+      engineOss: 'Alibaba Cloud OSS',
+      "description": "Cấu hình lưu trữ tài liệu và hình ảnh. Đặt tham số công cụ tại đây; cơ sở tri thức chỉ chọn công cụ nào sẽ dùng.",
+      "basicSection": "Cơ bản",
+      "modeSection": "Chế độ triển khai",
+      "credentialsSection": "Thông tin xác thực",
+      "bucketSection": "Bucket",
+      "useSslDesc": "Kết nối tới MinIO qua HTTPS",
+      "loading": "Đang tải...",
+      "retry": "Thử lại",
+      "defaultEngine": "Công cụ mặc định",
+      "defaultEngineDesc": "Công cụ lưu trữ mặc định khi tạo cơ sở tri thức mới",
+      "localTitle": "Lưu trữ cục bộ",
+      "localDesc": "Lưu tệp trên hệ thống tệp cục bộ của máy chủ, chỉ phù hợp với triển khai một nút.",
+      "available": "Khả dụng",
+      "needsConfig": "Cần cấu hình",
+      "configurable": "Có thể cấu hình",
+      "pathPrefix": "Tiền tố đường dẫn (tùy chọn)",
+      "pathPrefixPlaceholder": "ví dụ: weknora/images",
+      "prefixPlaceholder": "ví dụ: weknora",
+      "bucketName": "Tên bucket",
+      "bucketPlaceholder": "Tên bucket",
+      "minioDesc": "Lưu trữ đối tượng tự lưu trữ tương thích S3, phù hợp với mạng riêng và triển khai đám mây riêng.",
+      "minioDocker": "Triển khai Docker",
+      "minioRemote": "MinIO từ xa",
+      "minioDockerDetected": "Đã phát hiện biến môi trường của MinIO triển khai bằng Docker. Thông tin kết nối được cung cấp qua biến môi trường, không cần nhập thủ công.",
+      "minioDockerNotDetected": "Không phát hiện biến môi trường MinIO (MINIO_ENDPOINT, v.v.). Vui lòng kiểm tra cấu hình Docker Compose của bạn.",
+      "minioRemoteHint": "Kết nối tới dịch vụ MinIO từ xa. Cần nhập thông tin kết nối thủ công.",
+      "cosTitle": "Tencent Cloud COS",
+      "cosDesc": "Tencent Cloud Object Storage, phù hợp với triển khai đám mây công cộng có tăng tốc CDN.",
+      "cosSecretIdPlaceholder": "SecretId API của Tencent Cloud",
+      "cosSecretKeyPlaceholder": "SecretKey API của Tencent Cloud",
+      "cosAppIdPlaceholder": "AppID tài khoản Tencent Cloud",
+      "tosTitle": "Volcengine TOS",
+      "tosDesc": "Volcengine Object Storage Service (TOS), phù hợp với triển khai đám mây công cộng.",
+      "tosAccessKeyPlaceholder": "Access Key của Volcengine",
+      "tosSecretKeyPlaceholder": "Secret Key của Volcengine",
+      "s3Title": "AWS S3",
+      "s3Desc": "AWS S3 và các dịch vụ lưu trữ đối tượng tương thích S3, phù hợp với triển khai đám mây công cộng.",
+      "s3AccessKeyPlaceholder": "AWS Access Key",
+      "s3SecretKeyPlaceholder": "AWS Secret Key",
+      "s3DefaultCredentialsHint": "Để trống cả hai khóa để dùng chuỗi thông tin xác thực mặc định của AWS (vai trò IAM, IRSA / web identity, biến môi trường hoặc cấu hình dùng chung).",
+      "s3EndpointPlaceholder": "Tùy chọn; để trống để dùng endpoint vùng của AWS",
+      "ks3Title": "Kingsoft Cloud KS3",
+      "ks3Desc": "Kingsoft Cloud Object Storage Service (KS3), phù hợp với triển khai đám mây công cộng.",
+      "ks3AccessKeyPlaceholder": "Access Key của Kingsoft Cloud",
+      "ks3SecretKeyPlaceholder": "Secret Key của Kingsoft Cloud",
+      "ks3EndpointPlaceholder": "ví dụ: ks3-cn-beijing.ksyuncs.com",
+      "ks3RegionPlaceholder": "ví dụ: BEIJING",
+      "engineKs3": "Kingsoft Cloud KS3",
+      "obsTitle": "Huawei Cloud OBS",
+      "obsDesc": "Huawei Cloud Object Storage Service (OBS), phù hợp với triển khai đám mây công cộng.",
+      "obsAccessKeyPlaceholder": "Access Key của Huawei Cloud",
+      "obsSecretKeyPlaceholder": "Secret Key của Huawei Cloud",
+      "obsEndpointPlaceholder": "ví dụ: obs.cn-north-4.myhuaweicloud.com",
+      "obsRegionPlaceholder": "ví dụ: cn-north-4",
+      "engineObs": "Huawei Cloud OBS",
+      "ossTitle": "Alibaba Cloud OSS",
+      "ossDesc": "Alibaba Cloud Object Storage Service (OSS), phù hợp với triển khai đám mây công cộng.",
+      "ossAccessKeyPlaceholder": "Access Key của Alibaba Cloud",
+      "ossSecretKeyPlaceholder": "Secret Key của Alibaba Cloud",
+      "console": "Console",
+      "docs": "Tài liệu",
+      "testConnection": "Kiểm tra kết nối",
+      "loadFailed": "Không tải được",
+      "saveSuccess": "Đã lưu thành công",
+      "saveFailed": "Lưu thất bại",
+      "unknownError": "Lỗi không xác định",
+      "requestFailed": "Yêu cầu thất bại"
     },
     storageBackend: {
       description: 'Quản lý các instance lưu trữ dùng cho tệp và hình ảnh; có thể cấu hình nhiều instance cùng loại.',
@@ -5670,7 +5963,19 @@ export default {
       vlmServerUrlHint: 'Bắt buộc khi Backend là vlm-http-client hoặc hybrid-http-client',
       paddleocrVlEndpointPlaceholder: 'ví dụ http://your-paddleocr-vl:8080',
       paddleocrVlEndpointHint: 'Base URL của toàn bộ dịch vụ pipeline PaddleOCR-VL; không cần hậu tố /layout-parsing',
-      paddleocrVlCloudTokenPlaceholder: 'Token PaddleOCR-VL AI Studio'
+      paddleocrVlCloudTokenPlaceholder: 'Token PaddleOCR-VL AI Studio',
+      "mineruEndpointHint": "Phiên bản máy chủ được phát hiện tự động: MinerU 4.0+ dùng API V1, các phiên bản cũ hơn dùng /file_parse.",
+      "mineruServerApiKeyPlaceholder": "Giá trị của cờ --api-key của máy chủ (để trống nếu tắt xác thực)",
+      "mineruServerApiKeyHint": "Chỉ dùng cho MinerU 4.0+.",
+      "mineruTierLabel": "Cấp độ phân tích",
+      "mineruTierDefault": "Mặc định của máy chủ (ưu tiên standard)",
+      "mineruTierFlash": "flash (nhanh nhất, chất lượng thấp nhất)",
+      "mineruTierBasic": "basic (mô hình nhỏ, chạy trên CPU)",
+      "mineruTierStandard": "standard (VLM, chất lượng cao)",
+      "mineruTierAdvanced": "advanced (VLM, chất lượng cao nhất, chậm nhất)",
+      "mineruTierHint": "Chỉ áp dụng cho MinerU 4.0+; các cấp độ khả dụng phụ thuộc vào cờ --tier của máy chủ.",
+      "mineruLegacySection": "Tùy chọn cũ (MinerU 3.x trở về trước)",
+      "mineruLegacySectionHint": "MinerU 4.0 đã loại bỏ các tham số yêu cầu này nên máy chủ 4.0+ sẽ bỏ qua; hãy cấu hình máy chủ VLM ở phía MinerU."
     },
     weknoraCloud: {
       title: 'WeKnora Cloud',
@@ -5792,7 +6097,39 @@ export default {
       upgradeRowHintFailed: 'Quá trình cài đặt trên Sandbox này không thành công và danh mục đã có phiên bản mới hơn. Nâng cấp sẽ cài phiên bản trong danh mục thay thế.',
       upgradeRowHintFailedVersions: 'Việc cài đặt {from} trên Sandbox này không thành công, còn danh mục đang có {to}. Nâng cấp sẽ cài {to} thay thế.',
       servedAfterFailure: 'Nâng cấp thất bại; vẫn đang chạy {version}',
-      loadFailed: 'Không tải được'
+      loadFailed: 'Không tải được',
+      "hostTarget": "Máy tính này",
+      "host": {
+        "description": "Kỹ năng nằm trong danh mục của không gian làm việc. Agent có thể bật một Kỹ năng sau khi nó được cài đặt trên máy tính này.",
+        "helpTooltip": "Một Kỹ năng trong danh mục có thể không cần cài đặt. Tập lệnh chỉ chạy sau khi nó được cài đặt trên máy tính này.",
+        "emptyDesc": "Chưa có Kỹ năng nào. Hãy thêm một Kỹ năng và có thể cài đặt nó trên máy tính này.",
+        "addStepInstallDesc": "Xác nhận Kỹ năng đã phân tích, rồi chọn mô hình cài đặt. Kỹ năng sẽ được cài đặt trên máy tính này.",
+        "installToSandbox": "Cài đặt trên máy tính này",
+        "installToSandboxDesc": "Việc cài đặt sẽ chuẩn bị các phần phụ thuộc trên máy tính này. Agent có thể dùng Kỹ năng khi nó sẵn sàng.",
+        "installDrawerDesc": "Cài đặt “{name}” trên máy tính này.",
+        "noInstalls": "Chưa cài đặt trên máy tính này",
+        "installedOnName": "Đã cài đặt trên máy tính này",
+        "manageDrawerDesc": "Bật, chỉnh sửa biến hoặc gỡ cài đặt trên máy tính này.",
+        "manageUninstall": "Gỡ cài đặt khỏi máy tính này",
+        "manageUninstallConfirm": "Gỡ cài đặt “{name}” khỏi máy tính này?",
+        "deleteCatalogConfirm": "Xóa “{name}” khỏi danh mục? Trước tiên hãy gỡ cài đặt nó khỏi máy tính này.",
+        "deleteCatalogBlocked": "Trước tiên hãy gỡ cài đặt Kỹ năng này khỏi máy tính này.",
+        "upgradeDrawerDesc": "Nâng cấp “{name}” lên phiên bản trong danh mục. Máy tính này giữ phiên bản hiện tại cho đến khi nâng cấp hoàn tất, và nâng cấp thất bại sẽ giữ nguyên phiên bản đó.",
+        "disableHint": "Khi bị tắt, các Agent không thể thấy Kỹ năng này. Các tệp của nó vẫn nằm trên máy tính này. Thay đổi có hiệu lực vào lần chạy phiên tiếp theo.",
+        "removeDone": "Đã gỡ cài đặt “{name}” khỏi máy tính này. Kỹ năng vẫn còn trong danh mục và có thể cài đặt lại.",
+        "removeWaiting": "Đã bắt đầu gỡ cài đặt. Đang chờ tiến độ…",
+        "removeSandboxReady": "Đang chuẩn bị thư mục cục bộ",
+        "removeRemoved": "Đã xóa tệp",
+        "envWorkspaceHint": "Các thành viên chưa đặt giá trị riêng sẽ dùng giá trị này. Họ có thể đặt giá trị cá nhân tại Cài đặt → Biến môi trường."
+      },
+      "noConfigsDesc": "Chưa có Sandbox. Kỹ năng cần một image để cài đặt vào.",
+      "addDrawerDesc": "Dán nguồn hoặc tải lên tệp zip để thêm vào danh mục. Bạn có thể cài đặt vào các Sandbox ngay bây giờ hoặc sau.",
+      "addRegisteredAs": "Đã đăng ký là “{name}”",
+      "installedOn": "Đã cài đặt trên",
+      "manageOnSandbox": "Quản lý Kỹ năng này trên “{name}”",
+      "servedWhileUpgrading": "Đang nâng cấp; vẫn đang chạy {version}",
+      "servedWhileUpgradingPlain": "Đang nâng cấp; vẫn đang chạy phiên bản trước",
+      "servedAfterFailurePlain": "Nâng cấp thất bại; vẫn đang chạy phiên bản trước"
     },
     sandbox: {
       title: 'Sandbox Backend',
@@ -6378,7 +6715,17 @@ export default {
       buttons: {
         create: 'Tạo Agent',
         saveAndClose: 'Lưu và đóng'
-      }
+      },
+      "hostSkillsConfigDesc": "Chọn các Kỹ năng đã được cài đặt trên máy tính này. Những Kỹ năng khác hiển thị Cài đặt và chỉ có thể chọn sau khi cài.",
+      "hostSkillsSelectionDesc": "Các Kỹ năng của không gian làm việc được liệt kê tại đây. Những Kỹ năng đã cài trên máy tính này có thể dùng ngay; hãy cài các Kỹ năng còn lại trước.",
+      "hostSelectSkillsDesc": "Chọn các Kỹ năng mà Agent này nên dùng. Không thể chọn Kỹ năng chưa có trên máy tính này — hãy nhấp Cài đặt trước.",
+      "hostSkillsAllListHint": "Tất cả chỉ bao gồm các Kỹ năng đã cài trên máy tính này. Các Kỹ năng khác bị loại ra cho đến khi bạn cài đặt.",
+      "hostInstallToThisComputer": "Cài đặt trên máy tính này",
+      "hostUpgradeOnThisComputer": "Nâng cấp Kỹ năng trên máy tính này lên phiên bản trong danh mục",
+      "hostSkillDisabled": "Đã tắt trên máy tính này",
+      "selectSkills": "Chọn Kỹ năng",
+      "skillsInfoTitle": "Kỹ năng và Sandbox phối hợp với nhau như thế nào",
+      "skillsInfoContent": "Kỹ năng là các mô-đun tri thức có tập lệnh chạy trong Sandbox đã chọn. Danh sách lấy từ các Kỹ năng đã cài ở đó. Khi Sandbox của một phiên đã tồn tại, các tệp đính kèm, artifact và việc dọn dẹp của nó vẫn gắn với cấu hình lúc nó được tạo — thay đổi Sandbox chỉ ảnh hưởng đến các phiên sau."
     },
     messages: {
       created: 'Tạo Agent thành công',
@@ -6393,7 +6740,8 @@ export default {
     },
     delete: {
       confirmTitle: 'Xóa Agent',
-      confirmMessage: 'Bạn có chắc chắn muốn xóa Agent "{name}" không? Hành động này không thể hoàn tác.'
+      confirmMessage: 'Bạn có chắc chắn muốn xóa Agent "{name}" không? Hành động này không thể hoàn tác.',
+      "confirmButton": "Xác nhận xóa"
     },
     shareScope: {
       title: 'Phạm vi Chia sẻ',
@@ -6507,7 +6855,15 @@ export default {
     noActivity: 'Chưa có hoạt động phân tích',
     totalDuration: 'Tổng: {d}',
     errorCode: {
-      UNKNOWN_SUGGESTION: 'Kiểm tra nhật ký ứng dụng để biết chi tiết.'
+      UNKNOWN_SUGGESTION: 'Kiểm tra nhật ký ứng dụng để biết chi tiết.',
+      "DOCREADER_UNAVAILABLE": "Dịch vụ phân tích tài liệu không khả dụng",
+      "DOCREADER_UNAVAILABLE_SUGGESTION": "Không thể kết nối tới DocReader hoặc kết nối bị gián đoạn. Hãy kiểm tra tình trạng dịch vụ, vòng lặp khởi động lại và quyền truy cập mạng. Thử lại sau khi khôi phục; không cần tải tệp lên lại.",
+      "DOCREADER_TIMEOUT": "Phân tích tài liệu hết thời gian chờ",
+      "DOCREADER_TIMEOUT_SUGGESTION": "Hãy kiểm tra tình trạng và tải của DocReader trước khi thử lại. Chia nhỏ các tệp lớn nếu cần.",
+      "DOCREADER_PARSE_FAILED": "Phân tích tài liệu thất bại",
+      "DOCREADER_PARSE_FAILED_SUGGESTION": "Hãy kiểm tra định dạng tệp và nhờ quản trị viên xem log DocReader của lần thử này.",
+      "TASK_STALLED": "Đã dừng do không có tiến triển",
+      "TASK_STALLED_SUGGESTION": "Quá trình xử lý không có tiến triển quá thời hạn và không còn tác vụ nào trong hàng đợi, nên đã bị đánh dấu thất bại. Nhấn Thử lại; nếu tình trạng này tiếp diễn, hãy kiểm tra dịch vụ mà giai đoạn này phụ thuộc (phân tích tài liệu, mô hình hoặc kho vector)."
     },
     status: {
       pending: 'Đang chờ',
@@ -6581,7 +6937,8 @@ export default {
       title: 'Cài đặt phân tích cho lần chạy này',
       kbDefault: 'Sử dụng mặc định cơ sở tri thức',
       graph: 'Đồ thị tri thức'
-    }
+    },
+    "attempt": "Lần thử {n}"
   },
   uploadConfirm: {
     documentSummary: 'Tóm tắt tài liệu',
@@ -6637,7 +6994,10 @@ export default {
     pdfForceScanned: {
       label: 'Phân tích PDF theo bản quét',
       description: 'Hữu ích với PDF in từ web, bản quét hoặc chứa nhiều ảnh. Mỗi trang sẽ được hiển thị thành ảnh và xử lý qua OCR/VLM. Có thể tăng thời gian xử lý và chi phí mô hình.'
-    }
+    },
+    "destinationToRoot": "Dùng thư mục gốc",
+    "folderUploadTitle": "Thư mục “{name}”",
+    "folderUploadHint": "{count} tệp; cấu trúc thư mục cục bộ sẽ được giữ nguyên"
   },
   knowledgeBase: {
     tagAddAction: 'Thêm thẻ',
@@ -6911,7 +7271,12 @@ export default {
       newFolderAddUnder: 'Thư mục con mới trong “{folder}”',
       success: 'Đã di chuyển {count} tài liệu',
       failed: 'Không thể di chuyển tài liệu',
-      duplicate: 'Thư mục đó đã tồn tại'
+      duplicate: 'Thư mục đó đã tồn tại',
+      "newFolder": "Thư mục con mới",
+      "newFolderCreate": "Tạo",
+      "newFolderHint": "Nhấn Enter để tạo và di chuyển",
+      "newFolderHintRoot": "Sẽ được tạo trong thư mục gốc",
+      "newFolderHintUnder": "Sẽ được tạo trong “{folder}”"
     },
     folderTree: {
       totalDocuments: 'Tổng cộng {count} tài liệu',
@@ -6930,7 +7295,9 @@ export default {
       renamePlaceholder: 'Tên thư mục',
       renameSuccess: 'Đã đổi tên thư mục',
       renameFailed: 'Không thể đổi tên thư mục',
-      renameInvalid: 'Không thể di chuyển thư mục vào bên trong chính nó'
+      renameInvalid: 'Không thể di chuyển thư mục vào bên trong chính nó',
+      "folderCardCount": "{count} tài liệu",
+      "collapseFolder": "Thu gọn thư mục này"
     },
     infoCard: {
       tooltip: 'Xem thông tin cơ sở tri thức',
@@ -6964,7 +7331,28 @@ export default {
       fromOrg: 'Từ khu vực',
       sharedAt: 'Chia sẻ lúc',
       lastUpdated: 'Cập nhật lần cuối'
-    }
+    },
+    "sort": {
+      "title": "Sắp xếp",
+      "updatedTime": "Thời gian cập nhật",
+      "updatedTimeDescription": "Sắp xếp theo thay đổi mới nhất của từng tệp.",
+      "createdTime": "Thời gian tải lên/tạo",
+      "createdTimeDescription": "Mặc định. Xem các tài liệu mới thêm gần nhất hoặc tài liệu tích lũy từ sớm nhất.",
+      "fileName": "Tên tệp",
+      "fileNameDescription": "Tìm nhanh một tệp khi bạn đã biết tên.",
+      "recentlyUpdated": "Cập nhật gần nhất",
+      "earliestUpdated": "Cập nhật cũ nhất",
+      "newestCreated": "Tải lên mới nhất",
+      "earliestCreated": "Tải lên cũ nhất",
+      "nameAscending": "A–Z",
+      "nameDescending": "Z–A"
+    },
+    "tagFilterPlaceholder": "Thẻ",
+    "deleteFailed": "Xóa thất bại. Vui lòng thử lại sau!",
+    "newSession": "Cuộc trò chuyện mới",
+    "columnSize": "Kích thước",
+    "columnSource": "Nguồn",
+    "batchDownloading": "Đang chuẩn bị tải xuống…"
   },
   resourceOrigin: {
     mine: 'Của tôi',
@@ -7256,7 +7644,15 @@ export default {
       assistant: 'Trợ lý',
       attachments: 'Tệp đính kèm',
       references: 'Tài liệu tham khảo'
-    }
+    },
+    "copySessionId": "Sao chép ID phiên",
+    "copyLink": "Sao chép liên kết cuộc trò chuyện",
+    "openNewWindow": "Mở trong cửa sổ mới",
+    "unpinSuccess": "Đã bỏ ghim cuộc trò chuyện",
+    "temporaryWorkspace": "Không gian làm việc tạm thời",
+    "sessionIdCopied": "Đã sao chép ID phiên",
+    "linkCopied": "Đã sao chép liên kết cuộc trò chuyện",
+    "copyFailed": "Sao chép thất bại. Hãy kiểm tra quyền clipboard của trình duyệt."
   },
   menu: {
     sessionInProgress: 'Hội thoại đang diễn ra',
@@ -7444,6 +7840,199 @@ export default {
     usageStep4Text: 'Một phần xem trước nhỏ xuất hiện trong hội thoại. Bấm vào đó để tìm thẻ tác vụ. Các tác vụ bị ngắt vẫn tạm dừng sau khi kết nối lại — hãy tiếp tục chúng từ phần xem trước. Thẻ có sẵn cần bạn cấp quyền.',
     running: 'Đang chạy',
     locateWindow: 'Hiện trình duyệt',
-    reconnectShort: 'Đang chờ kết nối lại'
+    reconnectShort: 'Đang chờ kết nối lại',
+    "resumeShort": "Tiếp tục",
+    "pauseShort": "Tạm dừng",
+    "stopShort": "Kết thúc",
+    "capabilitiesTitle": "Agent của bạn có thể",
+    "sidebarStatus": "Hiển thị trạng thái kết nối trên thanh bên",
+    "storeInstall": "Chrome Web Store",
+    "edgeStoreInstall": "Edge Add-ons",
+    "extensionMinVersion": "Yêu cầu BrowserSkill v{version} trở lên. Hoạt động với Chrome và Edge.",
+    "extensionOutdated": "Tiện ích v{current} đã lỗi thời. Hãy cập nhật lên v{version} trở lên.",
+    "manualInstall": "Cài đặt thủ công (cách khác)",
+    "storeInstallHint": "Cài đặt BrowserSkill từ Chrome Web Store hoặc Edge Add-ons, sau đó quay lại đây để ghép nối.",
+    "officialExtension": "Tiện ích chính thức (Chrome Web Store)",
+    "installGuide": "Cài đặt gói đã tải xuống như thế nào?",
+    "pairGuide": "Dùng liên kết ghép nối như thế nào?"
+  },
+  "modelCatalog": {
+    "title": "Danh mục mô hình",
+    "description": "Danh mục mô hình xác định các mô hình được cung cấp khi thêm mô hình, cùng các giá trị mặc định như cửa sổ ngữ cảnh và khả năng suy luận. Thay đổi tại đây được áp dụng ngay cho tất cả không gian làm việc.",
+    "howItWorks": "Cách các cài đặt được xác định",
+    "layers": {
+      "builtin": "Danh mục tích hợp: danh sách mô hình mặc định đi kèm mỗi bản phát hành.",
+      "deployment": "Tệp triển khai: models.json trên máy chủ, ghi đè danh mục tích hợp.",
+      "console": "Thay đổi của quản trị viên: các chỉnh sửa thực hiện trên trang này, có ưu tiên cao hơn cả hai nguồn trên.",
+      "explicit": "Giá trị do không gian làm việc đặt trong cài đặt mô hình luôn được ưu tiên; thay đổi danh mục không bao giờ ghi đè các mô hình đã lưu."
+    },
+    "add": "Thêm mô hình",
+    "more": "Khác",
+    "jsonEditor": "Chỉnh sửa JSON",
+    "history": "Lịch sử phiên bản",
+    "import": "Nhập JSON",
+    "export": "Xuất thay đổi",
+    "search": "Tìm theo ID hoặc tên mô hình",
+    "allProviders": "Tất cả nhà cung cấp",
+    "allTypes": "Tất cả loại",
+    "onlyModified": "Chỉ mục đã sửa đổi",
+    "summary": "{count} mô hình · phiên bản {version}",
+    "columns": {
+      "model": "Mô hình",
+      "provider": "Nhà cung cấp",
+      "type": "Loại",
+      "tokens": "Ngữ cảnh / đầu ra",
+      "capabilities": "Khả năng",
+      "source": "Nguồn"
+    },
+    "capability": {
+      "reasoning": "Suy luận",
+      "image": "Hình ảnh",
+      "audio": "Âm thanh",
+      "video": "Video"
+    },
+    "source": {
+      "builtin": "Tích hợp",
+      "deployment": "Triển khai",
+      "console": "Thay đổi của quản trị viên"
+    },
+    "rule": "Mẫu",
+    "ruleTip": "Khớp một nhóm mô hình theo tên và cung cấp giá trị mặc định. Các mẫu không hiển thị trong trình chọn mô hình.",
+    "hidden": "Đã ẩn",
+    "edit": "Chỉnh sửa",
+    "view": "Xem",
+    "empty": "Không có mô hình phù hợp",
+    "editDescription": "{provider} · {type}",
+    "ruleNotice": "Mẫu này cung cấp giá trị mặc định cho các mô hình có tên khớp với nó. Để thay đổi, hãy dùng Khác → Chỉnh sửa JSON.",
+    "fieldsSection": "Giá trị mặc định",
+    "nameDesc": "Tên hiển thị trong trình chọn mô hình.",
+    "dimension": "Số chiều vector",
+    "dimensionDesc": "Được điền sẵn khi thêm mô hình embedding này; phải khớp với giá trị mô hình thực sự trả về.",
+    "inputDesc": "Các loại đầu vào mà mô hình chấp nhận. Mô hình có đầu vào hình ảnh có thể dùng làm mô hình thị giác.",
+    "thinkingLevels": "Mức độ suy nghĩ",
+    "thinkingLevelsDesc": "Cường độ suy luận được cung cấp trong cuộc trò chuyện. Nếu không có Tắt, mô hình luôn suy nghĩ.",
+    "levelsNeedReasoning": "Bật Suy luận để thiết lập các mức.",
+    "levelsUnsupported": "API của nhà cung cấp này không hỗ trợ suy nghĩ theo mức độ.",
+    "textOnly": "Chỉ văn bản",
+    "noLevels": "Không có",
+    "sourceLink": "Tài liệu nhà cung cấp",
+    "customHint": "Quản trị viên đã thêm mô hình này trên trang này; mọi giá trị của nó đều lấy từ đây.",
+    "fieldsHint": "Giá trị do không gian làm việc đặt trong cài đặt mô hình vẫn được ưu tiên. Xóa một trường để khôi phục giá trị mặc định.",
+    "context": "Cửa sổ ngữ cảnh",
+    "contextDesc": "Số token tối đa mà mô hình có thể xử lý cùng lúc.",
+    "output": "Đầu ra tối đa",
+    "outputDesc": "Số token tối đa được tạo trong một phản hồi.",
+    "reasoning": "Suy luận",
+    "reasoningDesc": "Mô hình có thể xuất ra quá trình suy luận của nó hay không.",
+    "hide": "Ẩn khỏi trình chọn",
+    "hideDesc": "Các mô hình bị ẩn sẽ không còn được đề xuất khi thêm mô hình. Các mô hình hiện có không bị ảnh hưởng.",
+    "inputModes": "Loại đầu vào",
+    "inherited": "Mặc định: {value}",
+    "notSet": "Chưa đặt",
+    "optional": "Tùy chọn",
+    "yes": "Có",
+    "no": "Không",
+    "modified": "Đã sửa đổi",
+    "layersSection": "Giá trị theo lớp",
+    "layerField": "Cài đặt",
+    "layerBuiltin": "Tích hợp",
+    "layerDeployment": "Triển khai",
+    "layerEffective": "Hiệu lực",
+    "save": "Lưu và áp dụng",
+    "restore": "Khôi phục mặc định",
+    "restoreConfirm": "Xóa mọi thay đổi của quản trị viên cho mô hình này và áp dụng ngay?",
+    "restored": "Đã khôi phục. Các instance khác sẽ đồng bộ trong khoảng 5 giây.",
+    "remove": "Xóa mô hình",
+    "removeConfirm": "Xóa mô hình do quản trị viên thêm này khỏi danh mục và áp dụng ngay?",
+    "removed": "Đã xóa. Các instance khác sẽ đồng bộ trong khoảng 5 giây.",
+    "published": "Đã áp dụng. Các instance khác sẽ đồng bộ trong khoảng 5 giây.",
+    "conflict": "Một quản trị viên khác đã cập nhật danh mục. Trang đã được làm mới; vui lòng thử lại.",
+    "loadFailed": "Không tải được danh mục mô hình",
+    "deploymentError": "Không tải được models.json của bản triển khai; chỉ đang dùng danh mục tích hợp: {error}",
+    "syncError": "Không đồng bộ được phiên bản mới nhất; trang này có thể không hiển thị cấu hình đang có hiệu lực: {error}",
+    "addDescription": "Thêm một mô hình mà danh mục chưa liệt kê. Sau đó có thể chọn trực tiếp trong cài đặt mô hình.",
+    "modelId": "ID mô hình",
+    "modelIdPlaceholder": "Tên mô hình dùng trong API của nhà cung cấp, ví dụ: gpt-5-mini",
+    "displayName": "Tên hiển thị",
+    "required": "Chọn nhà cung cấp và nhập ID mô hình",
+    "exists": "Mô hình này đã có trong danh mục; hãy chỉnh sửa nó",
+    "jsonDescription": "Chỉnh sửa toàn bộ thay đổi của quản trị viên dưới dạng models.json. Hữu ích cho thay đổi hàng loạt hoặc di chuyển.",
+    "jsonHint": "Chỉ bao gồm các trường bạn muốn thay đổi; xóa một trường để khôi phục giá trị mặc định. Quản lý thông tin xác thực, header và tham chiếu biến môi trường trong cài đặt mô hình hoặc tệp triển khai. Biểu tượng phải là SVG nội tuyến. Tối đa 1 MiB.",
+    "jsonClear": "Xóa mọi thay đổi",
+    "jsonCheck": "Kiểm tra thay đổi",
+    "jsonPublish": "Phát hành {count} thay đổi",
+    "jsonUnchanged": "Khớp với cấu hình đang có hiệu lực; không có gì để phát hành.",
+    "changesTitle": "Thay đổi sẽ áp dụng",
+    "change": {
+      "added": "Đã thêm",
+      "removed": "Đã xóa",
+      "updated": "Đã thay đổi",
+      "provider": "Nhà cung cấp"
+    },
+    "publishHint": "Có hiệu lực ngay trên instance này; các instance khác đồng bộ trong khoảng 5 giây.",
+    "invalid": "Hãy nhập tài liệu models.json có chứa đối tượng providers.",
+    "tooLarge": "Tệp không được vượt quá 1 MiB.",
+    "historyDescription": "Lưu giữ 20 phiên bản gần nhất. Khôi phục một phiên bản sẽ áp dụng ngay.",
+    "historyVersion": "Phiên bản {version}",
+    "historyCurrent": "Hiện tại",
+    "historyRestore": "Khôi phục",
+    "historyRestoreConfirm": "Khôi phục phiên bản {version} và áp dụng ngay cho tất cả không gian làm việc?",
+    "historyEmpty": "Không có phiên bản trước đó",
+    "historyModels": "{count} mô hình đã thay đổi",
+    "historyNoOverrides": "Không có thay đổi của quản trị viên"
+  },
+  "toolbox": {
+    "title": "Hộp công cụ",
+    "description": "Quản lý Kỹ năng, công cụ bên ngoài và kết nối trình duyệt cho các Agent của bạn.",
+    "unavailable": "Không có công cụ nào khả dụng trong không gian làm việc hiện tại."
+  },
+  "resourceSort": {
+    "title": "Sắp xếp",
+    "updatedTime": "Thời gian cập nhật",
+    "updatedTimeDescription": "Tùy chọn mặc định.",
+    "createdTime": "Thời gian tạo",
+    "createdTimeDescription": "Xem các mục mới nhất hoặc cũ nhất được tạo",
+    "name": "Tên",
+    "nameDescription": "Tìm nhanh một mục khi bạn biết tên của nó",
+    "recentlyUpdated": "Cập nhật gần nhất",
+    "earliestUpdated": "Cập nhật cũ nhất",
+    "recentlyCreated": "Tạo gần nhất",
+    "earliestCreated": "Tạo cũ nhất",
+    "nameAscending": "A–Z",
+    "nameDescending": "Z–A"
+  },
+  "imageAttr": {
+    "contain_text": {
+      "label": "Văn bản trong ảnh",
+      "description": "Lượng văn bản chính mà bản thân hình ảnh chứa. Quyết định việc đọc văn bản của nó có đáng để chạy một lượt OCR riêng hay không.",
+      "values": {
+        "none": {
+          "label": "Không có",
+          "description": "không có văn bản nào"
+        },
+        "sparse": {
+          "label": "Thưa",
+          "description": "vài từ — logo, biển báo, một nhãn đơn lẻ"
+        },
+        "block": {
+          "label": "Khối",
+          "description": "một khối văn bản chính — ảnh chụp màn hình, bảng, trang tài liệu"
+        }
+      }
+    },
+    "contain_data_visual": {
+      "label": "Trực quan hóa dữ liệu",
+      "description": "Hình ảnh có truyền tải dữ liệu dưới dạng biểu đồ, đồ thị, sơ đồ hay infographic hay không. Những hình ảnh như vậy vẫn giữ nhãn của chúng trong luồng OCR ngay cả khi văn bản trông thưa.",
+      "values": {
+        "true": {
+          "label": "Có",
+          "description": "biểu đồ, đồ thị hoặc sơ đồ có các giá trị được vẽ"
+        },
+        "false": {
+          "label": "Không",
+          "description": "ảnh chụp, hình vẽ, biểu tượng hoặc đồ trang trí"
+        }
+      }
+    }
   }
 }
