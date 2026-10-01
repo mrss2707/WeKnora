@@ -2153,7 +2153,21 @@ export default {
     subtabBrowse: 'Browse',
     subtabGraph: 'Graph',
     subtabHealth: 'Health',
-    subtabHistory: 'History'
+    subtabHistory: 'History',
+    subtabMcpConfig: 'MCP Config',
+    mcpConfig: {
+      connectionTitle: 'Connect your agent',
+      desc: 'Point your agent at the WeKnora MCP server so it can read and write long-term memory. The knowledge base and access token are configured in the MCP setting.',
+      noEndpoint: 'No MCP endpoint covers this knowledge base yet.',
+      configFile: 'Config file',
+      hintClaudeCode: 'Add this to .mcp.json in your project root (create it if missing).',
+      hintCodex: 'Add this [mcp_servers] table to ~/.codex/config.toml.',
+      hintAntigravity: 'Add this to ~/.gemini/config/mcp_config.json, or .agents/mcp_config.json per workspace.',
+      instructionTitle: 'Memory protocol instruction',
+      instructionDesc: 'Paste this into your agent’s project file (CLAUDE.md, AGENTS.md or system prompt).',
+      copied: 'Copied',
+      tokenNotRetrievable: 'This endpoint\'s token is not retrievable (created before auto-fill). Rotate the token in MCP settings to enable auto-fill.'
+    }
   },
   memorySettings: {
     title: 'My memory',

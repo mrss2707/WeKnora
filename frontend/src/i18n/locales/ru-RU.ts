@@ -5281,6 +5281,20 @@ export default {
     subtabGraph: 'Граф',
     subtabHealth: 'Состояние',
     subtabHistory: 'История',
+    subtabMcpConfig: 'Настройка MCP',
+    mcpConfig: {
+      connectionTitle: 'Подключите вашего агента',
+      desc: 'Подключите агента к серверу WeKnora MCP, чтобы он читал и записывал долговременную память. База знаний и токен доступа настраиваются в параметрах MCP.',
+      noEndpoint: 'Для этой базы знаний пока нет MCP-эндпоинта.',
+      configFile: 'Файл конфигурации',
+      hintClaudeCode: 'Добавьте это в .mcp.json в корне проекта (создайте, если его нет).',
+      hintCodex: 'Добавьте эту таблицу [mcp_servers] в ~/.codex/config.toml.',
+      hintAntigravity: 'Добавьте это в ~/.gemini/config/mcp_config.json или .agents/mcp_config.json для рабочего пространства.',
+      instructionTitle: 'Инструкция протокола памяти',
+      instructionDesc: 'Вставьте это в файл проекта агента (CLAUDE.md, AGENTS.md или системный промпт).',
+      copied: 'Скопировано',
+      tokenNotRetrievable: 'Токен этого эндпоинта нельзя получить (создан до появления автозаполнения). Обновите токен в настройках MCP, чтобы включить автозаполнение.'
+    },
     health: {
       loading: 'Загрузка отчёта о здоровье...',
       emptyTitle: 'Отчёт о здоровье недоступен',

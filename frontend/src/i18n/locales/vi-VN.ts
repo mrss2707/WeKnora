@@ -5281,6 +5281,20 @@ export default {
     subtabGraph: 'Đồ thị',
     subtabHealth: 'Sức khỏe',
     subtabHistory: 'Lịch sử',
+    subtabMcpConfig: 'Cấu hình MCP',
+    mcpConfig: {
+      connectionTitle: 'Kết nối agent của bạn',
+      desc: 'Trỏ agent của bạn tới WeKnora MCP server để đọc/ghi memory dài hạn. Knowledge base và access token được cấu hình trong cài đặt MCP.',
+      noEndpoint: 'Chưa có MCP endpoint nào phục vụ knowledge base này.',
+      configFile: 'File cấu hình',
+      hintClaudeCode: 'Thêm vào file .mcp.json ở gốc dự án (tạo mới nếu chưa có).',
+      hintCodex: 'Thêm bảng [mcp_servers] này vào ~/.codex/config.toml.',
+      hintAntigravity: 'Thêm vào ~/.gemini/config/mcp_config.json, hoặc .agents/mcp_config.json theo từng workspace.',
+      instructionTitle: 'Instruction giao thức memory',
+      instructionDesc: 'Dán đoạn này vào file dự án của agent (CLAUDE.md, AGENTS.md hoặc system prompt).',
+      copied: 'Đã sao chép',
+      tokenNotRetrievable: 'Token của endpoint này không lấy lại được (tạo trước khi có tự điền). Hãy rotate token trong cài đặt MCP để bật tự điền.'
+    },
     health: {
       loading: 'Đang tải báo cáo sức khỏe...',
       emptyTitle: 'Báo cáo sức khỏe không khả dụng',

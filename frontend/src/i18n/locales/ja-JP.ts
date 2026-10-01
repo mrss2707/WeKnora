@@ -5281,6 +5281,20 @@ export default {
     subtabGraph: 'Graph',
     subtabHealth: 'Health',
     subtabHistory: 'History',
+    subtabMcpConfig: 'MCP 設定',
+    mcpConfig: {
+      connectionTitle: 'エージェントを接続',
+      desc: 'エージェントを WeKnora MCP サーバーに接続し、長期記憶の読み書きを可能にします。ナレッジベースとアクセストークンは MCP 設定で構成します。',
+      noEndpoint: 'このナレッジベースをカバーする MCP エンドポイントはまだありません。',
+      configFile: '設定ファイル',
+      hintClaudeCode: 'プロジェクトルートの .mcp.json に追加してください（なければ作成）。',
+      hintCodex: 'この [mcp_servers] テーブルを ~/.codex/config.toml に追加してください。',
+      hintAntigravity: '~/.gemini/config/mcp_config.json、またはワークスペースごとの .agents/mcp_config.json に追加してください。',
+      instructionTitle: 'メモリプロトコルの instruction',
+      instructionDesc: 'これをエージェントのプロジェクトファイル（CLAUDE.md、AGENTS.md、またはシステムプロンプト）に貼り付けてください。',
+      copied: 'コピーしました',
+      tokenNotRetrievable: 'このエンドポイントのトークンは取得できません（自動入力導入前に作成）。MCP 設定でトークンをローテーションすると自動入力が有効になります。'
+    },
     health: {
       loading: 'Loading health report...',
       emptyTitle: 'Health Report Unavailable',

@@ -57,7 +57,7 @@ export const useMemoryStore = defineStore('memory', {
     viewMode: 'table' as 'grid' | 'table',
 
     /** Active sub-tab within the Memory tab. */
-    activeSubTab: 'browse' as 'browse' | 'graph' | 'health' | 'history',
+    activeSubTab: 'browse' as 'browse' | 'graph' | 'health' | 'history' | 'mcpconfig',
 
     /** IDs selected for bulk operations. */
     selectedIds: [] as string[],
@@ -358,7 +358,7 @@ export const useMemoryStore = defineStore('memory', {
       this.viewMode = this.viewMode === 'grid' ? 'table' : 'grid'
     },
 
-    setSubTab(tab: 'browse' | 'graph' | 'health' | 'history') {
+    setSubTab(tab: 'browse' | 'graph' | 'health' | 'history' | 'mcpconfig') {
       this.activeSubTab = tab
     },
 

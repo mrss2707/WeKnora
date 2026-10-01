@@ -5281,6 +5281,20 @@ export default {
     subtabGraph: '图谱',
     subtabHealth: '健康',
     subtabHistory: '历史',
+    subtabMcpConfig: 'MCP 配置',
+    mcpConfig: {
+      connectionTitle: '连接你的 Agent',
+      desc: '将 Agent 指向 WeKnora MCP 服务器以读写长期记忆。知识库与访问令牌在 MCP 设置中配置。',
+      noEndpoint: '当前没有服务于该知识库的 MCP 端点。',
+      configFile: '配置文件',
+      hintClaudeCode: '添加到项目根目录的 .mcp.json（若不存在则创建）。',
+      hintCodex: '将此 [mcp_servers] 表添加到 ~/.codex/config.toml。',
+      hintAntigravity: '添加到 ~/.gemini/config/mcp_config.json，或每个工作区的 .agents/mcp_config.json。',
+      instructionTitle: '记忆协议 Instruction',
+      instructionDesc: '将此内容粘贴到 Agent 的项目文件（CLAUDE.md、AGENTS.md 或系统提示词）中。',
+      copied: '已复制',
+      tokenNotRetrievable: '该端点的令牌无法取回（创建于自动填充功能之前）。请在 MCP 设置中轮换令牌以启用自动填充。'
+    },
     health: {
       loading: '正在加载健康报告...',
       emptyTitle: '健康报告不可用',

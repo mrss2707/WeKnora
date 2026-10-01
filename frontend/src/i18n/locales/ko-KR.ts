@@ -5281,6 +5281,20 @@ export default {
     subtabGraph: '그래프',
     subtabHealth: '상태',
     subtabHistory: '히스토리',
+    subtabMcpConfig: 'MCP 설정',
+    mcpConfig: {
+      connectionTitle: '에이전트 연결',
+      desc: '에이전트를 WeKnora MCP 서버에 연결해 장기 기억을 읽고 쓰세요. 지식 베이스와 액세스 토큰은 MCP 설정에서 구성합니다.',
+      noEndpoint: '이 지식 베이스를 지원하는 MCP 엔드포인트가 아직 없습니다.',
+      configFile: '설정 파일',
+      hintClaudeCode: '프로젝트 루트의 .mcp.json에 추가하세요 (없으면 새로 만드세요).',
+      hintCodex: '이 [mcp_servers] 테이블을 ~/.codex/config.toml에 추가하세요.',
+      hintAntigravity: '~/.gemini/config/mcp_config.json 또는 워크스페이스별 .agents/mcp_config.json에 추가하세요.',
+      instructionTitle: '기억 프로토콜 instruction',
+      instructionDesc: '이를 에이전트의 프로젝트 파일(CLAUDE.md, AGENTS.md 또는 시스템 프롬프트)에 붙여넣으세요.',
+      copied: '복사됨',
+      tokenNotRetrievable: '이 엔드포인트의 토큰은 가져올 수 없습니다 (자동 채우기 이전에 생성됨). MCP 설정에서 토큰을 교체하면 자동 채우기가 활성화됩니다.'
+    },
     health: {
       loading: '건강 보고서 로딩 중...',
       emptyTitle: '건강 보고서를 사용할 수 없음',

@@ -72,3 +72,14 @@ export function deleteMcpEndpoint(id: string) {
 export function rotateMcpEndpointToken(id: string) {
   return post<Envelope<McpEndpoint>>(`/api/v1/mcp-endpoints/${id}/rotate-token`, {})
 }
+
+export interface McpEndpointToken {
+  token: string
+  /** False for legacy endpoints created before token auto-fill; rotate to enable. */
+  retrievable: boolean
+}
+
+/** Owner-only: returns the decrypted endpoint bearer token for config auto-fill. */
+export function getMcpEndpointToken(id: string) {
+  return get<Envelope<McpEndpointToken>>(`/api/v1/mcp-endpoints/${id}/token`)
+}

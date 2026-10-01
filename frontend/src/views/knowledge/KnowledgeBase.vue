@@ -59,6 +59,7 @@ import MemoryBrowse from '@/views/memory/MemoryBrowse.vue'
 import MemoryGraph from '@/views/memory/MemoryGraph.vue'
 import MemoryHealth from '@/views/memory/MemoryHealth.vue'
 import MemoryHistory from '@/views/memory/MemoryHistory.vue'
+import MemoryMcpConfig from '@/views/memory/MemoryMcpConfig.vue'
 import MemoryDrawer from '@/views/memory/MemoryDrawer.vue'
 import type { AgentMemory } from '@/api/memory/index'
 import { getWikiStats } from '@/api/wiki';
@@ -90,6 +91,7 @@ const subTabs = computed(() => [
   { key: 'graph', icon: 'chart-bubble', label: t('memory.subtabGraph'), badge: undefined },
   { key: 'health', icon: 'info-circle', label: t('memory.subtabHealth'), badge: hasCriticalIssues.value ? 1 : undefined },
   { key: 'history', icon: 'time', label: t('memory.subtabHistory'), badge: undefined },
+  { key: 'mcpconfig', icon: 'setting', label: t('memory.subtabMcpConfig'), badge: undefined },
 ] as const)
 const memoryDrawerVisible = ref(false)
 const selectedMemory = ref<AgentMemory | null>(null)
@@ -2307,6 +2309,7 @@ const handleKBEditorSuccess = (kbIdValue: string) => {
             <MemoryGraph   v-if="memoryStore.activeSubTab === 'graph'"   :kb-id="kbId" />
             <MemoryHealth  v-if="memoryStore.activeSubTab === 'health'"  :kb-id="kbId" @critical-issues-changed="hasCriticalIssues = $event" />
             <MemoryHistory v-if="memoryStore.activeSubTab === 'history'" :kb-id="kbId" />
+            <MemoryMcpConfig v-if="memoryStore.activeSubTab === 'mcpconfig'" :kb-id="kbId" />
           </KeepAlive>
           <MemoryDrawer
             v-model:visible="memoryDrawerVisible"
