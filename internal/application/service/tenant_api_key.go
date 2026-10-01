@@ -72,6 +72,7 @@ func (s *tenantAPIKeyService) CreateAPIKey(
 		KnowledgeBaseIDs: normalizeAPIKeyIDs(req.KnowledgeBaseIDs),
 		Capabilities:     capabilities,
 		ExpiresAt:        expiresAt,
+		CreatedBy:        types.HumanUserIDOrEmpty(ctx),
 	}
 	if key.FullAccess {
 		key.KnowledgeBaseIDs = nil

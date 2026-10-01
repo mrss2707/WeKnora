@@ -26,6 +26,7 @@ func RegisterMCPEndpointRoutes(r *gin.RouterGroup, h *handler.MCPEndpointHandler
 	grp.PUT("/:endpoint_id", g.Admin(), h.UpdateMCPEndpoint)
 	grp.DELETE("/:endpoint_id", g.Admin(), h.DeleteMCPEndpoint)
 	grp.POST("/:endpoint_id/rotate-token", g.Admin(), h.RotateMCPEndpointToken)
+	grp.GET("/:endpoint_id/token", g.Admin(), h.RetrieveMCPEndpointToken)
 }
 
 // RegisterMCPServerRoutes mounts the public MCP server surface at
@@ -36,13 +37,15 @@ func RegisterMCPServerRoutes(
 	srv *mcpserver.Server,
 	endpointService interfaces.MCPEndpointService,
 	tenantService interfaces.TenantService,
+	apiKeyService interfaces.TenantAPIKeyService,
 ) {
 	if srv == nil || endpointService == nil {
 		return
 	}
 	h := gin.WrapH(srv.Handler())
 	auth := middleware.MCPEndpointAuth(endpointService, tenantService)
+	attribution := middleware.MCPEndpointUserAttribution(apiKeyService)
 	for _, method := range []string{http.MethodPost, http.MethodGet, http.MethodDelete} {
-		r.Handle(method, handler.MCPEndpointPath+":endpoint_id", auth, h)
+		r.Handle(method, handler.MCPEndpointPath+":endpoint_id", auth, attribution, h)
 	}
 }

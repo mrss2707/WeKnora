@@ -119,6 +119,7 @@ func (s *mcpEndpointService) Create(
 		Enabled:            ep.Enabled,
 		TokenHash:          HashMCPEndpointToken(token),
 		TokenHint:          mcpEndpointTokenHint(token),
+		TokenEncrypted:     token,
 		KnowledgeBaseIDs:   types.StringArray(kbIDs),
 		Tools:              types.StringArray(tools),
 		DefaultAgentID:     agentID,
@@ -224,6 +225,7 @@ func (s *mcpEndpointService) RotateToken(
 	}
 	ep.TokenHash = HashMCPEndpointToken(token)
 	ep.TokenHint = mcpEndpointTokenHint(token)
+	ep.TokenEncrypted = token
 	if err := s.repo.Update(ctx, ep); err != nil {
 		return nil, "", err
 	}

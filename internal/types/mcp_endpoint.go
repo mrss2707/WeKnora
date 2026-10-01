@@ -31,6 +31,11 @@ type MCPEndpoint struct {
 	// TokenHint is the first few characters of the token so the UI can show
 	// "mcp_ab12…" next to an endpoint without revealing the secret.
 	TokenHint string `json:"token_hint" gorm:"type:varchar(16);not null;default:''"`
+	// TokenEncrypted is an AES-256-GCM (enc:v1: prefix) copy of the bearer
+	// token so a logged-in owner can auto-fill it; blank for legacy rows. It is
+	// encrypted at persist by BeforeSave (see mcp_endpoint_token_hooks.go) and
+	// never serialized. TokenHash remains the authentication secret.
+	TokenEncrypted string `json:"-" gorm:"type:text;not null;default:''"`
 	// KnowledgeBaseIDs bounds every knowledge-facing tool. Empty means every
 	// knowledge base the workspace owns or has been granted at call time.
 	KnowledgeBaseIDs StringArray `json:"knowledge_base_ids" gorm:"type:jsonb;not null;default:'[]'"`

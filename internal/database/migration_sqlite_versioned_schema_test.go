@@ -62,9 +62,13 @@ var versionedSQLiteColumns = map[string][]string{
 	"tenant_user_env_vars": {
 		"principal_type", "principal_id", "sandbox_config_id", "skill_id", "name", "value",
 	}, // 000028
+	"mcp_endpoints":   {"token_encrypted"}, // 900077 (module mcp_attribution)
+	"tenant_api_keys": {"created_by"},      // 900077 (module mcp_attribution)
 }
 
-const expectedSQLiteMigrationVersion = 29
+// 900077 = develop module mcp_attribution (migrations/modules/mcp_attribution/sqlite);
+// core sqlite stream (main) currently ends at 000029.
+const expectedSQLiteMigrationVersion = 900077
 
 func TestSQLiteMigrationsCreateVersionedSchema(t *testing.T) {
 	repoRoot := sqliteRepoRoot(t)

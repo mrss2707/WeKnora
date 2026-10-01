@@ -33,8 +33,12 @@ type TenantAPIKey struct {
 	LastUsedAt   *time.Time  `json:"last_used_at,omitempty"`
 	ExpiresAt    *time.Time  `json:"expires_at,omitempty"`
 	RevokedAt    *time.Time  `json:"revoked_at,omitempty" gorm:"index"`
-	CreatedAt    time.Time   `json:"created_at"`
-	UpdatedAt    time.Time   `json:"updated_at"`
+	// CreatedBy is the user id of the human who created this key (empty for
+	// machine/synthetic creators). Used to attribute memory saves made over MCP
+	// with this key back to a real user.
+	CreatedBy string    `json:"created_by,omitempty" gorm:"type:varchar(36);not null;default:''"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
 type APIKeyScopeType string

@@ -50,7 +50,7 @@ func TestMCPServerRoutesAreMountedAndReported(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	engine := gin.New()
 	srv := mcpserver.NewServer(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
-	RegisterMCPServerRoutes(engine, srv, &stubMCPEndpointServiceForRoutes{}, nil)
+	RegisterMCPServerRoutes(engine, srv, &stubMCPEndpointServiceForRoutes{}, nil, nil)
 
 	routes := map[string]bool{}
 	for _, r := range engine.Routes() {

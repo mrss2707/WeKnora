@@ -95,7 +95,7 @@ func (s *ScopedMemoryV2Service) Save(
 	result, err := s.service.SaveMemory(ctx, &types.AgentMemory{
 		TenantID:  scope.TenantID,
 		KbID:      scope.KnowledgeBaseID,
-		UserID:    "",
+		UserID:    types.HumanUserIDOrEmpty(ctx),
 		Content:   content,
 		SessionID: strings.TrimSpace(sessionID),
 	})

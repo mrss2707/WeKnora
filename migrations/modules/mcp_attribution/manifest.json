@@ -1,0 +1,16 @@
+{
+  "module": "mcp_attribution",
+  "owner": "develop branch (MCP token auto-fill + memory user attribution)",
+  "backend": "postgres+sqlite",
+  "reserved_range": "900000-909999",
+  "migrations": [
+    "postgres/900077_mcp_token_and_api_key_owner.up.sql",
+    "sqlite/900077_mcp_token_and_api_key_owner.up.sql"
+  ],
+  "prerequisites": [
+    "PostgreSQL",
+    "mcp_endpoints and tenant_api_keys tables (core)"
+  ],
+  "rollback_policy": "Down migration bundled; re-runs are idempotent (ADD COLUMN IF NOT EXISTS).",
+  "upgrade_guide": "See README.md."
+}
