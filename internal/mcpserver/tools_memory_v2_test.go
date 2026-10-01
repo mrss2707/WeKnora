@@ -46,7 +46,7 @@ func newMemoryToolTestEngine(t *testing.T, ep *types.MCPEndpoint, memory interfa
 	for _, kb := range kbs {
 		kbService.kbs[kb.ID] = kb
 	}
-	srv := NewServer(kbService, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	srv := newMemoryToolsTestServer(kbService, nil, nil)
 	if err := RegisterMemoryV2Tools(srv, memory); err != nil {
 		t.Fatalf("register Memory V2 tools: %v", err)
 	}
@@ -155,9 +155,9 @@ func TestMemoryToolsRejectForeignOwnerSharedKnowledgeBase(t *testing.T) {
 		Tools: types.StringArray{types.MCPEndpointToolMemoryRecall}, KnowledgeBaseIDs: types.StringArray{"kb-shared"},
 	}
 	kbService := &stubKBService{kbs: map[string]*types.KnowledgeBase{"kb-shared": shared}}
-	srv := NewServer(kbService, nil, nil, nil, nil, nil, nil,
+	srv := newMemoryToolsTestServer(kbService,
 		&stubKBShareService{shared: map[string]types.OrgMemberRole{"kb-shared": types.OrgRoleViewer}},
-		&stubTenantService{tenants: map[uint64]*types.Tenant{2: {ID: 2}}}, nil, nil, nil, nil)
+		&stubTenantService{tenants: map[uint64]*types.Tenant{2: {ID: 2}}})
 	if err := RegisterMemoryV2Tools(srv, memory); err != nil {
 		t.Fatal(err)
 	}
@@ -174,4 +174,15 @@ func TestMemoryToolsRejectForeignOwnerSharedKnowledgeBase(t *testing.T) {
 	if !isError || !strings.Contains(text, "owned by another workspace") {
 		t.Fatalf("shared-owner memory must be rejected: error=%v text=%s", isError, text)
 	}
+}
+
+// newMemoryToolsTestServer isolates the NewServer constructor signature (which
+// main extends over time) from the Memory V2 tool tests: only the services these
+// tests exercise are passed, everything else is nil.
+func newMemoryToolsTestServer(
+	kb interfaces.KnowledgeBaseService,
+	share interfaces.KBShareService,
+	tenant interfaces.TenantService,
+) *Server {
+	return NewServer(kb, nil, nil, nil, nil, nil, nil, share, tenant, nil, nil, nil, nil)
 }
