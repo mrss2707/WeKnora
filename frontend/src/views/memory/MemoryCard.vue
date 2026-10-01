@@ -14,7 +14,7 @@
 
     <!-- Card header: type icon + date -->
     <div class="card-header">
-      <div class="card-type-icon" :title="$t(`memory.types.${memory.memory_type}`)">
+      <div class="card-type-icon" :style="{ color: typeColor }" :title="$t(`memory.types.${memory.memory_type}`)">
         <t-icon :name="typeIcon" size="18px" />
       </div>
       <span class="card-date">{{ formattedDate }}</span>
@@ -51,24 +51,22 @@
         />
       </div>
 
-      <!-- Verdict badge -->
-      <t-tag
-        :class="['verdict-badge', `verdict-${memory.verdict}`]"
-        size="small"
-        variant="light"
-      >
-        {{ $t(`memory.verdicts.${memory.verdict || 'none'}`) }}
-      </t-tag>
+      <!-- Verdict badge: Soft pill -->
+      <span :class="['verdict-soft-pill', `verdict-${memory.verdict || 'none'}`]">
+        <t-icon :name="verdictIcon" size="12px" class="verdict-icon" />
+        <span>{{ $t(`memory.verdicts.${memory.verdict || 'none'}`) }}</span>
+      </span>
 
-      <!-- Tier label -->
-      <t-tag
+      <!-- Tier label: Outline pill -->
+      <t-tooltip
         v-if="memory.tier !== undefined && memory.tier !== null"
-        size="small"
-        variant="outline"
-        class="tier-badge"
+        :content="tierTooltip"
+        placement="top"
       >
-        {{ $t(`memory.tiers.${memory.tier}`) }}
-      </t-tag>
+        <span :class="['tier-outline-pill', `tier-${memory.tier}`]">
+          <span>{{ $t(`memory.tiers.${memory.tier}`) }}</span>
+        </span>
+      </t-tooltip>
 
       <!-- Stale indicator -->
       <t-tooltip v-if="isStale" :content="$t('memory.card.staleTitle', { days: staleDays })">
@@ -134,6 +132,41 @@ const typeIcon = computed(() => {
     fact: 'info-circle',
   }
   return iconMap[props.memory.memory_type] || 'memory'
+})
+
+const TYPE_COLORS: Record<string, string> = {
+  episodic: '#1890ff',
+  semantic: '#52c41a',
+  procedural: '#fa8c16',
+  decision: '#722ed1',
+  preference: '#eb2f96',
+  fact: '#8c8c8c',
+}
+
+const typeColor = computed(() => {
+  return TYPE_COLORS[props.memory.memory_type] || '#8c8c8c'
+})
+
+const verdictIcon = computed(() => {
+  const map: Record<string, string> = {
+    decision: 'lock-on',
+    fixed: 'check-circle',
+    gotcha: 'error-circle',
+    wip: 'time',
+    refuted: 'close-circle',
+    none: 'minus-circle',
+  }
+  return map[props.memory.verdict || 'none'] || 'minus-circle'
+})
+
+const tierTooltip = computed(() => {
+  const map: Record<number, string> = {
+    0: 'Bậc 0 (Mỗi lượt): Luôn được đưa vào context của Agent trong mọi lượt trò chuyện',
+    1: 'Bậc 1 (Tình huống): Kích hoạt khi câu hỏi hoặc bối cảnh cuộc trò chuyện có liên quan',
+    2: 'Bậc 2 (Chủ đề thường gặp): Mối quan tâm dài hạn, chỉ kích hoạt khi chạm ngưỡng tần suất',
+    3: 'Bậc 3 (Theo dõi trước): Thu thập & đếm tần suất lặp lại trước, chưa kích hoạt trực tiếp',
+  }
+  return map[props.memory.tier ?? -1] || `Bậc ${props.memory.tier}`
 })
 </script>
 
@@ -243,32 +276,78 @@ const typeIcon = computed(() => {
   }
 }
 
-.verdict-badge {
+.verdict-soft-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   font-size: 11px;
+  font-weight: 500;
+  padding: 2px 7px;
+  border-radius: 12px;
+  line-height: 16px;
+  white-space: nowrap;
 
-  &.verdict-refuted {
-    --td-tag-color: var(--td-error-color, #e34d59);
+  .verdict-icon {
+    flex-shrink: 0;
   }
 
   &.verdict-decision {
-    --td-tag-color: var(--td-brand-color, #0052d9);
+    background: rgba(114, 46, 209, 0.12);
+    color: #722ed1;
   }
-
   &.verdict-fixed {
-    --td-tag-color: var(--td-success-color, #00a870);
+    background: rgba(0, 168, 112, 0.12);
+    color: #00885a;
   }
-
   &.verdict-gotcha {
-    --td-tag-color: var(--td-warning-color, #ed7b2f);
+    background: rgba(237, 123, 47, 0.12);
+    color: #d46b08;
   }
-
   &.verdict-wip {
-    --td-tag-color: var(--td-info-color, #4094f7);
+    background: rgba(24, 144, 255, 0.12);
+    color: #096dd9;
+  }
+  &.verdict-refuted {
+    background: rgba(227, 77, 89, 0.12);
+    color: #cf1322;
+  }
+  &.verdict-none {
+    background: var(--td-bg-color-secondarycontainer, rgba(0, 0, 0, 0.04));
+    color: var(--td-text-color-placeholder, #8c8c8c);
   }
 }
 
-.tier-badge {
+.tier-outline-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
   font-size: 11px;
+  font-weight: 500;
+  padding: 1px 6px;
+  border-radius: 4px;
+  line-height: 16px;
+  background: transparent;
+  white-space: nowrap;
+  cursor: help;
+  transition: all 0.2s ease;
+
+  &.tier-0 {
+    border: 1px solid #d48806;
+    color: #d48806;
+    font-weight: 600;
+  }
+  &.tier-1 {
+    border: 1px solid #096dd9;
+    color: #096dd9;
+  }
+  &.tier-2 {
+    border: 1px solid #597ef7;
+    color: #597ef7;
+  }
+  &.tier-3 {
+    border: 1px dashed var(--td-text-color-placeholder, #bfbfbf);
+    color: var(--td-text-color-placeholder, #8c8c8c);
+  }
 }
 
 .stale-badge {

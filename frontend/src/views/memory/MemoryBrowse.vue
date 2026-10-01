@@ -82,7 +82,7 @@
           :title="$t('memory.browse.viewModeTable')"
           @click="memoryStore.viewMode = 'table'"
         >
-          <t-icon name="list" />
+          <t-icon name="view-list" />
         </t-button>
       </div>
     </div>
@@ -187,11 +187,16 @@
           />
         </template>
 
-        <!-- Type column -->
+        <!-- Type column: Colored Icon + Text -->
         <template #memory_type="{ row }">
           <div class="table-type-cell">
-            <t-icon :name="tableTypeIcon(row.memory_type)" size="14px" />
-            <span>{{ $t(`memory.types.${row.memory_type}`) }}</span>
+            <t-icon
+              :name="tableTypeIcon(row.memory_type)"
+              :style="{ color: typeColor(row.memory_type) }"
+              size="15px"
+              class="type-icon-glyph"
+            />
+            <span class="type-name">{{ $t(`memory.types.${row.memory_type}`) }}</span>
           </div>
         </template>
 
@@ -202,15 +207,12 @@
           </div>
         </template>
 
-        <!-- Verdict column -->
+        <!-- Verdict column: Soft Background Tint + Icon -->
         <template #verdict="{ row }">
-          <t-tag
-            :class="['verdict-badge', `verdict-${row.verdict || 'none'}`]"
-            size="small"
-            variant="light"
-          >
-            {{ $t(`memory.verdicts.${row.verdict || 'none'}`) }}
-          </t-tag>
+          <span :class="['verdict-soft-pill', `verdict-${row.verdict || 'none'}`]">
+            <t-icon :name="verdictIcon(row.verdict)" size="12px" class="verdict-icon" />
+            <span>{{ $t(`memory.verdicts.${row.verdict || 'none'}`) }}</span>
+          </span>
         </template>
 
         <!-- Importance column -->
@@ -239,6 +241,19 @@
             </t-tag>
             <span v-if="row.tags.length > 3" class="table-tags-more">+{{ row.tags.length - 3 }}</span>
           </div>
+        </template>
+
+        <!-- Tier column: Outline Border + Text -->
+        <template #tier="{ row }">
+          <t-tooltip
+            v-if="row.tier !== undefined && row.tier !== null"
+            :content="tierTooltip(row.tier)"
+            placement="top"
+          >
+            <span :class="['tier-outline-pill', `tier-${row.tier}`]">
+              <span>{{ $t(`memory.tiers.${row.tier}`) }}</span>
+            </span>
+          </t-tooltip>
         </template>
 
         <!-- Stale column -->
@@ -336,12 +351,12 @@ const displayMemories = computed(() => {
 // -----------------------------------------------------------------------
 const tableColumns = computed(() => [
   { colKey: 'selection', width: 40, cell: 'selection' },
-  { colKey: 'memory_type', title: t('memory.browse.table.type'), width: 100, cell: 'memory_type' },
+  { colKey: 'memory_type', title: t('memory.browse.table.type'), width: 120, cell: 'memory_type' },
   { colKey: 'content', title: t('memory.browse.table.content'), minWidth: 200, cell: 'content', ellipsis: true },
-  { colKey: 'verdict', title: t('memory.browse.table.verdict'), width: 90, cell: 'verdict' },
-  { colKey: 'importance', title: t('memory.browse.table.importance'), width: 80, cell: 'importance' },
+  { colKey: 'verdict', title: t('memory.browse.table.verdict'), width: 110, cell: 'verdict' },
+  { colKey: 'importance', title: t('memory.browse.table.importance'), width: 85, cell: 'importance' },
   { colKey: 'tags', title: t('memory.browse.table.tags'), width: 140, cell: 'tags' },
-  { colKey: 'tier', title: t('memory.browse.table.tier'), width: 60 },
+  { colKey: 'tier', title: t('memory.browse.table.tier'), width: 110, cell: 'tier' },
   { colKey: 'stale', title: '', width: 50, cell: 'stale' },
   { colKey: 'created_at', title: t('memory.browse.table.date'), width: 100, cell: 'created_at' },
 ])
@@ -359,6 +374,41 @@ function tableTypeIcon(type: string): string {
     fact: 'info-circle',
   }
   return map[type] || 'memory'
+}
+
+const TYPE_COLORS: Record<string, string> = {
+  episodic: '#1890ff',
+  semantic: '#52c41a',
+  procedural: '#fa8c16',
+  decision: '#722ed1',
+  preference: '#eb2f96',
+  fact: '#8c8c8c',
+}
+
+function typeColor(type: string): string {
+  return TYPE_COLORS[type] || '#8c8c8c'
+}
+
+function verdictIcon(verdict: string): string {
+  const map: Record<string, string> = {
+    decision: 'lock-on',
+    fixed: 'check-circle',
+    gotcha: 'error-circle',
+    wip: 'time',
+    refuted: 'close-circle',
+    none: 'minus-circle',
+  }
+  return map[verdict] || 'minus-circle'
+}
+
+function tierTooltip(tier: number): string {
+  const map: Record<number, string> = {
+    0: 'Bậc 0 (Mỗi lượt): Luôn được đưa vào context của Agent trong mọi lượt trò chuyện',
+    1: 'Bậc 1 (Tình huống): Kích hoạt khi câu hỏi hoặc bối cảnh cuộc trò chuyện có liên quan',
+    2: 'Bậc 2 (Chủ đề thường gặp): Mối quan tâm dài hạn, chỉ kích hoạt khi chạm ngưỡng tần suất',
+    3: 'Bậc 3 (Theo dõi trước): Thu thập & đếm tần suất lặp lại trước, chưa kích hoạt trực tiếp',
+  }
+  return map[tier] || `Bậc ${tier}`
 }
 
 function isMemoryStale(memory: AgentMemory): boolean {
@@ -530,10 +580,20 @@ async function handleBulkDelete() {
   }
 
   .table-type-cell {
-    display: flex;
+    display: inline-flex;
     align-items: center;
-    gap: 4px;
-    font-size: 12px;
+    gap: 6px;
+    font-size: 13px;
+
+    .type-icon-glyph {
+      flex-shrink: 0;
+      transition: transform 0.15s ease;
+    }
+
+    .type-name {
+      color: var(--td-text-color-primary);
+      font-weight: 500;
+    }
   }
 
   .table-content-cell {
@@ -572,23 +632,81 @@ async function handleBulkDelete() {
   }
 }
 
-.verdict-badge {
+// -----------------------------------------------------------------------
+// Visual forms: Verdict (Soft pill) & Tier (Outline pill)
+// -----------------------------------------------------------------------
+.verdict-soft-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   font-size: 11px;
+  font-weight: 500;
+  padding: 2px 8px;
+  border-radius: 12px;
+  line-height: 18px;
+  white-space: nowrap;
 
-  &.verdict-refuted {
-    --td-tag-color: var(--td-error-color, #e34d59);
+  .verdict-icon {
+    flex-shrink: 0;
   }
+
   &.verdict-decision {
-    --td-tag-color: var(--td-brand-color, #0052d9);
+    background: rgba(114, 46, 209, 0.12);
+    color: #722ed1;
   }
   &.verdict-fixed {
-    --td-tag-color: var(--td-success-color, #00a870);
+    background: rgba(0, 168, 112, 0.12);
+    color: #00885a;
   }
   &.verdict-gotcha {
-    --td-tag-color: var(--td-warning-color, #ed7b2f);
+    background: rgba(237, 123, 47, 0.12);
+    color: #d46b08;
   }
   &.verdict-wip {
-    --td-tag-color: var(--td-info-color, #4094f7);
+    background: rgba(24, 144, 255, 0.12);
+    color: #096dd9;
+  }
+  &.verdict-refuted {
+    background: rgba(227, 77, 89, 0.12);
+    color: #cf1322;
+  }
+  &.verdict-none {
+    background: var(--td-bg-color-secondarycontainer, rgba(0, 0, 0, 0.04));
+    color: var(--td-text-color-placeholder, #8c8c8c);
+  }
+}
+
+.tier-outline-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  font-weight: 500;
+  padding: 1px 7px;
+  border-radius: 4px;
+  line-height: 18px;
+  background: transparent;
+  white-space: nowrap;
+  cursor: help;
+  transition: all 0.2s ease;
+
+  &.tier-0 {
+    border: 1px solid #d48806;
+    color: #d48806;
+    font-weight: 600;
+    box-shadow: 0 0 0 1px rgba(212, 136, 6, 0.15);
+  }
+  &.tier-1 {
+    border: 1px solid #096dd9;
+    color: #096dd9;
+  }
+  &.tier-2 {
+    border: 1px solid #597ef7;
+    color: #597ef7;
+  }
+  &.tier-3 {
+    border: 1px dashed var(--td-text-color-placeholder, #bfbfbf);
+    color: var(--td-text-color-placeholder, #8c8c8c);
   }
 }
 

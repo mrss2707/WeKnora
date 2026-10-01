@@ -101,6 +101,12 @@ function closeMemoryDrawer() {
   memoryDrawerVisible.value = false
   selectedMemory.value = null
 }
+function handleMemoryUpdate(updated: AgentMemory) {
+  const idx = memoryStore.memories.findIndex((m) => m.id === updated.id)
+  if (idx !== -1) {
+    memoryStore.memories[idx] = { ...memoryStore.memories[idx], ...updated }
+  }
+}
 const kbId = computed(() => (route.params as any).kbId as string || '');
 const kbInfo = ref<any>(null);
 const uploadSourceRef = ref<InstanceType<typeof KbUploadSourceDropdown> | null>(null);
@@ -2302,7 +2308,12 @@ const handleKBEditorSuccess = (kbIdValue: string) => {
             <MemoryHealth  v-if="memoryStore.activeSubTab === 'health'"  :kb-id="kbId" @critical-issues-changed="hasCriticalIssues = $event" />
             <MemoryHistory v-if="memoryStore.activeSubTab === 'history'" :kb-id="kbId" />
           </KeepAlive>
-          <MemoryDrawer v-model:visible="memoryDrawerVisible" :memory="selectedMemory" @close="closeMemoryDrawer" />
+          <MemoryDrawer
+            v-model:visible="memoryDrawerVisible"
+            :memory="selectedMemory"
+            @close="closeMemoryDrawer"
+            @update="handleMemoryUpdate"
+          />
         </div>
       </template>
 

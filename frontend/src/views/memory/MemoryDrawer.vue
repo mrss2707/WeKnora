@@ -5,12 +5,12 @@
     size="560px"
     placement="right"
     destroy-on-close
+    :footer="false"
     :close-btn="true"
     @close="handleClose"
-    @visible-change="onVisibleChange"
   >
     <!-- Loading state -->
-    <div v-if="loading" class="drawer-loading">
+    <div v-if="loading && !localMemory" class="drawer-loading">
       <t-loading :text="$t('memory.drawer.loading')" size="large" />
     </div>
 
@@ -211,15 +211,18 @@
         <span v-else class="drawer-empty-text">{{ $t('memory.drawer.noHistory') }}</span>
       </div>
     </template>
+    <div v-else class="drawer-empty-placeholder" style="padding: 40px; text-align: center; color: var(--td-text-color-secondary);">
+      <t-empty :description="$t('memory.browse.empty')" />
+    </div>
   </t-drawer>
 </template>
 
 <script setup lang="ts">
 import { computed, ref, watch, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
-import type { AgentMemory, MemoryRelation, MemoryLintIssue, MemoryVerdict, TimelineEvent } from '@/api/memory/index'
+import type { AgentMemory, MemoryRelation, MemoryLintIssue, MemoryVerdict, TimelineEvent, UpdateMemoryRequest } from '@/api/memory/index'
 import { MEMORY_VERDICTS, isVerdictProtected } from '@/api/memory/index'
-import { getMemory } from '@/api/memory/index'
+import { getMemory, updateMemory } from '@/api/memory/index'
 import { MessagePlugin } from 'tdesign-vue-next'
 
 const props = defineProps<{
@@ -231,6 +234,7 @@ const props = defineProps<{
 }>()
 
 const emit = defineEmits<{
+  'update:visible': [visible: boolean]
   close: []
   update: [memory: AgentMemory]
   'view-in-graph': [relation: MemoryRelation]
@@ -244,6 +248,7 @@ const { t } = useI18n()
 const drawerVisible = computed({
   get: () => props.visible,
   set: (val) => {
+    emit('update:visible', val)
     if (!val) handleClose()
   },
 })
@@ -288,37 +293,62 @@ const isProtectedVerdict = computed(() => {
 async function loadMemoryDetails() {
   if (!props.memory) return
 
+  if (!localMemory.value) {
+    localMemory.value = { ...props.memory }
+  }
+
   loading.value = true
   try {
     const resp = await getMemory(props.memory.id)
-    if (resp.data) {
-      localMemory.value = { ...resp.data }
+    const memData = (resp as any)?.data?.data ?? (resp as any)?.data ?? resp
+    if (memData && typeof memData === 'object' && 'id' in memData) {
+      localMemory.value = { ...memData }
     } else {
       localMemory.value = { ...props.memory }
     }
   } catch {
     // Fallback to the prop data if API fails
-    localMemory.value = { ...props.memory }
+    if (!localMemory.value) {
+      localMemory.value = { ...props.memory }
+    }
   } finally {
     loading.value = false
-  }
-}
-
-function onVisibleChange(visible: boolean) {
-  if (visible) {
-    // Reset local state
-    relations.value = props.relations || []
-    lintIssues.value = props.lintIssues || []
-    historyTimeline.value = props.historyEvents || []
-    showTagInput.value = false
-    newTag.value = ''
-    loadMemoryDetails()
   }
 }
 
 // -----------------------------------------------------------------------
 // Watchers for prop changes
 // -----------------------------------------------------------------------
+watch(
+  () => props.visible,
+  (val) => {
+    if (val && props.memory) {
+      localMemory.value = { ...props.memory }
+      relations.value = props.relations || []
+      lintIssues.value = props.lintIssues || []
+      historyTimeline.value = props.historyEvents || []
+      showTagInput.value = false
+      newTag.value = ''
+      loadMemoryDetails()
+    } else if (!val) {
+      localMemory.value = null
+      showTagInput.value = false
+      newTag.value = ''
+    }
+  },
+  { immediate: true }
+)
+
+watch(
+  () => props.memory,
+  (newMem) => {
+    if (newMem && props.visible) {
+      localMemory.value = { ...newMem }
+      loadMemoryDetails()
+    }
+  }
+)
+
 watch(
   () => props.relations,
   (val) => {
@@ -341,39 +371,53 @@ watch(
 )
 
 // -----------------------------------------------------------------------
+// Persist patch to backend
+// -----------------------------------------------------------------------
+async function persistMemoryPatch(patch: UpdateMemoryRequest) {
+  if (!localMemory.value) return
+  try {
+    const resp = await updateMemory(localMemory.value.id, patch)
+    const updated = (resp as any)?.data?.data ?? (resp as any)?.data ?? resp
+    if (updated && typeof updated === 'object' && 'id' in updated) {
+      localMemory.value = { ...localMemory.value, ...updated }
+    }
+    emitUpdate()
+  } catch (err: any) {
+    MessagePlugin.error(err?.message || t('common.saveFailed') || 'Failed to update memory')
+  }
+}
+
+// -----------------------------------------------------------------------
 // Verdict change
 // -----------------------------------------------------------------------
-function handleVerdictChange(verdict: MemoryVerdict) {
+async function handleVerdictChange(verdict: MemoryVerdict) {
   if (!localMemory.value) return
   if (isVerdictProtected(localMemory.value.verdict)) {
     MessagePlugin.warning(t('memory.drawer.verdictProtected'))
     return
   }
   localMemory.value.verdict = verdict
-  emitUpdate()
+  await persistMemoryPatch({ verdict })
 }
 
 // -----------------------------------------------------------------------
 // Tier change
 // -----------------------------------------------------------------------
-function handleTierChange(tier: number) {
+async function handleTierChange(tier: number) {
   if (!localMemory.value) return
   localMemory.value.tier = tier
-  emitUpdate()
+  await persistMemoryPatch({ tier })
 }
 
 // -----------------------------------------------------------------------
 // Importance change
 // -----------------------------------------------------------------------
-function handleImportanceClick(importance: number) {
+async function handleImportanceClick(importance: number) {
   if (!localMemory.value) return
   // Clicking the same value toggles it off (set to 0), otherwise set to clicked value
-  if (localMemory.value.importance === importance && importance === 1) {
-    localMemory.value.importance = 0
-  } else {
-    localMemory.value.importance = importance
-  }
-  emitUpdate()
+  const newImportance = (localMemory.value.importance === importance && importance === 1) ? 0 : importance
+  localMemory.value.importance = newImportance
+  await persistMemoryPatch({ importance: newImportance })
 }
 
 // -----------------------------------------------------------------------
@@ -388,7 +432,7 @@ function showAddTagInput() {
   })
 }
 
-function handleAddTag() {
+async function handleAddTag() {
   const tag = newTag.value.trim()
   if (tag && localMemory.value) {
     if (!localMemory.value.tags) {
@@ -396,17 +440,17 @@ function handleAddTag() {
     }
     if (!localMemory.value.tags.includes(tag)) {
       localMemory.value.tags.push(tag)
-      emitUpdate()
+      await persistMemoryPatch({ tags: [...localMemory.value.tags] })
     }
   }
   showTagInput.value = false
   newTag.value = ''
 }
 
-function handleRemoveTag(idx: number) {
+async function handleRemoveTag(idx: number) {
   if (!localMemory.value?.tags) return
   localMemory.value.tags.splice(idx, 1)
-  emitUpdate()
+  await persistMemoryPatch({ tags: [...localMemory.value.tags] })
 }
 
 // -----------------------------------------------------------------------
@@ -425,6 +469,7 @@ function handleClose() {
   showTagInput.value = false
   newTag.value = ''
   loading.value = false
+  emit('update:visible', false)
   emit('close')
 }
 
