@@ -79,7 +79,7 @@ export interface McpEndpointToken {
   retrievable: boolean
 }
 
-/** Owner-only: returns the decrypted endpoint bearer token for config auto-fill. */
+/** Admin-only (same guard as rotate-token): returns the decrypted endpoint bearer token for config auto-fill. */
 export function getMcpEndpointToken(id: string) {
   return get<Envelope<McpEndpointToken>>(`/api/v1/mcp-endpoints/${id}/token`)
 }
