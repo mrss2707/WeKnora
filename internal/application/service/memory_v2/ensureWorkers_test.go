@@ -274,3 +274,8 @@ func TestEnsureWorkers_GetEmbeddingModelFails(t *testing.T) {
 	assert.Nil(t, svc.entityExtractor, "entityExtractor should not be created when GetEmbeddingModel fails")
 	assert.Nil(t, svc.consolidator, "consolidator should not be created when GetEmbeddingModel fails")
 }
+
+// CopyModel satisfies main's interfaces.ModelService (unused by these tests).
+func (m *mockModelService) CopyModel(ctx context.Context, sourceID, displayName string) (*types.Model, error) {
+	return nil, nil
+}

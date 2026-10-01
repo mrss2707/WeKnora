@@ -564,3 +564,8 @@ func TestServiceLifecycleModelServiceFake_ListError(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "catalog down")
 }
+
+// CopyModel satisfies main's interfaces.ModelService (unused by these tests).
+func (m *serviceLifecycleModelServiceFake) CopyModel(ctx context.Context, sourceID, displayName string) (*types.Model, error) {
+	return nil, nil
+}

@@ -1,6 +1,7 @@
 package service
 
 import (
+	"errors"
 	"context"
 	"sort"
 
@@ -197,4 +198,19 @@ func (s *modelServiceWithFallback) GetASRModel(ctx context.Context, modelID stri
 	logger.Infof(ctx, "[ModelFallback] GetASRModel falling back from %s to %s (%s)",
 		modelID, fallback.ID, fallback.Name)
 	return s.inner.GetASRModel(ctx, fallback.ID)
+}
+
+// modelCopier is the CopyModel capability of main's interfaces.ModelService.
+// It is asserted at runtime so this decorator compiles both before and after
+// main's interface change is merged.
+type modelCopier interface {
+	CopyModel(ctx context.Context, sourceID, displayName string) (*types.Model, error)
+}
+
+// CopyModel is forwarded to the base service.
+func (s *modelServiceWithFallback) CopyModel(ctx context.Context, sourceID, displayName string) (*types.Model, error) {
+	if c, ok := s.inner.(modelCopier); ok {
+		return c.CopyModel(ctx, sourceID, displayName)
+	}
+	return nil, errors.New("wrapped model service does not support CopyModel")
 }
