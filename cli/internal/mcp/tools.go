@@ -122,16 +122,7 @@ type sessionAskService interface {
 	AgentQAStreamWithRequest(ctx context.Context, sessionID string, req *sdk.AgentQARequest, cb sdk.AgentEventCallback, opts ...sdk.ResourceURLOptions) error
 }
 
-// memoryService is the narrow surface the memory_* tools depend on.
-type memoryService interface {
-	SearchMemories(ctx context.Context, kbID, query string, limit int, memoryType, sessionID string, minScore float64) ([]sdk.MemorySearchResult, error)
-	CreateMemory(ctx context.Context, req *sdk.CreateMemoryRequest) (*sdk.SaveMemoryResult, error)
-	GetMemoryGraph(ctx context.Context, id, kbID string) (*sdk.MemoryGraphResult, error)
-	GetMemoryStatus(ctx context.Context) (*sdk.MemoryStatusResult, error)
-	GetMemory(ctx context.Context, id string) (*sdk.AgentMemory, error)
-}
-
-// registerTools wires the curated 15 tools onto server. Adding a tool here
+// registerTools wires the curated 10 tools onto server. Adding a tool here
 // is a deliberate API expansion - the agent-callable surface is the
 // reason this CLI ships an MCP server, not its CLI command list, so this
 // list must be maintained by hand.
@@ -154,11 +145,6 @@ func registerTools(server *mcpsdk.Server, svc ServiceClient) {
 	addAgentList(server, svc)
 	addSessionAsk(server, svc)
 	addChunkList(server, svc)
-	addMemoryRecall(server, svc)
-	addMemorySave(server, svc)
-	addMemoryGraph(server, svc)
-	addMemoryDetail(server, svc)
-	addMemoryStatus(server, svc)
 }
 
 // ---- kb_list -------------------------------------------------------------
