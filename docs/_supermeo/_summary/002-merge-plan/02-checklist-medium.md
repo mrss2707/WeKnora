@@ -46,6 +46,8 @@ Rủi ro cao hơn 5 file trên vì `main` viết lại toàn bộ nội dung `co
 - **Việc cần làm**: test riêng embed bundle (`frontend/src/i18n/embedLocale.test.ts`, file mới của `main`) sau merge.
 
 ## `cli/internal/mcp/server.go`
+> **[2026-10-01] Đã xử lý:** `cli/` đã reset về main nên mục này không còn conflict (không cần resolve).
+
 `develop`: sửa comment số lượng tool + thêm field `memoryService` vào interface `ServiceClient`. `main`: thêm import `sdk "github.com/Tencent/WeKnora/client"` + static assertion `var _ ServiceClient = (*sdk.Client)(nil)`.
 - **Resolve**: union cả 2 — giữ field `memoryService` của develop, giữ static assertion của main, cập nhật lại số lượng tool trong comment cho khớp con số thật hiện tại (đếm lại, không giữ nguyên số cũ của bên nào).
 - **Việc cần làm**: `go build ./cli/...`, xác nhận static assertion `var _ ServiceClient = (*sdk.Client)(nil)` vẫn pass compile (tức `sdk.Client` có implement đủ field/method mới bao gồm `memoryService` nếu assertion yêu cầu — kiểm tra kỹ vì đây là compile-time check, lỗi sẽ chặn build ngay).

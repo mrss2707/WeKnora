@@ -1,10 +1,10 @@
 /**
  * The shared, project-agnostic WeKnora Memory Protocol instruction.
  *
- * This mirrors `GenerateRules()` in `cli/internal/memory/rules.go` so the web UI
- * shows exactly what the CLI injects into an agent's project file. Keep the two
- * in sync: the instruction is agent-facing, English-only, and carries no KB id
- * or token (those live in the MCP setting).
+ * This file is the single source of truth (the Go CLI that used to generate it
+ * has been removed from develop). The instruction is agent-facing, English-only
+ * and carries no KB id or token (those live in the MCP setting). Guarded by
+ * `memoryProtocolInstruction.test.ts`.
  */
 export const MEMORY_PROTOCOL_INSTRUCTION = `<!-- WEKNORA_MEMORY_PROTOCOL -->
 ## WeKnora Memory Protocol

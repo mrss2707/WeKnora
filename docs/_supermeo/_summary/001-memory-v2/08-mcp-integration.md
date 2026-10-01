@@ -1,5 +1,7 @@
 # 08 — MCP & Agent Integration
 
+> **[2026-10-01] Lỗi thời:** Go CLI (`cli/`), hooks `weknora memory hook` và `mcp-server/` Python đã được reset về main; Memory V2 chỉ đi qua built-in HTTP MCP. Các phần nhắc CLI/hooks bên dưới chỉ còn giá trị lịch sử.
+
 > Memory v2 Module | Last Update: 2026-07-09
 
 ## 1. Vấn đề: MCP Tool không có KB Context

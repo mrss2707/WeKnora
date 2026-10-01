@@ -15,6 +15,8 @@
 
 **Types** — new types in `internal/types/<name>.go` (+ `internal/types/interfaces/<name>.go`). Adding a field to a shared struct is OK. Never splice into order-sensitive shared literals (e.g. `types.Pipeline["chat_history_stream"]`); use an `append`/builder helper the module owns.
 
+**Do not touch `cli/` or `mcp-server/` on develop** (reset to main; Memory V2 is delivered via the built-in HTTP MCP, the web UI's `memoryProtocolInstruction.ts` is the only protocol copy).
+
 **Files main may also add** — use a distinct name (e.g. `client/memory_v2.go`, not `memory.go`) to avoid add/add conflicts.
 
 **Frontend** — new files only: `stores/<m>.ts`, `api/<m>/`, `views/<m>/`. Editing an existing screen: keep to the minimal hand-wired spots (for a KB tab in `KnowledgeBase.vue`: imports, `subTabs`, `validTabs`, 2 breadcrumb blocks, content switch). Top-level page: one entry in `frontend/src/router/index.ts`.
