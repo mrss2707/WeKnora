@@ -184,5 +184,5 @@ func newMemoryToolsTestServer(
 	share interfaces.KBShareService,
 	tenant interfaces.TenantService,
 ) *Server {
-	return NewServer(kb, nil, nil, nil, nil, nil, nil, share, tenant, nil, nil, nil, nil)
+	return NewServer(kb, nil, nil, nil, nil, nil, nil, share, tenant, nil, nil, nil, nil, nil, nil, nil)
 }

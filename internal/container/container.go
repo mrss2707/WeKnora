@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -16,6 +17,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	modelruntime "github.com/Tencent/WeKnora/internal/models/runtime"
 
 	sqlite_vec "github.com/asg017/sqlite-vec-go-bindings/cgo"
 	_ "github.com/duckdb/duckdb-go/v2"
@@ -85,11 +88,9 @@ import (
 	"github.com/Tencent/WeKnora/internal/mcp"
 	"github.com/Tencent/WeKnora/internal/mcpserver"
 	"github.com/Tencent/WeKnora/internal/models/api"
-	"github.com/Tencent/WeKnora/internal/models/catalog"
 	"github.com/Tencent/WeKnora/internal/models/embedding"
-	"github.com/Tencent/WeKnora/internal/models/limiter"
+	"github.com/Tencent/WeKnora/internal/models/limiter" // register built-in vendors
 	"github.com/Tencent/WeKnora/internal/models/utils/ollama"
-	_ "github.com/Tencent/WeKnora/internal/models/vendors" // register built-in vendors
 	"github.com/Tencent/WeKnora/internal/router"
 	"github.com/Tencent/WeKnora/internal/sandbox"
 	"github.com/Tencent/WeKnora/internal/storageallowlist"
@@ -114,9 +115,8 @@ import (
 //   - Configured container with all application dependencies registered
 func BuildContainer(container *dig.Container) *dig.Container {
 	// Deployment-level model catalog overlay (config/models.json, optional).
-	// Built-in vendors register themselves through the vendors package
-	// import; the overlay may add vendors or patch built-in ones.
-	if err := catalog.LoadOverlay(config.ConfigDir()); err != nil {
+	// Register providers explicitly, then validate and publish one catalog generation.
+	if err := modelruntime.Initialize(config.ConfigDir()); err != nil {
 		logger.Warnf(context.Background(), "Load models catalog overlay failed: %v", err)
 	}
 	ctx := context.Background()
@@ -173,6 +173,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(repository.NewUserRepository))
 	must(container.Provide(repository.NewAuthTokenRepository))
 	must(container.Provide(repository.NewSystemSettingRepository))
+	must(container.Provide(repository.NewModelCatalogRepository))
 	must(container.Provide(neo4jRepo.NewNeo4jRepository))
 	// Cross-session memory (main) — single gated choice point; a no-op unless
 	// config cross_session_memory is enabled. Wired in cross_session_memory.go.
@@ -201,6 +202,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	// MCP manager for managing MCP client connections
 	logger.Debugf(ctx, "[Container] Registering MCP manager...")
 	must(container.Provide(mcp.NewMCPManager))
+	must(container.Invoke(registerMCPCleanup))
 	must(container.Provide(mcp.NewOAuthManager))
 
 	// Sandbox manager fallback is disabled; executable backends are resolved
@@ -250,6 +252,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(service.NewEvaluationService))
 	must(container.Provide(service.NewUserService))
 	must(container.Provide(service.NewSystemSettingService))
+	must(container.Provide(service.NewModelCatalogService))
 	must(container.Provide(func(
 		repo repository.TenantSandboxConfigRepository,
 		agents interfaces.CustomAgentRepository,
@@ -368,7 +371,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 		pinner *service.SessionSandboxPinner,
 		host service.HostSandboxManager,
 	) *service.HostSessionResolver {
-		return service.NewHostSessionResolver(pinner, host.Manager)
+		return service.NewHostSessionResolver(pinner, host.Manager, host.Desktop)
 	}))
 	must(container.Provide(func(
 		mgr sandbox.Manager,
@@ -623,6 +626,14 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	// persistence succeeded immediately before trigger enqueue failed). Re-arm
 	// them only after the matching handlers are ready.
 	must(container.Invoke(recoverPendingWikiTasks))
+
+	// BrowserSkill is registered when its manager is constructed, which is
+	// early, so reverse-order cleanup would run it last. Force the manager
+	// to exist, then run that hook first so a slow cron stop cannot leave
+	// the daemon alive until the process is killed.
+	must(container.Invoke(func(cleaner interfaces.ResourceCleaner, _ *browserskill.Manager) {
+		cleaner.Promote("BrowserSkill")
+	}))
 
 	logger.Infof(ctx, "[Container] Container initialization completed successfully")
 	return container
@@ -934,7 +945,7 @@ func initDatabase(cfg *config.Config) (*gorm.DB, error) {
 		// Post-migration: declarative built-in models from config/builtin_models.yaml (optional).
 		// The loader validates each row's catalog parameters through this hook;
 		// the wiring lives here because internal/types cannot import the catalog.
-		types.ValidateModelParameters = catalog.ValidateRow
+		types.ValidateModelParameters = modelruntime.ValidateRow
 		if err := types.LoadBuiltinModelsConfig(context.Background(), db, config.ConfigDir()); err != nil {
 			logger.Warnf(context.Background(), "Load builtin models config failed: %v", err)
 		}
@@ -1305,6 +1316,36 @@ func initRawFileService(_ *config.Config) (interfaces.FileService, error) {
 // Returns:
 //   - Configured retrieval engine registry
 //   - Error if initialization fails
+//
+// newEnvQdrantClient builds the env-configured qdrant client, refusing a host
+// whitelist-only mode does not admit before the client exists.
+//
+// These two clients are the one outbound path the dial-time guard cannot
+// cover: gRPC resolves its own target through its dns resolver before calling
+// any dialer, so by the time a dialer sees the address the name is gone and
+// the query has already happened. Judging the configured name here is what
+// keeps a non-whitelisted vector store host from ever being resolved (#3378).
+func newEnvQdrantClient(host string, port int, apiKey string, useTLS bool) (*qdrant.Client, error) {
+	if err := secutils.CheckSSRFWhitelistOnly(host); err != nil {
+		return nil, err
+	}
+	return qdrant.NewClient(&qdrant.Config{Host: host, Port: port, APIKey: apiKey, UseTLS: useTLS})
+}
+
+// newEnvMilvusClient is newEnvQdrantClient's twin for the env-configured
+// milvus client; its address carries the port, which the whitelist never
+// matches on.
+func newEnvMilvusClient(ctx context.Context, cfg *milvusclient.ClientConfig) (*milvusclient.Client, error) {
+	host := cfg.Address
+	if h, _, err := net.SplitHostPort(host); err == nil {
+		host = h
+	}
+	if err := secutils.CheckSSRFWhitelistOnly(host); err != nil {
+		return nil, err
+	}
+	return milvusclient.New(ctx, cfg)
+}
+
 func initRetrieveEngineRegistry(
 	db *gorm.DB, cfg *config.Config, auditSvc interfaces.AuditLogService,
 	storeRepo interfaces.VectorStoreRepository, engineFactory interfaces.EngineFactory,
@@ -1433,12 +1474,7 @@ func initRetrieveEngineRegistry(
 
 		log.Infof("Connecting to Qdrant at %s:%d (TLS: %v)", qdrantHost, qdrantPort, qdrantUseTLS)
 
-		client, err := qdrant.NewClient(&qdrant.Config{
-			Host:   qdrantHost,
-			Port:   qdrantPort,
-			APIKey: qdrantAPIKey,
-			UseTLS: qdrantUseTLS,
-		})
+		client, err := newEnvQdrantClient(qdrantHost, qdrantPort, qdrantAPIKey, qdrantUseTLS)
 		if err != nil {
 			log.Errorf("Create qdrant client failed: %v", err)
 		} else {
@@ -1518,7 +1554,7 @@ func initRetrieveEngineRegistry(
 		if milvusDBName != "" {
 			milvusCfg.DBName = milvusDBName
 		}
-		milvusCli, err := milvusclient.New(context.Background(), &milvusCfg)
+		milvusCli, err := newEnvMilvusClient(context.Background(), &milvusCfg)
 		if err != nil {
 			log.Errorf("Create milvus client failed: %v", err)
 		} else {
@@ -1696,6 +1732,15 @@ func registerLangfuseCleanup(mgr *langfuse.Manager, cleaner interfaces.ResourceC
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		return mgr.Shutdown(ctx)
+	})
+}
+
+// registerMCPCleanup closes MCP connections on shutdown, so remote servers see
+// their sessions end instead of waiting for them to time out.
+func registerMCPCleanup(mgr *mcp.MCPManager, cleaner interfaces.ResourceCleaner) {
+	cleaner.RegisterWithName("MCPManager", func() error {
+		mgr.Shutdown()
+		return nil
 	})
 }
 
@@ -1916,7 +1961,7 @@ func startDataSourceScheduler(scheduler *datasource.Scheduler, cleaner interface
 	}
 
 	cleaner.RegisterWithName("DataSourceScheduler", func() error {
-		scheduler.Stop()
+		scheduler.StopWithin(cleanupStepTimeout)
 		return nil
 	})
 }
@@ -1934,7 +1979,7 @@ func startHousekeepingService(svc *service.HousekeepingService, cleaner interfac
 		logger.Warnf(context.Background(), "[Container] housekeeping start failed: %v", err)
 	}
 	cleaner.RegisterWithName("KnowledgeHousekeeping", func() error {
-		svc.Stop()
+		svc.StopWithin(cleanupStepTimeout)
 		return nil
 	})
 }
@@ -1950,7 +1995,7 @@ func startTenantSkillReaper(svc *service.TenantSkillService, cleaner interfaces.
 		logger.Warnf(context.Background(), "[Container] tenant skill reaper start failed: %v", err)
 	}
 	cleaner.RegisterWithName("TenantSkillReaper", func() error {
-		svc.Stop()
+		svc.StopWithin(cleanupStepTimeout)
 		return nil
 	})
 }
@@ -2026,7 +2071,7 @@ func startAuditLogRetention(
 ) {
 	runner.Start(context.Background())
 	cleaner.RegisterWithName("AuditLogRetentionRunner", func() error {
-		runner.Stop()
+		runner.StopWithin(cleanupStepTimeout)
 		return nil
 	})
 }

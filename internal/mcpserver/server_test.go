@@ -65,7 +65,7 @@ func newTestEngineWithRepo(t *testing.T, ep *types.MCPEndpoint) (*gin.Engine, *r
 	t.Helper()
 	gin.SetMode(gin.TestMode)
 	repo := &recordingEndpointRepo{touched: make(chan string, 8)}
-	srv := NewServer(nil, nil, nil, nil, nil, nil, nil, nil, nil, repo, nil, nil, nil)
+	srv := NewServer(nil, nil, nil, nil, nil, nil, nil, nil, nil, repo, nil, nil, nil, nil, nil, nil)
 	if err := RegisterMemoryV2Tools(srv, stubScopedMemoryV2{}); err != nil {
 		t.Fatalf("register Memory V2 tools: %v", err)
 	}
