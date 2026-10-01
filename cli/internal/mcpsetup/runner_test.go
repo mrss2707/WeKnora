@@ -10,7 +10,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestRunDefaultComponentsWritesLegacyFullSetup(t *testing.T) {
+func TestRunDefaultComponentsWritesMCPAndRulesWithoutHooks(t *testing.T) {
 	dir := t.TempDir()
 
 	err := Run(dir, []string{"claude-code"}, Options{
@@ -21,7 +21,9 @@ func TestRunDefaultComponentsWritesLegacyFullSetup(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.FileExists(t, filepath.Join(dir, ".mcp.json"))
-	assert.FileExists(t, filepath.Join(dir, ".claude", "settings.json"))
+	// Option A: lifecycle hooks are opt-in, so the default run must not write
+	// the hook file (.claude/settings.json for Claude Code).
+	assert.NoFileExists(t, filepath.Join(dir, ".claude", "settings.json"))
 	assert.FileExists(t, filepath.Join(dir, "CLAUDE.md"))
 
 	env := readWeknoraEnv(t, filepath.Join(dir, ".mcp.json"))
@@ -121,7 +123,9 @@ func TestRunRulesOnlyWritesRules(t *testing.T) {
 	data, err := os.ReadFile(filepath.Join(dir, "CLAUDE.md"))
 	require.NoError(t, err)
 	assert.Contains(t, string(data), "WEKNORA_MEMORY_PROTOCOL")
-	assert.Contains(t, string(data), "kb_abc")
+	// The instruction is shared/generic: the KB lives in the MCP setting, not here.
+	assert.Contains(t, string(data), "list_knowledge_bases")
+	assert.NotContains(t, string(data), "kb_abc")
 }
 
 func TestRunDryRunDoesNotWriteFiles(t *testing.T) {

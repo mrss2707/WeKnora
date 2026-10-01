@@ -26,10 +26,14 @@ type Options struct {
 	Components    []Component
 }
 
-// DefaultComponents preserves the historical setup behavior for non-interactive
-// and flag-driven runs.
+// DefaultComponents returns the components a non-interactive or flag-driven run
+// writes. Lifecycle hooks are opt-in (Option A): the memory protocol is
+// agent-driven via the instruction plus MCP tools, and the hook scripts shell
+// out to the weknora CLI binary, so they silently break in CLI-less setups.
+// Users who still want automatic capture can select "Memory lifecycle hooks"
+// explicitly.
 func DefaultComponents() []Component {
-	return []Component{ComponentMCP, ComponentMemoryHooks, ComponentMemoryRules}
+	return []Component{ComponentMCP, ComponentMemoryRules}
 }
 
 // NormalizeComponents de-duplicates valid components while preserving order.

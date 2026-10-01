@@ -45,7 +45,6 @@ func RunInteractiveSetup() (InteractiveResult, error) {
 	var result InteractiveResult
 	var selectedComponents = []string{
 		string(ComponentMCP),
-		string(ComponentMemoryHooks),
 		string(ComponentMemoryRules),
 	}
 
@@ -64,7 +63,7 @@ func RunInteractiveSetup() (InteractiveResult, error) {
 				}),
 			huh.NewMultiSelect[string]().
 				Title("Select WeKnora integration components").
-				Description("Defaults match the legacy full setup.").
+				Description("Memory is agent-driven via the instruction + MCP tools; lifecycle hooks are optional.").
 				Options(
 					huh.NewOption("MCP server config", string(ComponentMCP)),
 					huh.NewOption("Memory lifecycle hooks", string(ComponentMemoryHooks)),

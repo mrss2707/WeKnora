@@ -75,7 +75,7 @@ func setupPlatform(cwd, platformName string, kbIDs []string, serverURL, apiKey, 
 	}
 
 	if hasComponent(components, ComponentMemoryRules) {
-		if err := writeRules(cwd, platform, kbIDs, dryRun); err != nil {
+		if err := writeRules(cwd, platform, dryRun); err != nil {
 			return err
 		}
 	}
@@ -154,13 +154,13 @@ func writeHooks(cwd string, platform memoryinternal.Platform, serverURL, apiKey 
 	return nil
 }
 
-func writeRules(cwd string, platform memoryinternal.Platform, kbIDs []string, dryRun bool) error {
-	if err := memoryinternal.WriteRulesFile(platform.RulesFilePath(cwd), kbIDs, dryRun); err != nil {
+func writeRules(cwd string, platform memoryinternal.Platform, dryRun bool) error {
+	if err := memoryinternal.WriteRulesFile(platform.RulesFilePath(cwd), dryRun); err != nil {
 		return cmdutil.Wrapf(cmdutil.CodeLocalFileIO, err, "write rules file")
 	}
 	if extra, ok := platform.(memoryinternal.ExtraRulesPlatform); ok {
 		for _, p := range extra.ExtraRulesPaths(cwd) {
-			if err := memoryinternal.WriteRulesFile(p, kbIDs, dryRun); err != nil {
+			if err := memoryinternal.WriteRulesFile(p, dryRun); err != nil {
 				return cmdutil.Wrapf(cmdutil.CodeLocalFileIO, err, "write extra rules file")
 			}
 		}

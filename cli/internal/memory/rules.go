@@ -10,19 +10,27 @@ const (
 	rulesMarkerEnd   = "<!-- /WEKNORA_MEMORY_PROTOCOL -->"
 )
 
-// GenerateRules returns the memory protocol rules markdown block for the current locale.
-// Multiple KB IDs are supported; each appears in a per-KB recall line.
-// An empty slice emits a "No KBs linked yet" placeholder.
-// The block is wrapped in HTML comment markers for idempotent injection.
-func GenerateRules(kbIDs []string) string {
-	locale := CurrentLocale()
-	var content string
-	switch locale {
-	case LocaleEnUS:
-		content = enUSRules(kbIDs)
-	default:
-		content = viVNRules(kbIDs)
-	}
+// GenerateRules returns the memory protocol rules markdown block.
+//
+// The block is agent-facing system-prompt content, always emitted in English:
+// instruction-following is markedly more reliable in English, and the consumer
+// is the model, not the human. It targets the built-in HTTP MCP server (the
+// go-forward surface) and uses the knowledge_base_id parameter.
+//
+// The instruction is deliberately generic and shared across every project. The
+// knowledge base and access token are declared in the MCP setting (the endpoint
+// scope / .mcp.json), not baked into the text, so one copy works everywhere and
+// never goes stale when a project's KB changes. Agents resolve the KB at runtime
+// from the MCP scope via list_knowledge_bases and pass it as knowledge_base_id.
+//
+// Design note: the text is written to work for both weaker models (DeepSeek,
+// MiMo, GLM — which need explicit triggers, numbered steps, templates and a
+// self-check) and stronger models (Opus, GPT — which skim the core loop and
+// apply judgment). Concrete rules and a quality gate serve the former without
+// over-constraining the latter. Wrapped in HTML comment markers for idempotent
+// injection.
+func GenerateRules() string {
+	content := rulesContent()
 	return fmt.Sprintf("%s\n%s\n%s", rulesMarkerStart, strings.TrimSpace(content), rulesMarkerEnd)
 }
 
@@ -33,91 +41,53 @@ func HasMemoryProtocolRules(content string) bool {
 
 // InjectRules appends the rules block to the file content. If the marker already exists,
 // returns the content unchanged (idempotent).
-func InjectRules(existingContent string, kbIDs []string) string {
+func InjectRules(existingContent string) string {
 	if HasMemoryProtocolRules(existingContent) {
 		return existingContent
 	}
-	rules := GenerateRules(kbIDs)
+	rules := GenerateRules()
 	if existingContent == "" {
 		return rules + "\n"
 	}
 	return strings.TrimRight(existingContent, "\n") + "\n\n" + rules + "\n"
 }
 
-func enUSRules(kbIDs []string) string {
-	linkedKBs := "(none)"
-	var recallLines string
-	if len(kbIDs) > 0 {
-		linkedKBs = strings.Join(kbIDs, ", ")
-		var parts []string
-		for _, id := range kbIDs {
-			parts = append(parts, fmt.Sprintf("`memory_recall(kb_id=\"%s\", query=\"<2-4 keywords>\")`", id))
-		}
-		recallLines = strings.Join(parts, " and\n")
-	} else {
-		recallLines = "`memory_recall(kb_id=\"<your-kb-id>\", query=\"<2-4 keywords>\")`"
-	}
-
+// rulesContent is the shared, project-agnostic protocol. It carries no KB ids or
+// tokens; the <kb> placeholder is resolved by the agent from the MCP setting.
+func rulesContent() string {
 	return fmt.Sprintf(`## WeKnora Memory Protocol
 
-Linked KBs: %s
+Long-term memory is provided by the ` + "`weknora`" + ` MCP tools. Call these tools yourself — nothing is injected automatically. Goal: reuse context across sessions and write back durable knowledge; never narrate the current task.
 
-### Recall
-At session start or when switching topics:
-%s to load relevant context.
-For complex questions: `+"`memory_recall(...)`"+` before researching.
-Skip recall for: simple answers, basic commands, known facts.
+**KB scope:** the knowledge base is configured in your ` + "`weknora`" + ` MCP setting, not in this file. Call ` + "`list_knowledge_bases`" + ` once to read its ` + "`id`" + `/` + "`name`" + `, then pass that value as ` + "`knowledge_base_id`" + ` (written ` + "`<kb>`" + ` below) in every memory call.
 
-### Save
-After research with no matching memory → `+"`memory_save`"+` BEFORE answering.
-Bug fixed → memory_type=episodic, importance=high (cause + solution).
-Architectural decision → memory_type=decision, importance=high.
-Tags: concept-based (auth, api, database). NO file names. Max 8 tags.
+**Core loop: Recall → answer → Save anything durable that was not already in memory.**
 
-### Graph
-Check for duplicates or contradictions: `+"`memory_graph(memory_id=\"<id>\")`"+`.
-Before editing a memory: `+"`memory_graph(...)`"+` to see relationships.
+### 1. Recall — before you answer
+**Trigger** (any one): session started, topic changed, or a non-trivial question/task.
+**Action:** ` + "`memory_recall(knowledge_base_id=\"<kb>\", query=\"<2-4 keywords>\")`" + `
+Then ` + "`memory_detail(knowledge_base_id=\"<kb>\", memory_id=\"<id>\")`" + ` to read any memory in full.
+**Skip only for:** greetings, one-line replies, simple commands, or facts already in the current context.
 
-### Status
-Verify backend health: `+"`memory_status()`"+` at session start.
-If unavailable → skip memory operations, report to user.`, linkedKBs, recallLines)
-}
+### 2. Save — before you answer (write-back)
+**Trigger:** you learned something durable this turn **and** recall found no matching memory.
+**Action:** ` + "`memory_save(knowledge_base_id=\"<kb>\", content=\"...\")`" + ` **before** you reply.
+Write content in the right shape:
+- Bug fixed → ` + "`cause`" + ` + ` + "`fix`" + `.
+- Decision → ` + "`choice`" + ` + ` + "`why`" + `.
+- Stable fact / preference / constraint → the fact, concrete and specific.
+**Never save:** secrets or credentials; transient task state; anything already in code, docs, or context; small talk.
+**Quality gate** — all four must hold:
+1. One idea per memory.
+2. Self-contained: readable without this conversation.
+3. Concrete: real names, values, causes — not vague.
+4. Future-useful: a later session would benefit.
+**Tags:** concept words (` + "`auth`" + `, ` + "`api`" + `, ` + "`db`" + `), never file names, max 8. The system derives memory type and importance automatically — write good content and do not pass ` + "`memory_type`" + ` or ` + "`importance`" + `.
 
-func viVNRules(kbIDs []string) string {
-	linkedKBs := "(không có)"
-	var recallLines string
-	if len(kbIDs) > 0 {
-		linkedKBs = strings.Join(kbIDs, ", ")
-		var parts []string
-		for _, id := range kbIDs {
-			parts = append(parts, fmt.Sprintf("`memory_recall(kb_id=\"%s\", query=\"<2-4 từ khóa>\")`", id))
-		}
-		recallLines = strings.Join(parts, " và\n")
-	} else {
-		recallLines = "`memory_recall(kb_id=\"<your-kb-id>\", query=\"<2-4 từ khóa>\")`"
-	}
+### 3. Graph — before you duplicate or edit
+**Trigger:** about to save something similar to an existing memory, or to edit one.
+**Action:** ` + "`memory_graph(knowledge_base_id=\"<kb>\", memory_id=\"<id>\")`" + ` → check for duplicate, supersedes, or contradiction.
 
-	return fmt.Sprintf(`## WeKnora Memory Protocol
-
-Linked KBs: %s
-
-### Thu hồi (Recall)
-Đầu phiên hoặc khi đổi chủ đề:
-%s → tải context liên quan.
-Với câu hỏi phức tạp: `+"`memory_recall(...)`"+` trước khi nghiên cứu.
-Bỏ qua recall cho: câu trả lời đơn giản, lệnh cơ bản, sự kiện đã biết.
-
-### Lưu (Save)
-Sau khi nghiên cứu không có memory khớp → `+"`memory_save`"+` TRƯỚC KHI trả lời.
-Bug đã sửa → memory_type=episodic, importance=high (nguyên nhân + giải pháp).
-Quyết định kiến trúc → memory_type=decision, importance=high.
-Tags: dựa trên khái niệm (auth, api, database). KHÔNG dùng tên file. Tối đa 8 tags.
-
-### Đồ thị (Graph)
-Kiểm tra trùng lặp hoặc mâu thuẫn: `+"`memory_graph(memory_id=\"<id>\")`"+`.
-Trước khi sửa memory: `+"`memory_graph(...)`"+` để xem quan hệ.
-
-### Trạng thái (Status)
-Xác minh backend: `+"`memory_status()`"+` đầu phiên.
-Nếu không khả dụng → bỏ qua thao tác memory, báo cho người dùng.`, linkedKBs, recallLines)
+### 4. Status — at session start
+**Action:** ` + "`memory_status()`" + `. If it reports unavailable, skip memory operations and tell the user.`)
 }

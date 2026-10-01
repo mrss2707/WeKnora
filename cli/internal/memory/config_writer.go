@@ -276,9 +276,11 @@ func hasWeknoraInNestedHooks(hooks map[string]any) bool {
 
 // ----- Rules file -----
 
-// WriteRulesFile writes the memory protocol rules block to rulesPath.
-// Idempotent: skips if the WEKNORA_MEMORY_PROTOCOL marker is already present.
-func WriteRulesFile(rulesPath string, kbIDs []string, dryRun bool) error {
+// WriteRulesFile writes the shared memory protocol rules block to rulesPath.
+// The block is project-agnostic: the KB and token live in the MCP setting, so
+// nothing here is parameterized per project. Idempotent: skips if the
+// WEKNORA_MEMORY_PROTOCOL marker is already present.
+func WriteRulesFile(rulesPath string, dryRun bool) error {
 	if dryRun {
 		fmt.Fprintf(os.Stderr, "%s %s\n", T("setup.dry_run"), rulesPath)
 		return nil
@@ -291,7 +293,7 @@ func WriteRulesFile(rulesPath string, kbIDs []string, dryRun bool) error {
 	}
 
 	fmt.Fprintf(os.Stderr, "%s\n", fmt.Sprintf(T("setup.writing_rules"), rulesPath))
-	newContent := InjectRules(string(existing), kbIDs)
+	newContent := InjectRules(string(existing))
 	if err := os.MkdirAll(filepath.Dir(rulesPath), 0755); err != nil {
 		return fmt.Errorf("create rules dir %s: %w", filepath.Dir(rulesPath), err)
 	}

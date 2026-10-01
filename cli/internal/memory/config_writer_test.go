@@ -221,7 +221,7 @@ func TestWriteRulesFile_Idempotent(t *testing.T) {
 	path := filepath.Join(dir, "CLAUDE.md")
 
 	// First write
-	err := WriteRulesFile(path, []string{"kb_test"}, false)
+	err := WriteRulesFile(path, false)
 	require.NoError(t, err)
 
 	data, err := os.ReadFile(path)
@@ -230,7 +230,7 @@ func TestWriteRulesFile_Idempotent(t *testing.T) {
 
 	// Second write should be idempotent (no change)
 	firstContent := string(data)
-	err = WriteRulesFile(path, []string{"kb_test"}, false)
+	err = WriteRulesFile(path, false)
 	require.NoError(t, err)
 	data2, _ := os.ReadFile(path)
 	assert.Equal(t, firstContent, string(data2))
@@ -240,7 +240,7 @@ func TestWriteRulesFile_DryRun(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "CLAUDE.md")
 
-	err := WriteRulesFile(path, []string{"kb_test"}, true)
+	err := WriteRulesFile(path, true)
 	require.NoError(t, err)
 
 	// Dry run should not create file
