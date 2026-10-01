@@ -8,6 +8,7 @@ var supportedLocales = map[string]struct{}{
 	"ko-KR": {},
 	"ja-JP": {},
 	"ru-RU": {},
+	"vi-VN": {}, // develop: Vietnamese is a first-class locale
 }
 
 // NormalizeSupportedLocale returns a trimmed, supported locale tag or an empty
