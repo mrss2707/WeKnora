@@ -124,8 +124,6 @@ func main() {
 			}
 
 			logger.Info(context.Background(), "Cleaning up resources...")
-			logger.Info(context.Background(), "Stopping Memory V2 background workers...")
-			memV2.Cleanup()
 			errs := resourceCleaner.Cleanup(shutdownCtx)
 			if len(errs) > 0 {
 				logger.Errorf(context.Background(), "Errors occurred during resource cleanup: %v", errs)
