@@ -112,3 +112,51 @@ func latestVersionedMigration(t *testing.T, root string) int {
 	}
 	return latest
 }
+
+// TestPostgresTwoStreamMigrationsAndLegacyConversion checks, on a real
+// PostgreSQL, that core and module migrations keep separate version tables and
+// that a database left on the former single counter (a module version in
+// schema_migrations) is converted exactly once.
+func TestPostgresTwoStreamMigrationsAndLegacyConversion(t *testing.T) {
+	dsn := os.Getenv("WEKNORA_MIGRATION_TEST_POSTGRES_DSN")
+	if dsn == "" {
+		t.Skip("set WEKNORA_MIGRATION_TEST_POSTGRES_DSN to run PostgreSQL migration tests")
+	}
+	chdirAndRestore(t, sqliteRepoRoot(t))
+	ctx := context.Background()
+
+	db, err := sql.Open("postgres", dsn)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = db.Close() })
+	// Start from an empty schema so the test is repeatable.
+	_, err = db.ExecContext(ctx, `DROP SCHEMA public CASCADE; CREATE SCHEMA public;`)
+	require.NoError(t, err)
+
+	require.NoError(t, RunMigrationsWithOptions(dsn, MigrationOptions{}))
+
+	var coreV, modV int
+	require.NoError(t, db.QueryRowContext(ctx, `SELECT version FROM schema_migrations`).Scan(&coreV))
+	require.NoError(t, db.QueryRowContext(ctx, `SELECT version FROM schema_migrations_modules`).Scan(&modV))
+	require.Less(t, coreV, int(moduleRangeMin))
+	require.GreaterOrEqual(t, modV, int(moduleRangeMin))
+
+	// Re-create the former layout: one counter holding the module version.
+	_, err = db.ExecContext(ctx, `DROP TABLE schema_migrations_modules`)
+	require.NoError(t, err)
+	_, err = db.ExecContext(ctx, `UPDATE schema_migrations SET version = $1, dirty = false`, modV)
+	require.NoError(t, err)
+
+	require.NoError(t, migrateLegacySingleVersionTable(ctx, db, BackendPostgres))
+
+	var rewound, carried int
+	require.NoError(t, db.QueryRowContext(ctx, `SELECT version FROM schema_migrations`).Scan(&rewound))
+	require.NoError(t, db.QueryRowContext(ctx, `SELECT version FROM schema_migrations_modules`).Scan(&carried))
+	require.Equal(t, int(legacyCoreBaselinePostgres), rewound)
+	require.Equal(t, modV, carried)
+
+	// The core stream must now apply everything above the baseline that exists
+	// in the tree (a no-op on develop until main's newer migrations are merged).
+	require.NoError(t, runMigrationStream(dsn, MigrationOptions{}, BackendPostgres, StreamCore))
+	require.NoError(t, db.QueryRowContext(ctx, `SELECT version FROM schema_migrations`).Scan(&rewound))
+	require.Equal(t, coreV, rewound)
+}

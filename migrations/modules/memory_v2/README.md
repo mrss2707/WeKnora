@@ -26,8 +26,9 @@ ascending order, with duplicate-version rejection.
 ## Backend scoping
 
 These files apply to the `postgres` backend only. SQLite/Lite mode never reads
-this directory (`migrations/sqlite/` keeps its own stream — verify with
-`./scripts/migrate.sh validate --sqlite`).
+this directory (Lite reads `migrations/modules/<name>/sqlite/` and
+`migrations/sqlite/`, each with its own version table — verify with
+`./scripts/migrate.sh validate sqlite`).
 
 ## Runtime default
 
@@ -53,16 +54,17 @@ backing up if the column width must be normalized in place.
 
 ## Upgrading existing databases
 
-- Rows `76`..(module versions) already present in `schema_migrations` are kept
-  as-is; 900073–900076 re-run safely on the next `up` (every statement is
-  idempotent: `CREATE TABLE IF NOT EXISTS`, `ADD COLUMN IF NOT EXISTS`,
-  `CREATE INDEX IF NOT EXISTS`).
-- A database currently at version ≤ 76 would otherwise SKIP the core
-  migrations 000073–000076 coming from `main`. Handle once:
-  `./scripts/migrate.sh force 72 && ./scripts/migrate.sh up`
-  (all files are idempotent — verified: `main` 000073 uses
-  `ADD COLUMN IF NOT EXISTS`).
-- Fresh databases need no action.
+Module migrations are tracked in their own table, `schema_migrations_modules`,
+separate from main's `schema_migrations` (core). A database still on the former
+single counter (module version in `schema_migrations`) is converted
+automatically once at startup: module progress moves to
+`schema_migrations_modules` and the core counter is rewound to the baseline so
+core migrations added by `main` are applied (see
+`internal/database/migration_legacy.go`). No manual `force` is needed.
+
+Every module statement is idempotent (`CREATE TABLE IF NOT EXISTS`,
+`ADD COLUMN IF NOT EXISTS`, `CREATE INDEX IF NOT EXISTS`), so re-running is
+safe. Fresh databases need no action.
 
 ## Rollback
 

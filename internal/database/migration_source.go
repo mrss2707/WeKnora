@@ -44,6 +44,24 @@ const (
 	moduleRangeMax = uint(909999)
 )
 
+// MigrationStream selects which part of a backend's migration set is assembled.
+// Core (main-owned) and module (develop-owned) migrations are applied as two
+// independent streams with their own version tables, so a module version in the
+// reserved range can never mask newer core migrations that arrive from main.
+type MigrationStream string
+
+const (
+	// StreamAll assembles core and module files together. It is only used for
+	// validation (duplicates, ranges, pairs across the whole set).
+	StreamAll MigrationStream = "all"
+	// StreamCore assembles main's migrations only (migrations/versioned or
+	// migrations/sqlite).
+	StreamCore MigrationStream = "core"
+	// StreamModules assembles develop-only module migrations only
+	// (migrations/modules/<name>/<backend>).
+	StreamModules MigrationStream = "modules"
+)
+
 // ErrInvalidMigrationSet is the fail-closed sentinel: assembling the source
 // failed (bad name, duplicate version, out-of-range module file, missing
 // pair). Application startup treats this error as fatal because the schema
@@ -98,10 +116,17 @@ func defaultMigrationRoots() migrationRoots {
 	}
 }
 
-// NewCompositeMigrationSource assembles the migration source for a backend
-// using the default repository layout.
+// NewCompositeMigrationSource assembles the whole (core + module) migration set
+// for a backend using the default repository layout. Used to validate the set;
+// migrations are applied per stream via NewMigrationStreamSource.
 func NewCompositeMigrationSource(backend MigrationBackend) (source.Driver, error) {
 	return assembleSource(backend, defaultMigrationRoots())
+}
+
+// NewMigrationStreamSource assembles a single stream (core or modules) for a
+// backend using the default repository layout.
+func NewMigrationStreamSource(backend MigrationBackend, stream MigrationStream) (source.Driver, error) {
+	return assembleStream(backend, defaultMigrationRoots(), stream)
 }
 
 // ValidateMigrationSet assembles the set for the given backend and reports
@@ -117,9 +142,15 @@ func ValidateMigrationSet(backend string) error {
 	return err
 }
 
-// assembleSource walks the layout for the backend and returns an ordered,
-// duplicate-rejecting source, or ErrInvalidMigrationSet with all problems.
+// assembleSource assembles the whole (core + module) set for a backend.
 func assembleSource(backend MigrationBackend, roots migrationRoots) (source.Driver, error) {
+	return assembleStream(backend, roots, StreamAll)
+}
+
+// assembleStream walks the layout for the backend and returns an ordered,
+// duplicate-rejecting source for the requested stream, or ErrInvalidMigrationSet
+// with all problems.
+func assembleStream(backend MigrationBackend, roots migrationRoots, stream MigrationStream) (source.Driver, error) {
 	files := make(map[uint]compositeVersion)
 	var problems []string
 
@@ -217,13 +248,23 @@ func assembleSource(backend MigrationBackend, roots migrationRoots) (source.Driv
 		}
 	}
 
+	wantCore := stream == StreamAll || stream == StreamCore
+	wantModules := stream == StreamAll || stream == StreamModules
 	switch backend {
 	case BackendPostgres:
-		scanDir(roots.versioned, "core")
-		scanModules(BackendPostgres)
+		if wantCore {
+			scanDir(roots.versioned, "core")
+		}
+		if wantModules {
+			scanModules(BackendPostgres)
+		}
 	case BackendSQLite:
-		scanDir(roots.sqlite, "sqlite")
-		scanModules(BackendSQLite)
+		if wantCore {
+			scanDir(roots.sqlite, "sqlite")
+		}
+		if wantModules {
+			scanModules(BackendSQLite)
+		}
 	default:
 		problems = append(problems, fmt.Sprintf("unsupported migration backend %q", backend))
 	}
@@ -251,7 +292,7 @@ func assembleSource(backend MigrationBackend, roots migrationRoots) (source.Driv
 	}
 	sort.Slice(versions, func(i, j int) bool { return versions[i].version < versions[j].version })
 
-	return &compositeSource{versions: versions, index: index, name: string(backend)}, nil
+	return &compositeSource{versions: versions, index: index, name: string(backend) + "/" + string(stream)}, nil
 }
 
 // Open is part of source.Driver. The composite source is built in memory and

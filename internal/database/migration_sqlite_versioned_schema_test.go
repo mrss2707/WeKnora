@@ -66,9 +66,12 @@ var versionedSQLiteColumns = map[string][]string{
 	"tenant_api_keys": {"created_by"},      // 900077 (module mcp_attribution)
 }
 
-// 900077 = develop module mcp_attribution (migrations/modules/mcp_attribution/sqlite);
-// core sqlite stream (main) currently ends at 000029.
-const expectedSQLiteMigrationVersion = 900077
+const expectedSQLiteMigrationVersion = 29
+
+// Develop-only module stream (migrations/modules/*/sqlite) lives in its own
+// version table, so it never interferes with expectedSQLiteMigrationVersion
+// above (main's core stream). 900077 = module mcp_attribution.
+const expectedSQLiteModuleMigrationVersion = 900077
 
 func TestSQLiteMigrationsCreateVersionedSchema(t *testing.T) {
 	repoRoot := sqliteRepoRoot(t)
@@ -80,6 +83,9 @@ func TestSQLiteMigrationsCreateVersionedSchema(t *testing.T) {
 	db := openSQLiteDB(t, dbPath)
 	version, dirty := sqliteMigrationState(t, db)
 	require.Equal(t, expectedSQLiteMigrationVersion, version)
+	moduleVersion, moduleDirty := sqliteModuleMigrationState(t, db)
+	require.False(t, moduleDirty)
+	require.Equal(t, expectedSQLiteModuleMigrationVersion, moduleVersion)
 	require.False(t, dirty)
 
 	for _, table := range versionedSQLiteTables {
@@ -231,6 +237,12 @@ func openSQLiteDB(t *testing.T, dbPath string) *sql.DB {
 func sqliteMigrationState(t *testing.T, db *sql.DB) (version int, dirty bool) {
 	t.Helper()
 	require.NoError(t, db.QueryRow("SELECT version, dirty FROM schema_migrations").Scan(&version, &dirty))
+	return version, dirty
+}
+
+func sqliteModuleMigrationState(t *testing.T, db *sql.DB) (version int, dirty bool) {
+	t.Helper()
+	require.NoError(t, db.QueryRow("SELECT version, dirty FROM schema_migrations_modules").Scan(&version, &dirty))
 	return version, dirty
 }
 

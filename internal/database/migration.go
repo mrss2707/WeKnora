@@ -100,25 +100,112 @@ type MigrationOptions struct {
 	SQLiteDBPath string
 }
 
-// RunMigrationsWithOptions executes all pending database migrations with custom options
+// RunMigrationsWithOptions executes all pending database migrations with custom options.
+//
+// Migrations run as two independent streams, each with its own golang-migrate
+// version table: core (main's migrations, table schema_migrations) first, then
+// develop-only modules (table schema_migrations_modules). A database still on
+// the former single-counter layout is converted once before anything runs.
 func RunMigrationsWithOptions(dsn string, opts MigrationOptions) error {
 	ctx := context.Background()
+	backend := migrationBackendForDSN(dsn)
 
-	logger.Infof(ctx, "Starting database migration...")
-
-	// Assemble the backend-aware composite migration source (fail closed on
-	// an invalid set): postgres = core versioned + module postgres streams,
-	// sqlite = migrations/sqlite only.
-	backend := BackendPostgres
-	if strings.HasPrefix(dsn, "sqlite3://") {
-		backend = BackendSQLite
+	// Fail closed on an invalid set (duplicates, bad names, out-of-range files,
+	// missing up/down pairs) before touching the database.
+	if _, err := NewCompositeMigrationSource(backend); err != nil {
+		logger.Errorf(ctx, "Failed to assemble migration set: %v", err)
+		wrapped := fmt.Errorf("failed to assemble migration set: %w", err)
+		setMigrationState(0, false, wrapped.Error(), false)
+		return wrapped
 	}
-	src, err := NewCompositeMigrationSource(backend)
+
+	if err := convertLegacyMigrationState(ctx, dsn, opts, backend); err != nil {
+		logger.Errorf(ctx, "Failed to convert legacy migration state: %v", err)
+		wrapped := fmt.Errorf("failed to convert legacy migration state: %w", err)
+		setMigrationState(0, false, wrapped.Error(), false)
+		return wrapped
+	}
+
+	if err := runMigrationStream(dsn, opts, backend, StreamCore); err != nil {
+		return err
+	}
+
+	// The system-info version stays the core stream's (as on main); a module
+	// failure only adds its error message.
+	coreVersion, coreDirty, coreKnown := CachedMigrationVersion()
+	err := runMigrationStream(dsn, opts, backend, StreamModules)
+	errMsg := ""
+	if err != nil {
+		errMsg = err.Error()
+	}
+	setMigrationState(coreVersion, coreDirty, errMsg, coreKnown)
+	return err
+}
+
+// migrationBackendForDSN picks the backend from the DSN scheme.
+func migrationBackendForDSN(dsn string) MigrationBackend {
+	if strings.HasPrefix(dsn, "sqlite3://") {
+		return BackendSQLite
+	}
+	return BackendPostgres
+}
+
+// migrationsTableFor returns the golang-migrate version table of a stream.
+func migrationsTableFor(stream MigrationStream) string {
+	if stream == StreamModules {
+		return moduleMigrationsTable
+	}
+	return coreMigrationsTable
+}
+
+// streamDSN adds the version-table parameter the postgres driver understands.
+func streamDSN(dsn string, stream MigrationStream) string {
+	if stream != StreamModules {
+		return dsn
+	}
+	sep := "?"
+	if strings.Contains(dsn, "?") {
+		sep = "&"
+	}
+	return dsn + sep + "x-migrations-table=" + moduleMigrationsTable
+}
+
+// convertLegacyMigrationState opens the database and runs the one-time
+// single-counter -> two-stream conversion (see migrateLegacySingleVersionTable).
+func convertLegacyMigrationState(ctx context.Context, dsn string, opts MigrationOptions, backend MigrationBackend) error {
+	var db *sql.DB
+	var err error
+	if opts.SQLiteDBPath != "" {
+		db, err = sql.Open("sqlite3", opts.SQLiteDBPath)
+	} else {
+		db, err = sql.Open("postgres", dsn)
+	}
+	if err != nil {
+		return fmt.Errorf("open database: %w", err)
+	}
+	defer db.Close()
+	return migrateLegacySingleVersionTable(ctx, db, backend)
+}
+
+// runMigrationStream applies all pending migrations of one stream.
+func runMigrationStream(dsn string, opts MigrationOptions, backend MigrationBackend, stream MigrationStream) error {
+	ctx := context.Background()
+
+	logger.Infof(ctx, "Starting database migration (%s stream)...", stream)
+
+	src, err := NewMigrationStreamSource(backend, stream)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to assemble migration set: %v", err)
 		wrapped := fmt.Errorf("failed to assemble migration set: %w", err)
 		setMigrationState(0, false, wrapped.Error(), false)
 		return wrapped
+	}
+
+	// A stream without any migration files (e.g. no modules for this backend)
+	// has nothing to apply and must not create an empty version table.
+	if cs, ok := src.(*compositeSource); ok && len(cs.versions) == 0 {
+		logger.Infof(ctx, "No migrations in the %s stream, skipping", stream)
+		return nil
 	}
 
 	var m *migrate.Migrate
@@ -130,7 +217,7 @@ func RunMigrationsWithOptions(dsn string, opts MigrationOptions) error {
 			setMigrationState(0, false, wrapped.Error(), false)
 			return wrapped
 		}
-		driver, err := sqlite3migrate.WithInstance(sqlDB, &sqlite3migrate.Config{})
+		driver, err := sqlite3migrate.WithInstance(sqlDB, &sqlite3migrate.Config{MigrationsTable: migrationsTableFor(stream)})
 		if err != nil {
 			sqlDB.Close()
 			logger.Errorf(ctx, "Failed to create sqlite3 migrate driver: %v", err)
@@ -146,7 +233,7 @@ func RunMigrationsWithOptions(dsn string, opts MigrationOptions) error {
 			return wrapped
 		}
 	} else {
-		m, err = migrate.NewWithSourceInstance(sourceName, src, dsn)
+		m, err = migrate.NewWithSourceInstance(sourceName, src, streamDSN(dsn, stream))
 		if err != nil {
 			logger.Errorf(ctx, "Failed to create migrate instance: %v", err)
 			wrapped := fmt.Errorf("failed to create migrate instance: %w", err)
@@ -310,8 +397,7 @@ func recoverFromDirtyState(ctx context.Context, m *migrate.Migrate, dirtyVersion
 	return nil
 }
 
-// GetMigrationVersion returns the current migration version derived from the
-// composite postgres migration set.
+// GetMigrationVersion returns the current core-stream migration version.
 func GetMigrationVersion() (uint, bool, error) {
 	dbURL := fmt.Sprintf(
 		"postgres://%s:%s@%s:%s/%s?sslmode=disable",
@@ -322,7 +408,7 @@ func GetMigrationVersion() (uint, bool, error) {
 		os.Getenv("DB_NAME"),
 	)
 
-	src, err := NewCompositeMigrationSource(BackendPostgres)
+	src, err := NewMigrationStreamSource(BackendPostgres, StreamCore)
 	if err != nil {
 		return 0, false, fmt.Errorf("failed to assemble migration set: %w", err)
 	}

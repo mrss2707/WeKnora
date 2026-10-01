@@ -2,10 +2,13 @@
 
 `main` is owned by another team; `develop` merges it often. Goal: every develop feature adds NEW files and touches shared/core files by at most 1-2 lines. Reference module: Memory V2 (`memory_v2` files below). Never edit core inline when a new file or hook can do it.
 
-**Migrations** — never in `migrations/versioned/` (main's stream; develop DB is already ≥900076, so lower core numbers are silently skipped).
-- Postgres: `migrations/modules/<name>/postgres/9NNNNN_<name>.{up,down}.sql`, range 900000-909999 (next free: 900078), plus `manifest.json` + `README.md` (copy `migrations/modules/TEMPLATE/`). Fail-closed check in `internal/database/migration_source.go`.
-- All SQL idempotent (`IF NOT EXISTS`). SQLite (Lite) uses the SAME range and numbers: mirror in `migrations/modules/<name>/sqlite/9NNNNN_*.{up,down}.sql`; NEVER add to `migrations/sqlite/` (main's stream, rejected ≥900000 and collides with main's next number). Bump `expectedSQLiteMigrationVersion` + `versionedSQLiteColumns` in `internal/database/migration_sqlite_versioned_schema_test.go`.
-- Run `./scripts/migrate.sh validate postgres` (and `sqlite`). After deploy verify with `docker logs WeKnora-app | grep migrat`.
+**Migrations** — two independent streams, each with its own golang-migrate version table (`internal/database/migration.go`, `migration_legacy.go`):
+- Core = main's `migrations/versioned` (postgres) / `migrations/sqlite`, table `schema_migrations`. Never add develop SQL there: it would collide with main's next number.
+- Modules = develop-only `migrations/modules/<name>/{postgres,sqlite}/9NNNNN_<name>.{up,down}.sql`, range 900000-909999 (next free: 900078), table `schema_migrations_modules`, plus `manifest.json` + `README.md` (copy `migrations/modules/TEMPLATE/`). Core runs first, then modules, so module SQL may depend on core tables. Because the counters are separate, new core migrations from main are always applied, whatever module version the DB is at. Fail-closed range/pair/duplicate checks: `internal/database/migration_source.go`.
+- All SQL idempotent (`IF NOT EXISTS`). Mirror a module's SQLite SQL in `modules/<name>/sqlite/` with the same number. Tests: `expectedSQLiteMigrationVersion` is main's core counter (leave it to main); module progress is `expectedSQLiteModuleMigrationVersion` + `versionedSQLiteColumns` in `internal/database/migration_sqlite_versioned_schema_test.go`.
+- Run `./scripts/migrate.sh validate postgres` (and `sqlite`). After deploy verify `docker logs WeKnora-app | grep -i migrat` and `select * from schema_migrations, schema_migrations_modules`.
+- `scripts/migrate.sh up/force` operate on the core stream only (`schema_migrations`), exactly like main.
+- Legacy databases (single counter at 9000xx) are converted once on startup: modules=old version, core rewound to the baseline in `migration_legacy.go` (109 pg / 29 sqlite). Never change those baselines.
 
 **DI** — one `register<Name>(c *dig.Container) error` in `internal/container/<name>.go`; `container.go` gets one line `must(register<Name>(container))`. Never add scattered `Provide` calls there. Add a DI test (full resolve, duplicate registration fails, missing provider named). Config-gated feature that overlaps something main will ship: no-op when off, return an error when on but not wired (see `cross_session_memory.go`).
 
