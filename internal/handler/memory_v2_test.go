@@ -311,7 +311,7 @@ func TestParseOptionalVerdicts(t *testing.T) {
 func TestMemoryV2Handler_ListMemories(t *testing.T) {
 	t.Run("happy path", func(t *testing.T) {
 		repo := &memoryV2HandlerRepoFake{searchTotal: 9}
-		h := NewMemoryV2Handler(&memoryV2HandlerServiceFake{}, repo)
+		h := NewMemoryV2Handler(&memoryV2HandlerServiceFake{}, repo, nil, nil)
 		c, recorder := newMemoryV2HandlerTestContext(http.MethodGet, "/memories?kb_id=kb1&page=2&page_size=5&memory_type=semantic&session_id=s1&tier=2&verdicts=fixed,decision", nil)
 		setMemoryV2Auth(c, 42, "user-1")
 
@@ -337,7 +337,7 @@ func TestMemoryV2Handler_ListMemories(t *testing.T) {
 
 	t.Run("missing tenant", func(t *testing.T) {
 		repo := &memoryV2HandlerRepoFake{}
-		h := NewMemoryV2Handler(&memoryV2HandlerServiceFake{}, repo)
+		h := NewMemoryV2Handler(&memoryV2HandlerServiceFake{}, repo, nil, nil)
 		c, _ := newMemoryV2HandlerTestContext(http.MethodGet, "/memories", nil)
 
 		h.ListMemories(c)
@@ -350,7 +350,7 @@ func TestMemoryV2Handler_ListMemories(t *testing.T) {
 	t.Run("invalid pagination", func(t *testing.T) {
 		for _, path := range []string{"/memories?page=0", "/memories?page_size=999"} {
 			repo := &memoryV2HandlerRepoFake{}
-			h := NewMemoryV2Handler(&memoryV2HandlerServiceFake{}, repo)
+			h := NewMemoryV2Handler(&memoryV2HandlerServiceFake{}, repo, nil, nil)
 			c, _ := newMemoryV2HandlerTestContext(http.MethodGet, path, nil)
 			setMemoryV2Auth(c, 42, "")
 
@@ -363,7 +363,7 @@ func TestMemoryV2Handler_ListMemories(t *testing.T) {
 
 	t.Run("repo error", func(t *testing.T) {
 		repo := &memoryV2HandlerRepoFake{searchErr: errors.New("db down")}
-		h := NewMemoryV2Handler(&memoryV2HandlerServiceFake{}, repo)
+		h := NewMemoryV2Handler(&memoryV2HandlerServiceFake{}, repo, nil, nil)
 		c, recorder := newMemoryV2HandlerTestContext(http.MethodGet, "/memories", nil)
 		setMemoryV2Auth(c, 42, "")
 
@@ -379,7 +379,7 @@ func TestMemoryV2Handler_GetMemory(t *testing.T) {
 	t.Run("happy path", func(t *testing.T) {
 		mem := &types.AgentMemory{ID: "mem-1", TenantID: "42", Content: "hello"}
 		repo := &memoryV2HandlerRepoFake{getMemory: mem}
-		h := NewMemoryV2Handler(&memoryV2HandlerServiceFake{}, repo)
+		h := NewMemoryV2Handler(&memoryV2HandlerServiceFake{}, repo, nil, nil)
 		c, recorder := newMemoryV2HandlerTestContext(http.MethodGet, "/memories/mem-1", nil)
 		c.Params = gin.Params{{Key: "id", Value: "mem-1"}}
 		setMemoryV2Auth(c, 42, "")
@@ -395,7 +395,7 @@ func TestMemoryV2Handler_GetMemory(t *testing.T) {
 
 	t.Run("not found", func(t *testing.T) {
 		repo := &memoryV2HandlerRepoFake{getErr: errors.New("missing")}
-		h := NewMemoryV2Handler(&memoryV2HandlerServiceFake{}, repo)
+		h := NewMemoryV2Handler(&memoryV2HandlerServiceFake{}, repo, nil, nil)
 		c, _ := newMemoryV2HandlerTestContext(http.MethodGet, "/memories/mem-1", nil)
 		c.Params = gin.Params{{Key: "id", Value: "mem-1"}}
 		setMemoryV2Auth(c, 42, "")
@@ -407,7 +407,7 @@ func TestMemoryV2Handler_GetMemory(t *testing.T) {
 	})
 
 	t.Run("missing tenant and id", func(t *testing.T) {
-		h := NewMemoryV2Handler(&memoryV2HandlerServiceFake{}, &memoryV2HandlerRepoFake{})
+		h := NewMemoryV2Handler(&memoryV2HandlerServiceFake{}, &memoryV2HandlerRepoFake{}, nil, nil)
 		c, _ := newMemoryV2HandlerTestContext(http.MethodGet, "/memories/", nil)
 		h.GetMemory(c)
 		require.Len(t, c.Errors, 1)
@@ -424,7 +424,7 @@ func TestMemoryV2Handler_GetMemory(t *testing.T) {
 func TestMemoryV2Handler_CreateMemory(t *testing.T) {
 	t.Run("created", func(t *testing.T) {
 		svc := &memoryV2HandlerServiceFake{saveResult: &types.SaveMemoryResult{Created: true}}
-		h := NewMemoryV2Handler(svc, &memoryV2HandlerRepoFake{})
+		h := NewMemoryV2Handler(svc, &memoryV2HandlerRepoFake{}, nil, nil)
 		c, recorder := newMemoryV2HandlerTestContext(http.MethodPost, "/memories", map[string]any{"content": "hello", "kb_id": "kb1"})
 		setMemoryV2Auth(c, 42, "user-1")
 
@@ -439,7 +439,7 @@ func TestMemoryV2Handler_CreateMemory(t *testing.T) {
 
 	t.Run("duplicate", func(t *testing.T) {
 		svc := &memoryV2HandlerServiceFake{saveResult: &types.SaveMemoryResult{Created: false}}
-		h := NewMemoryV2Handler(svc, &memoryV2HandlerRepoFake{})
+		h := NewMemoryV2Handler(svc, &memoryV2HandlerRepoFake{}, nil, nil)
 		c, recorder := newMemoryV2HandlerTestContext(http.MethodPost, "/memories", map[string]any{"content": "hello"})
 		setMemoryV2Auth(c, 42, "")
 
@@ -450,7 +450,7 @@ func TestMemoryV2Handler_CreateMemory(t *testing.T) {
 
 	t.Run("invalid json", func(t *testing.T) {
 		svc := &memoryV2HandlerServiceFake{}
-		h := NewMemoryV2Handler(svc, &memoryV2HandlerRepoFake{})
+		h := NewMemoryV2Handler(svc, &memoryV2HandlerRepoFake{}, nil, nil)
 		c, _ := newMemoryV2HandlerRawContext(http.MethodPost, "/memories", "{")
 		setMemoryV2Auth(c, 42, "")
 
@@ -462,7 +462,7 @@ func TestMemoryV2Handler_CreateMemory(t *testing.T) {
 
 	t.Run("service error and missing tenant", func(t *testing.T) {
 		svc := &memoryV2HandlerServiceFake{saveErr: errors.New("save failed")}
-		h := NewMemoryV2Handler(svc, &memoryV2HandlerRepoFake{})
+		h := NewMemoryV2Handler(svc, &memoryV2HandlerRepoFake{}, nil, nil)
 		c, _ := newMemoryV2HandlerTestContext(http.MethodPost, "/memories", map[string]any{"content": "hello"})
 		setMemoryV2Auth(c, 42, "")
 
@@ -481,7 +481,7 @@ func TestMemoryV2Handler_CreateMemory(t *testing.T) {
 func TestMemoryV2Handler_UpdateMemory(t *testing.T) {
 	t.Run("happy path", func(t *testing.T) {
 		svc := &memoryV2HandlerServiceFake{saveResult: &types.SaveMemoryResult{Created: false}}
-		h := NewMemoryV2Handler(svc, &memoryV2HandlerRepoFake{})
+		h := NewMemoryV2Handler(svc, &memoryV2HandlerRepoFake{}, nil, nil)
 		c, recorder := newMemoryV2HandlerTestContext(http.MethodPut, "/memories/mem-1", map[string]any{"content": "updated"})
 		c.Params = gin.Params{{Key: "id", Value: "mem-1"}}
 		setMemoryV2Auth(c, 42, "user-1")
@@ -544,7 +544,7 @@ func TestMemoryV2Handler_UpdateMemory(t *testing.T) {
 		for _, tt := range tests {
 			t.Run(tt.name, func(t *testing.T) {
 				svc := &memoryV2HandlerServiceFake{}
-				h := NewMemoryV2Handler(svc, &memoryV2HandlerRepoFake{})
+				h := NewMemoryV2Handler(svc, &memoryV2HandlerRepoFake{}, nil, nil)
 				c, _ := tt.ctx(svc)
 				h.UpdateMemory(c)
 				require.Len(t, c.Errors, 1)
@@ -557,7 +557,7 @@ func TestMemoryV2Handler_UpdateMemory(t *testing.T) {
 func TestMemoryV2Handler_DeleteMemory(t *testing.T) {
 	t.Run("happy path", func(t *testing.T) {
 		repo := &memoryV2HandlerRepoFake{}
-		h := NewMemoryV2Handler(&memoryV2HandlerServiceFake{}, repo)
+		h := NewMemoryV2Handler(&memoryV2HandlerServiceFake{}, repo, nil, nil)
 		c, recorder := newMemoryV2HandlerTestContext(http.MethodDelete, "/memories/mem-1", nil)
 		c.Params = gin.Params{{Key: "id", Value: "mem-1"}}
 		setMemoryV2Auth(c, 42, "")
@@ -571,7 +571,7 @@ func TestMemoryV2Handler_DeleteMemory(t *testing.T) {
 
 	t.Run("repo error missing id missing tenant", func(t *testing.T) {
 		repo := &memoryV2HandlerRepoFake{deleteErr: errors.New("delete failed")}
-		h := NewMemoryV2Handler(&memoryV2HandlerServiceFake{}, repo)
+		h := NewMemoryV2Handler(&memoryV2HandlerServiceFake{}, repo, nil, nil)
 		c, _ := newMemoryV2HandlerTestContext(http.MethodDelete, "/memories/mem-1", nil)
 		c.Params = gin.Params{{Key: "id", Value: "mem-1"}}
 		setMemoryV2Auth(c, 42, "")
@@ -596,7 +596,7 @@ func TestMemoryV2Handler_DeleteMemory(t *testing.T) {
 func TestMemoryV2Handler_SearchMemories(t *testing.T) {
 	t.Run("happy path", func(t *testing.T) {
 		svc := &memoryV2HandlerServiceFake{searchResults: []*types.MemorySearchResult{{Memory: &types.AgentMemory{ID: "mem-1"}, Score: 0.9}}}
-		h := NewMemoryV2Handler(svc, &memoryV2HandlerRepoFake{})
+		h := NewMemoryV2Handler(svc, &memoryV2HandlerRepoFake{}, nil, nil)
 		c, recorder := newMemoryV2HandlerTestContext(http.MethodGet, "/memories/search?q=hello&kb_id=kb1&memory_type=semantic&session_id=s1&limit=7&min_score=0.42&verdicts=fixed,refuted", nil)
 		setMemoryV2Auth(c, 42, "")
 
@@ -616,7 +616,7 @@ func TestMemoryV2Handler_SearchMemories(t *testing.T) {
 
 	t.Run("empty query validation", func(t *testing.T) {
 		svc := &memoryV2HandlerServiceFake{}
-		h := NewMemoryV2Handler(svc, &memoryV2HandlerRepoFake{})
+		h := NewMemoryV2Handler(svc, &memoryV2HandlerRepoFake{}, nil, nil)
 		c, _ := newMemoryV2HandlerTestContext(http.MethodGet, "/memories/search?q=%20%20", nil)
 		setMemoryV2Auth(c, 42, "")
 
@@ -628,7 +628,7 @@ func TestMemoryV2Handler_SearchMemories(t *testing.T) {
 
 	t.Run("malformed optional numeric query defaults", func(t *testing.T) {
 		svc := &memoryV2HandlerServiceFake{}
-		h := NewMemoryV2Handler(svc, &memoryV2HandlerRepoFake{})
+		h := NewMemoryV2Handler(svc, &memoryV2HandlerRepoFake{}, nil, nil)
 		c, _ := newMemoryV2HandlerTestContext(http.MethodGet, "/memories/search?q=hello&limit=bad&min_score=bad", nil)
 		setMemoryV2Auth(c, 42, "")
 
@@ -641,7 +641,7 @@ func TestMemoryV2Handler_SearchMemories(t *testing.T) {
 
 	t.Run("service error", func(t *testing.T) {
 		svc := &memoryV2HandlerServiceFake{searchErr: errors.New("search failed")}
-		h := NewMemoryV2Handler(svc, &memoryV2HandlerRepoFake{})
+		h := NewMemoryV2Handler(svc, &memoryV2HandlerRepoFake{}, nil, nil)
 		c, _ := newMemoryV2HandlerTestContext(http.MethodGet, "/memories/search?q=hello", nil)
 		setMemoryV2Auth(c, 42, "")
 
@@ -665,7 +665,7 @@ func TestMemoryV2Handler_GetMemoryGraph(t *testing.T) {
 				{Memory: related, Score: 0.96},
 			},
 		}
-		h := NewMemoryV2Handler(&memoryV2HandlerServiceFake{}, repo)
+		h := NewMemoryV2Handler(&memoryV2HandlerServiceFake{}, repo, nil, nil)
 		c, recorder := newMemoryV2HandlerTestContext(http.MethodGet, "/memories/graph/mem-1?kb_id=kb1", nil)
 		c.Params = gin.Params{{Key: "id", Value: "mem-1"}}
 		setMemoryV2Auth(c, 42, "")
@@ -686,7 +686,7 @@ func TestMemoryV2Handler_GetMemoryGraph(t *testing.T) {
 
 	t.Run("get error", func(t *testing.T) {
 		repo := &memoryV2HandlerRepoFake{getErr: errors.New("missing")}
-		h := NewMemoryV2Handler(&memoryV2HandlerServiceFake{}, repo)
+		h := NewMemoryV2Handler(&memoryV2HandlerServiceFake{}, repo, nil, nil)
 		c, _ := newMemoryV2HandlerTestContext(http.MethodGet, "/memories/graph/mem-1", nil)
 		c.Params = gin.Params{{Key: "id", Value: "mem-1"}}
 		setMemoryV2Auth(c, 42, "")
@@ -699,7 +699,7 @@ func TestMemoryV2Handler_GetMemoryGraph(t *testing.T) {
 
 	t.Run("search error is non fatal", func(t *testing.T) {
 		repo := &memoryV2HandlerRepoFake{getMemory: &types.AgentMemory{ID: "mem-1", Content: "focal"}, searchErr: errors.New("search failed")}
-		h := NewMemoryV2Handler(&memoryV2HandlerServiceFake{}, repo)
+		h := NewMemoryV2Handler(&memoryV2HandlerServiceFake{}, repo, nil, nil)
 		c, recorder := newMemoryV2HandlerTestContext(http.MethodGet, "/memories/graph/mem-1", nil)
 		c.Params = gin.Params{{Key: "id", Value: "mem-1"}}
 		setMemoryV2Auth(c, 42, "")
@@ -716,7 +716,7 @@ func TestMemoryV2Handler_GetMemoryGraph(t *testing.T) {
 func TestMemoryV2Handler_GetMemoryStats(t *testing.T) {
 	t.Run("happy path documents per type filters", func(t *testing.T) {
 		repo := &memoryV2HandlerRepoFake{searchTotals: []int64{10, 4, 3, 0}}
-		h := NewMemoryV2Handler(&memoryV2HandlerServiceFake{}, repo)
+		h := NewMemoryV2Handler(&memoryV2HandlerServiceFake{}, repo, nil, nil)
 		c, recorder := newMemoryV2HandlerTestContext(http.MethodGet, "/memories/stats?kb_id=kb1", nil)
 		setMemoryV2Auth(c, 42, "")
 
@@ -725,7 +725,7 @@ func TestMemoryV2Handler_GetMemoryStats(t *testing.T) {
 		require.Equal(t, http.StatusOK, recorder.Code)
 		require.Len(t, repo.searchFilters, 4)
 		assert.Equal(t, "kb1", repo.searchFilters[0].KbID)
-		assert.Empty(t, repo.searchFilters[1].KbID, "current per-type count filters do not carry kb_id")
+		assert.Equal(t, "kb1", repo.searchFilters[1].KbID, "per-type counts stay inside the selected knowledge base")
 		assert.Equal(t, "semantic", repo.searchFilters[1].MemoryType)
 		assert.Equal(t, "episodic", repo.searchFilters[2].MemoryType)
 		assert.Equal(t, "procedural", repo.searchFilters[3].MemoryType)
@@ -739,7 +739,7 @@ func TestMemoryV2Handler_GetMemoryStats(t *testing.T) {
 
 	t.Run("first search error", func(t *testing.T) {
 		repo := &memoryV2HandlerRepoFake{searchErr: errors.New("db down")}
-		h := NewMemoryV2Handler(&memoryV2HandlerServiceFake{}, repo)
+		h := NewMemoryV2Handler(&memoryV2HandlerServiceFake{}, repo, nil, nil)
 		c, _ := newMemoryV2HandlerTestContext(http.MethodGet, "/memories/stats", nil)
 		setMemoryV2Auth(c, 42, "")
 
@@ -753,7 +753,7 @@ func TestMemoryV2Handler_GetMemoryStats(t *testing.T) {
 func TestMemoryV2Handler_GetHealthReport(t *testing.T) {
 	t.Run("happy path", func(t *testing.T) {
 		svc := &memoryV2HandlerServiceFake{healthIssues: []*types.MemoryHealthIssue{{Severity: "low"}, {Severity: "critical"}, {Severity: "critical"}}}
-		h := NewMemoryV2Handler(svc, &memoryV2HandlerRepoFake{})
+		h := NewMemoryV2Handler(svc, &memoryV2HandlerRepoFake{}, nil, nil)
 		c, recorder := newMemoryV2HandlerTestContext(http.MethodGet, "/memories/health?kb_id=kb1", nil)
 		setMemoryV2Auth(c, 42, "")
 
@@ -772,7 +772,7 @@ func TestMemoryV2Handler_GetHealthReport(t *testing.T) {
 
 	t.Run("service error and missing tenant", func(t *testing.T) {
 		svc := &memoryV2HandlerServiceFake{healthErr: errors.New("health failed")}
-		h := NewMemoryV2Handler(svc, &memoryV2HandlerRepoFake{})
+		h := NewMemoryV2Handler(svc, &memoryV2HandlerRepoFake{}, nil, nil)
 		c, _ := newMemoryV2HandlerTestContext(http.MethodGet, "/memories/health", nil)
 		setMemoryV2Auth(c, 42, "")
 		h.GetHealthReport(c)
@@ -789,7 +789,7 @@ func TestMemoryV2Handler_GetHealthReport(t *testing.T) {
 func TestMemoryV2Handler_TriggerDream(t *testing.T) {
 	t.Run("happy path", func(t *testing.T) {
 		svc := &memoryV2HandlerServiceFake{dreamResult: &types.DreamResult{ActionsProposed: 2, ActionsApplied: 1}}
-		h := NewMemoryV2Handler(svc, &memoryV2HandlerRepoFake{})
+		h := NewMemoryV2Handler(svc, &memoryV2HandlerRepoFake{}, nil, nil)
 		c, recorder := newMemoryV2HandlerTestContext(http.MethodPost, "/memories/dream", nil)
 		setMemoryV2Auth(c, 42, "")
 
@@ -803,7 +803,7 @@ func TestMemoryV2Handler_TriggerDream(t *testing.T) {
 
 	t.Run("service error and missing tenant", func(t *testing.T) {
 		svc := &memoryV2HandlerServiceFake{dreamErr: errors.New("dream failed")}
-		h := NewMemoryV2Handler(svc, &memoryV2HandlerRepoFake{})
+		h := NewMemoryV2Handler(svc, &memoryV2HandlerRepoFake{}, nil, nil)
 		c, _ := newMemoryV2HandlerTestContext(http.MethodPost, "/memories/dream", nil)
 		setMemoryV2Auth(c, 42, "")
 		h.TriggerDream(c)
@@ -819,7 +819,7 @@ func TestMemoryV2Handler_TriggerDream(t *testing.T) {
 
 func TestMemoryV2Handler_MemoryStatus(t *testing.T) {
 	t.Run("nil repo", func(t *testing.T) {
-		h := NewMemoryV2Handler(&memoryV2HandlerServiceFake{}, nil)
+		h := NewMemoryV2Handler(&memoryV2HandlerServiceFake{}, nil, nil, nil)
 		c, recorder := newMemoryV2HandlerTestContext(http.MethodGet, "/tenants/memory-status", nil)
 
 		h.MemoryStatus(c)
@@ -831,7 +831,7 @@ func TestMemoryV2Handler_MemoryStatus(t *testing.T) {
 
 	t.Run("missing tenant", func(t *testing.T) {
 		repo := &memoryV2HandlerRepoFake{}
-		h := NewMemoryV2Handler(&memoryV2HandlerServiceFake{}, repo)
+		h := NewMemoryV2Handler(&memoryV2HandlerServiceFake{}, repo, nil, nil)
 		c, recorder := newMemoryV2HandlerTestContext(http.MethodGet, "/tenants/memory-status", nil)
 
 		h.MemoryStatus(c)
@@ -844,7 +844,7 @@ func TestMemoryV2Handler_MemoryStatus(t *testing.T) {
 
 	t.Run("repo search success", func(t *testing.T) {
 		repo := &memoryV2HandlerRepoFake{searchTotal: 12}
-		h := NewMemoryV2Handler(&memoryV2HandlerServiceFake{}, repo)
+		h := NewMemoryV2Handler(&memoryV2HandlerServiceFake{}, repo, nil, nil)
 		c, recorder := newMemoryV2HandlerTestContext(http.MethodGet, "/tenants/memory-status", nil)
 		setMemoryV2Auth(c, 42, "")
 
@@ -858,7 +858,7 @@ func TestMemoryV2Handler_MemoryStatus(t *testing.T) {
 
 	t.Run("repo search error", func(t *testing.T) {
 		repo := &memoryV2HandlerRepoFake{searchErr: errors.New("db down")}
-		h := NewMemoryV2Handler(&memoryV2HandlerServiceFake{}, repo)
+		h := NewMemoryV2Handler(&memoryV2HandlerServiceFake{}, repo, nil, nil)
 		c, recorder := newMemoryV2HandlerTestContext(http.MethodGet, "/tenants/memory-status", nil)
 		setMemoryV2Auth(c, 42, "")
 

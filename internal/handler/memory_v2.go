@@ -18,16 +18,22 @@ import (
 type MemoryV2Handler struct {
 	memorySvc  interfaces.MemoryServiceV2
 	memoryRepo interfaces.MemoryRepositoryV2
+	kbService  interfaces.KnowledgeBaseService
+	kbShares   interfaces.KBShareService
 }
 
 // NewMemoryV2Handler creates a new MemoryV2Handler.
 func NewMemoryV2Handler(
 	memorySvc interfaces.MemoryServiceV2,
 	memoryRepo interfaces.MemoryRepositoryV2,
+	kbService interfaces.KnowledgeBaseService,
+	kbShares interfaces.KBShareService,
 ) *MemoryV2Handler {
 	return &MemoryV2Handler{
 		memorySvc:  memorySvc,
 		memoryRepo: memoryRepo,
+		kbService:  kbService,
+		kbShares:   kbShares,
 	}
 }
 
@@ -74,11 +80,9 @@ func parseOptionalVerdicts(raw string) []types.MemoryVerdict {
 
 // ListMemories returns a paginated list of memories.
 func (h *MemoryV2Handler) ListMemories(c *gin.Context) {
-	ctx := c.Request.Context()
-
-	tenantID, ok := h.getTenantID(c)
+	kbID := strings.TrimSpace(c.Query("kb_id"))
+	ctx, tenantID, ok := h.scopeForKB(c, kbID, types.OrgRoleViewer)
 	if !ok {
-		c.Error(errors.NewBadRequestError("Tenant ID cannot be empty"))
 		return
 	}
 
@@ -88,12 +92,14 @@ func (h *MemoryV2Handler) ListMemories(c *gin.Context) {
 	}
 
 	filter := &types.MemoryFilter{
-		TenantID:   tenantID,
-		KbID:       strings.TrimSpace(c.Query("kb_id")),
-		Limit:      pageSize,
-		Offset:     (page - 1) * pageSize,
-		MemoryType: strings.TrimSpace(c.Query("memory_type")),
-		SessionID:  strings.TrimSpace(c.Query("session_id")),
+		TenantID:     tenantID,
+		KbID:         kbID,
+		Limit:        pageSize,
+		Offset:       (page - 1) * pageSize,
+		MemoryType:   queryFirst(c, "memory_type", "type"),
+		SessionID:    strings.TrimSpace(c.Query("session_id")),
+		Query:        queryFirst(c, "keyword"),
+		AuthorUserID: h.authorFilter(c),
 	}
 
 	if tierStr := strings.TrimSpace(c.Query("tier")); tierStr != "" {
@@ -103,7 +109,7 @@ func (h *MemoryV2Handler) ListMemories(c *gin.Context) {
 		}
 	}
 
-	if v := parseOptionalVerdicts(c.Query("verdicts")); len(v) > 0 {
+	if v := parseOptionalVerdicts(queryFirst(c, "verdicts", "verdict")); len(v) > 0 {
 		filter.Verdicts = v
 	}
 
@@ -135,17 +141,16 @@ func (h *MemoryV2Handler) ListMemories(c *gin.Context) {
 
 // GetMemory retrieves a single memory by ID.
 func (h *MemoryV2Handler) GetMemory(c *gin.Context) {
-	ctx := c.Request.Context()
-
-	tenantID, ok := h.getTenantID(c)
-	if !ok {
-		c.Error(errors.NewBadRequestError("Tenant ID cannot be empty"))
+	if !h.requireTenant(c) {
 		return
 	}
-
 	id := c.Param("id")
 	if id == "" {
 		c.Error(errors.NewBadRequestError("Memory ID is required"))
+		return
+	}
+	ctx, tenantID, ok := h.scopeForMemory(c, id, types.OrgRoleViewer)
+	if !ok {
 		return
 	}
 
@@ -172,18 +177,14 @@ func (h *MemoryV2Handler) GetMemory(c *gin.Context) {
 
 // CreateMemory creates a new memory via the ingestion pipeline.
 func (h *MemoryV2Handler) CreateMemory(c *gin.Context) {
-	ctx := c.Request.Context()
-
-	tenantID, ok := h.getTenantID(c)
-	if !ok {
-		c.Error(errors.NewBadRequestError("Tenant ID cannot be empty"))
-		return
-	}
-
 	var memory types.AgentMemory
 	if err := c.ShouldBindJSON(&memory); err != nil {
-		logger.Error(ctx, "Failed to parse create memory request", err)
+		logger.Error(c.Request.Context(), "Failed to parse create memory request", err)
 		c.Error(errors.NewBadRequestError("Invalid request: " + err.Error()))
+		return
+	}
+	ctx, tenantID, ok := h.scopeForKB(c, memory.KbID, types.OrgRoleEditor)
+	if !ok {
 		return
 	}
 
@@ -219,14 +220,9 @@ func (h *MemoryV2Handler) CreateMemory(c *gin.Context) {
 
 // UpdateMemory updates an existing memory.
 func (h *MemoryV2Handler) UpdateMemory(c *gin.Context) {
-	ctx := c.Request.Context()
-
-	tenantID, ok := h.getTenantID(c)
-	if !ok {
-		c.Error(errors.NewBadRequestError("Tenant ID cannot be empty"))
+	if !h.requireTenant(c) {
 		return
 	}
-
 	id := c.Param("id")
 	if id == "" {
 		c.Error(errors.NewBadRequestError("Memory ID is required"))
@@ -235,9 +231,25 @@ func (h *MemoryV2Handler) UpdateMemory(c *gin.Context) {
 
 	var memory types.AgentMemory
 	if err := c.ShouldBindJSON(&memory); err != nil {
-		logger.Error(ctx, "Failed to parse update memory request", err)
+		logger.Error(c.Request.Context(), "Failed to parse update memory request", err)
 		c.Error(errors.NewBadRequestError("Invalid request: " + err.Error()))
 		return
+	}
+	ctx, tenantID, ok := h.scopeForMemory(c, id, types.OrgRoleEditor)
+	if !ok {
+		return
+	}
+	// The body may name a KB; it must be writable and live in the same tenant,
+	// otherwise an update could plant data in a KB the caller never authorized.
+	if memory.KbID != "" {
+		_, bodyTenant, authorized := h.scopeForKB(c, memory.KbID, types.OrgRoleEditor)
+		if !authorized {
+			return
+		}
+		if bodyTenant != tenantID {
+			c.Error(errors.NewBadRequestError("kb_id does not match the memory's knowledge base"))
+			return
+		}
 	}
 
 	memory.ID = id
@@ -249,8 +261,8 @@ func (h *MemoryV2Handler) UpdateMemory(c *gin.Context) {
 	result, err := h.memorySvc.SaveMemory(ctx, &memory)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{
-			"tenant_id":  tenantID,
-			"memory_id":  id,
+			"tenant_id": tenantID,
+			"memory_id": id,
 		})
 		c.Error(errors.NewInternalServerError("Failed to update memory: " + err.Error()))
 		return
@@ -269,17 +281,16 @@ func (h *MemoryV2Handler) UpdateMemory(c *gin.Context) {
 
 // DeleteMemory soft-deletes a memory.
 func (h *MemoryV2Handler) DeleteMemory(c *gin.Context) {
-	ctx := c.Request.Context()
-
-	tenantID, ok := h.getTenantID(c)
-	if !ok {
-		c.Error(errors.NewBadRequestError("Tenant ID cannot be empty"))
+	if !h.requireTenant(c) {
 		return
 	}
-
 	id := c.Param("id")
 	if id == "" {
 		c.Error(errors.NewBadRequestError("Memory ID is required"))
+		return
+	}
+	ctx, tenantID, ok := h.scopeForMemory(c, id, types.OrgRoleEditor)
+	if !ok {
 		return
 	}
 
@@ -304,25 +315,24 @@ func (h *MemoryV2Handler) DeleteMemory(c *gin.Context) {
 
 // SearchMemories performs the hybrid search pipeline.
 func (h *MemoryV2Handler) SearchMemories(c *gin.Context) {
-	ctx := c.Request.Context()
-
-	tenantID, ok := h.getTenantID(c)
-	if !ok {
-		c.Error(errors.NewBadRequestError("Tenant ID cannot be empty"))
-		return
-	}
-
 	query := strings.TrimSpace(c.Query("q"))
 	if query == "" {
 		c.Error(errors.NewValidationError("query parameter 'q' is required"))
 		return
 	}
 
+	kbID := strings.TrimSpace(c.Query("kb_id"))
+	ctx, tenantID, ok := h.scopeForKB(c, kbID, types.OrgRoleViewer)
+	if !ok {
+		return
+	}
+
 	filter := &types.MemoryFilter{
-		TenantID:   tenantID,
-		KbID:       strings.TrimSpace(c.Query("kb_id")),
-		MemoryType: strings.TrimSpace(c.Query("memory_type")),
-		SessionID:  strings.TrimSpace(c.Query("session_id")),
+		TenantID:     tenantID,
+		KbID:         kbID,
+		MemoryType:   queryFirst(c, "memory_type", "type"),
+		SessionID:    strings.TrimSpace(c.Query("session_id")),
+		AuthorUserID: h.authorFilter(c),
 	}
 
 	if limitStr := strings.TrimSpace(c.Query("limit")); limitStr != "" {
@@ -332,7 +342,7 @@ func (h *MemoryV2Handler) SearchMemories(c *gin.Context) {
 		}
 	}
 
-	if v := parseOptionalVerdicts(c.Query("verdicts")); len(v) > 0 {
+	if v := parseOptionalVerdicts(queryFirst(c, "verdicts", "verdict")); len(v) > 0 {
 		filter.Verdicts = v
 	}
 
@@ -365,17 +375,16 @@ func (h *MemoryV2Handler) SearchMemories(c *gin.Context) {
 
 // GetMemoryGraph returns a memory with its related nodes and edges.
 func (h *MemoryV2Handler) GetMemoryGraph(c *gin.Context) {
-	ctx := c.Request.Context()
-
-	tenantID, ok := h.getTenantID(c)
-	if !ok {
-		c.Error(errors.NewBadRequestError("Tenant ID cannot be empty"))
+	if !h.requireTenant(c) {
 		return
 	}
-
 	id := c.Param("id")
 	if id == "" {
 		c.Error(errors.NewBadRequestError("Memory ID is required"))
+		return
+	}
+	ctx, tenantID, ok := h.scopeForMemory(c, id, types.OrgRoleViewer)
+	if !ok {
 		return
 	}
 
@@ -397,7 +406,7 @@ func (h *MemoryV2Handler) GetMemoryGraph(c *gin.Context) {
 	}
 	relatedFilter := &types.MemoryFilter{
 		TenantID: tenantID,
-		KbID:     strings.TrimSpace(c.Query("kb_id")),
+		KbID:     firstNonBlank(memory.KbID, strings.TrimSpace(c.Query("kb_id"))),
 		Limit:    20,
 		Query:    memory.Content[:queryLen],
 	}
@@ -457,18 +466,16 @@ func (h *MemoryV2Handler) GetMemoryGraph(c *gin.Context) {
 
 // GetMemoryStats returns aggregate memory statistics for the tenant.
 func (h *MemoryV2Handler) GetMemoryStats(c *gin.Context) {
-	ctx := c.Request.Context()
-
-	tenantID, ok := h.getTenantID(c)
+	kbID := strings.TrimSpace(c.Query("kb_id"))
+	ctx, tenantID, ok := h.scopeForKB(c, kbID, types.OrgRoleViewer)
 	if !ok {
-		c.Error(errors.NewBadRequestError("Tenant ID cannot be empty"))
 		return
 	}
 
 	// Total count (Limit=1 is enough since total is returned separately)
 	totalFilter := &types.MemoryFilter{
 		TenantID: tenantID,
-		KbID:     strings.TrimSpace(c.Query("kb_id")),
+		KbID:     kbID,
 		Limit:    1,
 	}
 	_, total, err := h.memoryRepo.Search(ctx, totalFilter)
@@ -483,7 +490,7 @@ func (h *MemoryV2Handler) GetMemoryStats(c *gin.Context) {
 	// Count by memory type
 	typeCounts := map[string]int64{}
 	for _, mt := range []string{"semantic", "episodic", "procedural"} {
-		ft := &types.MemoryFilter{TenantID: tenantID, MemoryType: mt, Limit: 1}
+		ft := &types.MemoryFilter{TenantID: tenantID, KbID: kbID, MemoryType: mt, Limit: 1}
 		_, cnt, _ := h.memoryRepo.Search(ctx, ft)
 		if cnt > 0 {
 			typeCounts[mt] = cnt
@@ -506,15 +513,13 @@ func (h *MemoryV2Handler) GetMemoryStats(c *gin.Context) {
 
 // GetHealthReport runs the 6 health checks and returns a HealthReport.
 func (h *MemoryV2Handler) GetHealthReport(c *gin.Context) {
-	ctx := c.Request.Context()
-
-	tenantID, ok := h.getTenantID(c)
+	kbID := strings.TrimSpace(c.Query("kb_id"))
+	ctx, tenantID, ok := h.scopeForKB(c, kbID, types.OrgRoleViewer)
 	if !ok {
-		c.Error(errors.NewBadRequestError("Tenant ID cannot be empty"))
 		return
 	}
 
-	issues, err := h.memorySvc.AssessHealth(ctx, tenantID, strings.TrimSpace(c.Query("kb_id")))
+	issues, err := h.memorySvc.AssessHealth(ctx, tenantID, kbID)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{
 			"tenant_id": tenantID,
@@ -549,11 +554,19 @@ func (h *MemoryV2Handler) GetHealthReport(c *gin.Context) {
 
 // TriggerDream triggers one dreamer consolidation pass.
 func (h *MemoryV2Handler) TriggerDream(c *gin.Context) {
-	ctx := c.Request.Context()
-
-	tenantID, ok := h.getTenantID(c)
+	// A dream pass consolidates a whole tenant, so a shared KB's pass needs
+	// admin rights on that KB. The KB may arrive in the query or JSON body.
+	kbID := strings.TrimSpace(c.Query("kb_id"))
+	if kbID == "" && c.Request.Body != nil {
+		var body struct {
+			KbID string `json:"kb_id"`
+		}
+		if err := c.ShouldBindJSON(&body); err == nil {
+			kbID = strings.TrimSpace(body.KbID)
+		}
+	}
+	ctx, tenantID, ok := h.scopeForKB(c, kbID, types.OrgRoleAdmin)
 	if !ok {
-		c.Error(errors.NewBadRequestError("Tenant ID cannot be empty"))
 		return
 	}
 

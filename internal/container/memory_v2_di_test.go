@@ -21,6 +21,8 @@ func stubMemoryV2Deps(c *dig.Container) {
 	must(c.Provide(func() *gorm.DB { return &gorm.DB{} }))
 	must(c.Provide(func() interfaces.ModelService { return nil }))
 	must(c.Provide(func() *config.Config { return &config.Config{} }))
+	must(c.Provide(func() interfaces.KnowledgeBaseService { return nil }))
+	must(c.Provide(func() interfaces.KBShareService { return nil }))
 	must(c.Provide(chatpipeline.NewEventManager))
 	must(c.Provide(NewResourceCleaner, dig.As(new(interfaces.ResourceCleaner))))
 }

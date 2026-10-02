@@ -71,9 +71,9 @@ type Episode struct {
 
 // MemoryContext represents the retrieved memory context for a conversation.
 type MemoryContext struct {
-	RelatedEpisodes   []Episode      `json:"related_episodes"`
-	RelatedEntities   []Entity       `json:"related_entities"`
-	RelatedRelations  []Relationship `json:"related_relations"`
+	RelatedEpisodes  []Episode      `json:"related_episodes"`
+	RelatedEntities  []Entity       `json:"related_entities"`
+	RelatedRelations []Relationship `json:"related_relations"`
 }
 
 // ---------------------------------------------------------------------------
@@ -148,18 +148,22 @@ func (DreamerState) TableName() string {
 
 // MemoryFilter represents search/filter parameters for memories.
 type MemoryFilter struct {
-	TenantID   string          `json:"tenant_id"`
-	KbID       string          `json:"kb_id,omitempty"`
-	UserID     string          `json:"user_id,omitempty"`
-	Query      string          `json:"query,omitempty"`
-	MemoryType string          `json:"memory_type,omitempty"`
-	Tier       *int            `json:"tier,omitempty"` // nil means no filter; 0-3 are valid values
-	SessionID  string          `json:"session_id,omitempty"`
-	Verdicts   []MemoryVerdict `json:"verdicts,omitempty"`
-	MinScore   float64         `json:"min_score,omitempty"`
-	DeepGraph  bool            `json:"deep_graph,omitempty"`
-	Limit      int             `json:"limit,omitempty"`
-	Offset     int             `json:"offset,omitempty"`
+	TenantID string `json:"tenant_id"`
+	KbID     string `json:"kb_id,omitempty"`
+	UserID   string `json:"user_id,omitempty"`
+	// AuthorUserID narrows results to rows written by one user. Unlike UserID
+	// (carried for recall attribution and never applied as a SQL filter) it is
+	// enforced by the repository; empty means every member's memories.
+	AuthorUserID string          `json:"author_user_id,omitempty"`
+	Query        string          `json:"query,omitempty"`
+	MemoryType   string          `json:"memory_type,omitempty"`
+	Tier         *int            `json:"tier,omitempty"` // nil means no filter; 0-3 are valid values
+	SessionID    string          `json:"session_id,omitempty"`
+	Verdicts     []MemoryVerdict `json:"verdicts,omitempty"`
+	MinScore     float64         `json:"min_score,omitempty"`
+	DeepGraph    bool            `json:"deep_graph,omitempty"`
+	Limit        int             `json:"limit,omitempty"`
+	Offset       int             `json:"offset,omitempty"`
 }
 
 // ---------------------------------------------------------------------------
@@ -222,15 +226,15 @@ type HealthReport struct {
 
 // TokenBudgetConfig controls token budget thresholds.
 type TokenBudgetConfig struct {
-	MaxTotalTokens    int `json:"max_total_tokens"`     // default: 2000
-	TruncateThreshold int `json:"truncate_threshold"`    // default: 1500
-	SummaryThreshold  int `json:"summary_threshold"`     // default: 2500
-	MaxPerMemory      int `json:"max_per_memory"`        // default: 300
+	MaxTotalTokens    int `json:"max_total_tokens"`   // default: 2000
+	TruncateThreshold int `json:"truncate_threshold"` // default: 1500
+	SummaryThreshold  int `json:"summary_threshold"`  // default: 2500
+	MaxPerMemory      int `json:"max_per_memory"`     // default: 300
 }
 
 // TokenBudgetInfo describes the applied budget mode.
 type TokenBudgetInfo struct {
-	Mode      string `json:"mode"`      // full | truncated | summary
+	Mode      string `json:"mode"` // full | truncated | summary
 	Used      int    `json:"used"`
 	Remaining int    `json:"remaining"`
 }
@@ -242,7 +246,7 @@ type TokenBudgetInfo struct {
 // DreamerConfig configures the dreamer worker.
 type DreamerConfig struct {
 	Enabled     bool   `json:"enabled"`
-	Interval    string `json:"interval"`     // default: "1h"
+	Interval    string `json:"interval"` // default: "1h"
 	ModelID     string `json:"model_id"`
 	MaxActions  int    `json:"max_actions"`  // default: 5
 	TokenBudget int    `json:"token_budget"` // default: 4000
@@ -275,8 +279,8 @@ type DreamResult struct {
 // CacheWarmerConfig configures the cache warmer worker.
 type CacheWarmerConfig struct {
 	Enabled         bool   `json:"enabled"`
-	TopQueriesN     int    `json:"top_queries_n"`     // default: 100
-	RefreshInterval string `json:"refresh_interval"`  // default: "30m"
+	TopQueriesN     int    `json:"top_queries_n"`    // default: 100
+	RefreshInterval string `json:"refresh_interval"` // default: "30m"
 }
 
 // ---------------------------------------------------------------------------
@@ -298,10 +302,10 @@ type LintOnWriteConfig struct {
 // RecencyBoostConfig configures the recency boost applied to search results.
 type RecencyBoostConfig struct {
 	Enabled             bool    `json:"enabled"`
-	ShortTermMultiplier float64 `json:"short_term_multiplier"`  // default: 1.15
-	ShortTermWindow     string  `json:"short_term_window"`      // default: "1h"
-	LongTermFactor      float64 `json:"long_term_factor"`       // default: 0.05
-	LongTermHalfLife    int     `json:"long_term_half_life"`    // default: 30 (days)
+	ShortTermMultiplier float64 `json:"short_term_multiplier"` // default: 1.15
+	ShortTermWindow     string  `json:"short_term_window"`     // default: "1h"
+	LongTermFactor      float64 `json:"long_term_factor"`      // default: 0.05
+	LongTermHalfLife    int     `json:"long_term_half_life"`   // default: 30 (days)
 }
 
 // ---------------------------------------------------------------------------
@@ -323,18 +327,18 @@ type DedupConfig struct {
 // MemoryV2Config is the top-level configuration for the Memory v2 module.
 // See design.md section 2.7 for field specifications.
 type MemoryV2Config struct {
-	Enabled             bool               `json:"enabled"`
-	MaxSearchResults    int                `json:"max_search_results"`
-	SemanticDedup       DedupConfig        `json:"semantic_dedup"`
-	RecencyBoost        RecencyBoostConfig `json:"recency_boost"`
-	TokenBudget         TokenBudgetConfig  `json:"token_budget"`
-	Dreamer             DreamerConfig      `json:"dreamer"`
-	CacheWarmer         CacheWarmerConfig  `json:"cache_warmer"`
-	LintOnWrite         LintOnWriteConfig  `json:"lint_on_write"`
-	MinScoreThreshold   float64            `json:"min_score_threshold"`    // default: 0.4
-	HNSWM               int                `json:"hnsw_m"`               // default: 16
-	HNSWEfConstruction  int                `json:"hnsw_ef_construction"` // default: 200
-	HNSWEfSearch        int                `json:"hnsw_ef_search"`       // default: 100
+	Enabled            bool               `json:"enabled"`
+	MaxSearchResults   int                `json:"max_search_results"`
+	SemanticDedup      DedupConfig        `json:"semantic_dedup"`
+	RecencyBoost       RecencyBoostConfig `json:"recency_boost"`
+	TokenBudget        TokenBudgetConfig  `json:"token_budget"`
+	Dreamer            DreamerConfig      `json:"dreamer"`
+	CacheWarmer        CacheWarmerConfig  `json:"cache_warmer"`
+	LintOnWrite        LintOnWriteConfig  `json:"lint_on_write"`
+	MinScoreThreshold  float64            `json:"min_score_threshold"`  // default: 0.4
+	HNSWM              int                `json:"hnsw_m"`               // default: 16
+	HNSWEfConstruction int                `json:"hnsw_ef_construction"` // default: 200
+	HNSWEfSearch       int                `json:"hnsw_ef_search"`       // default: 100
 }
 
 // DefaultMemoryV2Config returns a config with sensible defaults.

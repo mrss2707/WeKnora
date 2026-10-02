@@ -6,7 +6,8 @@
   "migrations": [
     "900074_memory_v2.up.sql",
     "900075_memory_v2_verdict.up.sql",
-    "900076_memory_v2_hnsw.up.sql"
+    "900076_memory_v2_hnsw.up.sql",
+    "900078_memory_v2_kb_scope_repair.up.sql"
   ],
   "prerequisites": [
     "PostgreSQL (uuid-ossp legacy note: gen_random_uuid requires PG 13+)",

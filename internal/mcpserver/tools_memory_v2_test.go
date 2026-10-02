@@ -147,7 +147,7 @@ func TestMemorySaveUsesAuthorizedKnowledgeBaseScope(t *testing.T) {
 	}
 }
 
-func TestMemoryToolsRejectForeignOwnerSharedKnowledgeBase(t *testing.T) {
+func TestMemoryToolsServeSharedKnowledgeBaseUnderOwnerTenant(t *testing.T) {
 	memory := &recordingScopedMemoryV2{}
 	shared := &types.KnowledgeBase{ID: "kb-shared", Name: "Shared", TenantID: 2}
 	ep := &types.MCPEndpoint{
@@ -171,8 +171,13 @@ func TestMemoryToolsRejectForeignOwnerSharedKnowledgeBase(t *testing.T) {
 	text, isError := toolCallText(t, r, types.MCPEndpointToolMemoryRecall, map[string]any{
 		"knowledge_base_id": "kb-shared", "query": "test",
 	})
-	if !isError || !strings.Contains(text, "owned by another workspace") {
-		t.Fatalf("shared-owner memory must be rejected: error=%v text=%s", isError, text)
+	if isError {
+		t.Fatalf("shared knowledge base recall must succeed: %s", text)
+	}
+	// Memories live in the KB owner's tenant (2), not the caller's (1), so every
+	// member of the share reads the same rows.
+	if memory.lastScope.TenantID != "2" || memory.lastScope.KnowledgeBaseID != "kb-shared" {
+		t.Fatalf("shared KB must be scoped to the owner tenant: %+v", memory.lastScope)
 	}
 }
 

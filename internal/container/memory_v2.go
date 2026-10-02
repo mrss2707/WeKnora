@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"strconv"
+	"time"
 
 	"go.uber.org/dig"
 
@@ -98,6 +99,15 @@ func registerMemoryV2(container *dig.Container) error {
 		return err
 	}
 
+	if err := container.Invoke(func(memV2 interfaces.MemoryServiceV2, repo interfaces.MemoryRepositoryV2) {
+		if !memV2.Readiness().Ready {
+			return
+		}
+		go runMemoryV2KBScopeRepair(repo)
+	}); err != nil {
+		return err
+	}
+
 	if err := container.Invoke(func(params memoryV2MCPRegistrationParams) error {
 		if params.Server == nil {
 			return nil
@@ -108,6 +118,30 @@ func registerMemoryV2(container *dig.Container) error {
 	}
 
 	return container.Provide(handler.NewMemoryV2Handler)
+}
+
+// runMemoryV2KBScopeRepair detects memories stored under a tenant other than
+// their knowledge base owner's (written through shared KBs before memories were
+// owner-scoped) and migrates them. Failures are logged, never fatal.
+func runMemoryV2KBScopeRepair(repo interfaces.MemoryRepositoryV2) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	defer cancel()
+	defer func() {
+		if r := recover(); r != nil {
+			logger.Errorf(ctx, "[MemoryV2] kb scope repair panicked: %v", r)
+		}
+	}()
+	mode := memoryServiceV2.KBScopeRepairModeFromEnv()
+	report, err := memoryServiceV2.RepairKBTenantScope(ctx, repo, mode)
+	if err != nil {
+		logger.Errorf(ctx, "[MemoryV2] kb scope repair (%s) failed: %v", mode, err)
+	}
+	if report == nil || report.Detected == 0 {
+		return
+	}
+	logger.Warnf(ctx,
+		"[MemoryV2] kb scope repair mode=%s: detected=%d moved=%d failed=%d relations_retenanted=%d relations_dropped=%d moves=%v",
+		mode, report.Detected, report.Moved, report.Failed, report.Relations, report.Dropped, report.Migrations)
 }
 
 // MemoryV2PoolDelta returns the extra connection-pool headroom granted to the

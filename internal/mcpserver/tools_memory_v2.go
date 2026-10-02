@@ -315,10 +315,9 @@ func (r *memoryV2ToolRegistrar) authorizedKB(
 	if err != nil {
 		return nil, nil, ctx, mcp.NewToolResultError(err.Error())
 	}
+	// Memories belong to the KB owner's tenant (memoryScope), so knowledge
+	// bases shared from another workspace are served exactly like owned ones.
 	kb := kbs[0]
-	if kb.TenantID != ep.TenantID {
-		return nil, nil, ctx, mcp.NewToolResultError("memory tools are not yet available for knowledge bases owned by another workspace")
-	}
 	scoped, err := r.server.scopedKBContext(ctx, kb, role)
 	if err != nil {
 		return nil, nil, ctx, mcp.NewToolResultError(err.Error())

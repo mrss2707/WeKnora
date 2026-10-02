@@ -72,3 +72,12 @@ safe. Fresh databases need no action.
   for development databases.
 - Manual rollback of a live DB: `./scripts/migrate.sh force 76` moves the
   version marker back; no destructive down-migration is required.
+## Knowledge-base tenant scope (shared KBs)
+
+Memories belong to the **knowledge base owner's tenant**, not to the tenant of
+whoever wrote them, so every member with access to a shared KB sees the same
+memory (`user_id` only records who authored a row). Rows written by an earlier
+build under the caller's tenant are detected at startup (`agent_memories.tenant_id`
+differs from `knowledge_bases.tenant_id`) and moved to the owner tenant; each
+move is logged in `agent_memories_scope_repair_log` (migration 900078).
+Disable with `MEMORY_V2_KB_SCOPE_REPAIR=off`; use `=audit` to only log findings.

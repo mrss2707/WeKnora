@@ -238,6 +238,9 @@ func (r *MemoryRepository) buildSearchQuery(ctx context.Context, filter *types.M
 	if filter.SessionID != "" {
 		db = db.Where("session_id = ?", filter.SessionID)
 	}
+	if filter.AuthorUserID != "" {
+		db = db.Where("user_id = ?", filter.AuthorUserID)
+	}
 	if filter.Query != "" {
 		if r.paradeDBAvailable(ctx) {
 			db = db.Where("content @@@ paradedb.phrase(field => 'content', phrase => ?)", filter.Query)
