@@ -262,6 +262,8 @@ import { useApiBaseUrlDisplay } from '@/composables/useApiBaseUrlDisplay'
 import SettingDrawer from '@/components/settings/SettingDrawer.vue'
 import type { CustomAgent } from '@/api/agent'
 import { useChatResourcesStore } from '@/stores/chatResources'
+import { useOrganizationStore } from '@/stores/organization'
+import { mergeSelectableKnowledgeBases, toKnowledgeBaseSelectOption } from '@/utils/selectableKnowledgeBases'
 import {
   createMcpEndpoint,
   deleteMcpEndpoint,
@@ -284,6 +286,7 @@ import {
 const { t } = useI18n()
 const authStore = useAuthStore()
 const chatResources = useChatResourcesStore()
+const orgStore = useOrganizationStore()
 const { apiBaseUrlDisplay } = useApiBaseUrlDisplay()
 
 const isAdmin = computed(() => authStore.hasRole('admin'))
@@ -293,9 +296,9 @@ const endpoints = ref<McpEndpoint[]>([])
 const catalog = ref<McpEndpointToolCatalog>({ groups: [], tools: [], default_tools: [] })
 
 const kbLoading = ref(false)
-const knowledgeBases = ref<{ id: string; name: string }[]>([])
-const kbOptions = computed(() => knowledgeBases.value.map((kb) => ({ label: kb.name || kb.id, value: kb.id })))
-const kbNameById = computed(() => Object.fromEntries(knowledgeBases.value.map((kb) => [kb.id, kb.name || kb.id])))
+const knowledgeBases = ref<ReturnType<typeof mergeSelectableKnowledgeBases>>([])
+const kbOptions = computed(() => knowledgeBases.value.map(toKnowledgeBaseSelectOption))
+const kbNameById = computed(() => Object.fromEntries(knowledgeBases.value.map((kb) => [kb.id, kb.name])))
 
 const agentsLoading = ref(false)
 const agents = ref<CustomAgent[]>([])
@@ -404,10 +407,9 @@ async function loadOptions() {
       chatResources.ensureKnowledgeBases(),
       chatResources.ensureAgents(),
     ])
-    const kbRows = kbResult.status === 'fulfilled'
-      ? (chatResources.rawKnowledgeBases as Array<{ id: string | number; name?: string }>)
+    knowledgeBases.value = kbResult.status === 'fulfilled'
+      ? mergeSelectableKnowledgeBases(chatResources.rawKnowledgeBases, orgStore.sharedKnowledgeBases || [])
       : []
-    knowledgeBases.value = kbRows.map((kb) => ({ id: String(kb.id), name: kb.name || String(kb.id) }))
     agents.value = agentResult.status === 'fulfilled' ? (chatResources.agents as CustomAgent[]) : []
   } finally {
     kbLoading.value = false
