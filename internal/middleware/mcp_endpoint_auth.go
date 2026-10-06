@@ -70,12 +70,22 @@ func MCPEndpointAuth(svc interfaces.MCPEndpointService, tenantSvc interfaces.Ten
 			Principal:   types.MCPEndpointPrincipal(ep.TenantID, ep.ID),
 			TenantID:    ep.TenantID,
 			Tenant:      tenant,
-			Role:        types.TenantRoleViewer,
+			Role:        mcpEndpointTenantRole(&scope),
 			APIKeyScope: &scope,
 			Extra:       map[types.ContextKey]any{types.MCPEndpointContextKey: ep},
 		})
 		c.Next()
 	}
+}
+
+// mcpEndpointTenantRole is Viewer unless the endpoint enabled a write tool.
+// A Viewer caller caps every organization share at read-only, which would
+// silently block writes to shared knowledge bases even when the share is editor.
+func mcpEndpointTenantRole(scope *types.TenantAPIKeyScope) types.TenantRole {
+	if scope.HasCapability(types.APIKeyCapabilityIngest) {
+		return types.TenantRoleContributor
+	}
+	return types.TenantRoleViewer
 }
 
 // extractMCPEndpointToken reads "Authorization: Bearer mcp_..." only. Query

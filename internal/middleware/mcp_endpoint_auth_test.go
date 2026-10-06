@@ -86,6 +86,42 @@ func TestMCPEndpointAuthAttachesScopeAndPrincipal(t *testing.T) {
 	}
 }
 
+func TestMCPEndpointAuthRoleFollowsWriteTools(t *testing.T) {
+	cases := []struct {
+		name  string
+		tools types.StringArray
+		want  types.TenantRole
+	}{
+		{"read only tools", types.StringArray{types.MCPEndpointToolMemoryRecall, types.MCPEndpointToolAsk}, types.TenantRoleViewer},
+		{"memory_save", types.StringArray{types.MCPEndpointToolMemoryRecall, types.MCPEndpointToolMemorySave}, types.TenantRoleContributor},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			ep := &types.MCPEndpoint{ID: "ep-1", TenantID: 42, Enabled: true, Tools: tc.tools}
+			svc := &fakeMCPEndpointService{ep: ep, token: "mcp_secret"}
+			gin.SetMode(gin.TestMode)
+			r := gin.New()
+			r.ContextWithFallback = true
+			tenantSvc := &fakeTenantService{tenant: &types.Tenant{ID: 42, Status: "active"}}
+			var got types.TenantRole
+			r.POST("/mcp/:endpoint_id", MCPEndpointAuth(svc, tenantSvc), func(c *gin.Context) {
+				got = types.CallerFromContext(c.Request.Context()).Role
+				c.Status(http.StatusNoContent)
+			})
+			req := httptest.NewRequest(http.MethodPost, "/mcp/ep-1", nil)
+			req.Header.Set("Authorization", "Bearer mcp_secret")
+			w := httptest.NewRecorder()
+			r.ServeHTTP(w, req)
+			if w.Code != http.StatusNoContent {
+				t.Fatalf("status %d", w.Code)
+			}
+			if got != tc.want {
+				t.Fatalf("caller role = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestMCPEndpointAuthRejectsBadTokens(t *testing.T) {
 	ep := &types.MCPEndpoint{ID: "ep-1", TenantID: 42, Enabled: true}
 	svc := &fakeMCPEndpointService{ep: ep, token: "mcp_secret"}
