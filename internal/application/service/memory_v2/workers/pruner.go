@@ -5,6 +5,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Tencent/WeKnora/internal/application/service/memory_v2/telemetry"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
@@ -89,7 +90,7 @@ func (p *Pruner) pruneAll(ctx context.Context) {
 
 // prunable reports whether policy allows removing m now.
 func (p *Pruner) prunable(m *types.AgentMemory, now time.Time) bool {
-	if m == nil || m.Verdict.IsProtected() || hasProtectedTag(m.Tags) {
+	if m == nil || m.Tier == 0 || m.Verdict.IsProtected() || hasProtectedTag(m.Tags) {
 		return false
 	}
 	if m.ExpiresAt != nil {
@@ -101,14 +102,19 @@ func (p *Pruner) prunable(m *types.AgentMemory, now time.Time) bool {
 }
 
 // softDeleteExpired prunes one scope; returns the number removed.
-func (p *Pruner) softDeleteExpired(ctx context.Context, sc Scope) int {
+func (p *Pruner) softDeleteExpired(ctx context.Context, sc Scope) (n int) {
+	started, outcome := time.Now(), "completed"
+	defer func() {
+		telemetry.WorkerRun("pruner", outcome, started)
+		telemetry.WorkerActions("pruner", "applied", n)
+	}()
 	results, _, err := p.repo.Search(ctx, &types.MemoryFilter{TenantID: sc.TenantID, KbID: sc.KbID, Limit: pruneScanBatchSize})
 	if err != nil {
+		outcome = "failed"
 		logger.Errorf(ctx, "pruner: search failed: %v", err)
 		return 0
 	}
 	now := p.now()
-	n := 0
 	for _, r := range results {
 		if !p.prunable(r.Memory, now) {
 			continue
@@ -120,6 +126,8 @@ func (p *Pruner) softDeleteExpired(ctx context.Context, sc Scope) int {
 			err = p.repo.Delete(ctx, sc.TenantID, r.Memory.ID)
 		}
 		if err != nil {
+			outcome = "failed"
+			telemetry.WorkerActions("pruner", "blocked_apply", 1)
 			logger.Errorf(ctx, "pruner: soft-delete failed for %s: %v", r.Memory.ID, err)
 			continue
 		}

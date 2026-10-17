@@ -30,6 +30,13 @@ func (s *MemoryServiceV2Impl) RelinkKnowledgeBase(ctx context.Context, tenantID,
 		return nil, fmt.Errorf("memory_v2: relink is not supported by this repository")
 	}
 	res := &types.MemoryRelinkResult{}
+	// Repair all vectors before the graph pass so every candidate has verified
+	// provenance, including neighbours on later pages.
+	var err error
+	res.Reembedded, err = s.backfillScopeEmbeddings(ctx, tenantID, kbID, store)
+	if err != nil {
+		return res, err
+	}
 	for offset := 0; ; offset += relinkPageSize {
 		if err := ctx.Err(); err != nil {
 			return res, err

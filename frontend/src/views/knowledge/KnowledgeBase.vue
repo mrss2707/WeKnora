@@ -63,6 +63,7 @@ import MemoryMcpConfig from '@/views/memory/MemoryMcpConfig.vue'
 import MemoryDrawer from '@/views/memory/MemoryDrawer.vue'
 import MemoryDream from '@/views/memory/MemoryDream.vue'
 import { useMemoryTabNavigation } from '@/views/memory/useMemoryTabNavigation'
+import { useMemoryPermissions } from '@/views/memory/useMemoryPermissions'
 import ImageGallery from './gallery/ImageGallery.vue';
 import { getWikiStats } from '@/api/wiki';
 import {
@@ -107,6 +108,7 @@ const subTabs = computed(() => [
 const { memoryDrawerVisible, selectedMemory, graphFocusId, openMemoryDrawer, openMemoryById, closeMemoryDrawer, handleMemoryUpdate, viewMemoryInGraph } = useMemoryTabNavigation()
 const kbId = computed(() => (route.params as any).kbId as string || '');
 const kbInfo = ref<any>(null);
+const { canEditMemory, canManageMemory } = useMemoryPermissions(kbInfo)
 const uploadSourceRef = ref<InstanceType<typeof KbUploadSourceDropdown> | null>(null);
 const kbLoading = ref(false);
 const docListLoading = ref(true);
@@ -2364,6 +2366,7 @@ const handleKBEditorSuccess = (kbIdValue: string) => {
           <div class="memory-subtabs">
             <span v-for="sub in subTabs" :key="sub.key"
                   :class="{ active: memoryStore.activeSubTab === sub.key }"
+                  :data-testid="`memory-subtab-${sub.key}`"
                   @click="memoryStore.setSubTab(sub.key)">
               <t-icon :name="sub.icon" />
               {{ sub.label }}
@@ -2371,18 +2374,18 @@ const handleKBEditorSuccess = (kbIdValue: string) => {
             </span>
           </div>
           <KeepAlive>
-            <MemoryBrowse  v-if="memoryStore.activeSubTab === 'browse'"  :kb-id="kbId" :can-edit="canMutateKnowledge" @open-detail="openMemoryDrawer" />
-            <MemoryGraph   v-if="memoryStore.activeSubTab === 'graph'"   :kb-id="kbId" :focus-id="graphFocusId" @view-memory="openMemoryById" />
-            <MemoryHealth  v-if="memoryStore.activeSubTab === 'health'"  :kb-id="kbId" @critical-issues-changed="hasCriticalIssues = $event" @view-memory="openMemoryById" />
-            <MemoryHistory v-if="memoryStore.activeSubTab === 'history'" :kb-id="kbId" @view-memory="openMemoryById" />
-            <MemoryDream   v-if="memoryStore.activeSubTab === 'dream'"   :kb-id="kbId" :can-manage="canManage" @view-memory="openMemoryById" />
-            <MemoryMcpConfig v-if="memoryStore.activeSubTab === 'mcpconfig'" :kb-id="kbId" />
+            <MemoryBrowse  v-if="memoryStore.activeSubTab === 'browse'"  :kb-id="kbId" :can-edit="canEditMemory" @open-detail="openMemoryDrawer" />
+            <MemoryGraph   v-else-if="memoryStore.activeSubTab === 'graph'"   :kb-id="kbId" :focus-id="graphFocusId" @view-memory="openMemoryById" />
+            <MemoryHealth  v-else-if="memoryStore.activeSubTab === 'health'"  :kb-id="kbId" @critical-issues-changed="hasCriticalIssues = $event" @view-memory="openMemoryById" />
+            <MemoryHistory v-else-if="memoryStore.activeSubTab === 'history'" :kb-id="kbId" @view-memory="openMemoryById" />
+            <MemoryDream   v-else-if="memoryStore.activeSubTab === 'dream'"   :kb-id="kbId" :can-manage="canManageMemory" @view-memory="openMemoryById" />
+            <MemoryMcpConfig v-else-if="memoryStore.activeSubTab === 'mcpconfig'" :kb-id="kbId" :owner-tenant-id="kbInfo?.tenant_id" />
           </KeepAlive>
           <MemoryDrawer
             v-model:visible="memoryDrawerVisible"
             :memory="selectedMemory"
-            :can-edit="canMutateKnowledge"
-            :can-manage="canManage"
+            :can-edit="canEditMemory"
+            :can-manage="canManageMemory"
             @close="closeMemoryDrawer"
             @update="handleMemoryUpdate"
             @view-memory="openMemoryById"

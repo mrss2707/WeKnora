@@ -1,0 +1,1255 @@
+{
+ "canary": "GAMMA-CANARY-7f3a",
+ "near_duplicates": [
+  [
+   "dup_redis_a",
+   "dup_redis_b"
+  ]
+ ],
+ "contradictions": [
+  [
+   "es_primary",
+   "es_decommissioned"
+  ]
+ ],
+ "knowledge_bases": {
+  "acme-eng": [
+   {
+    "key": "pg_pool",
+    "content": "Postgres connection pool was exhausted under peak load; fixed by raising max_open_conns from 20 to 50 in config.yaml."
+   },
+   {
+    "key": "pgbouncer",
+    "content": "Decided to put pgbouncer in transaction mode in front of Postgres because app replicas opened too many connections."
+   },
+   {
+    "key": "pg_vacuum",
+    "content": "Autovacuum on the chunks table falls behind during bulk imports; we run a manual VACUUM ANALYZE after each import job."
+   },
+   {
+    "key": "pg_index_bloat",
+    "content": "The HNSW index on embeddings grew to 40 GB; REINDEX CONCURRENTLY every month keeps query latency under 50 ms."
+   },
+   {
+    "key": "redis_eviction",
+    "content": "Redis is configured with maxmemory-policy allkeys-lru so the asynq queue never blocks when memory is full."
+   },
+   {
+    "key": "redis_password",
+    "content": "Redis password is read from REDIS_PASSWORD; never hardcode it in docker-compose files."
+   },
+   {
+    "key": "asynq_retry",
+    "content": "Asynq document parsing tasks retry 3 times with exponential backoff before moving to the dead letter queue."
+   },
+   {
+    "key": "docreader_grpc",
+    "content": "The docreader service talks gRPC on port 50051; set DOCREADER_TRANSPORT=grpc in the app container."
+   },
+   {
+    "key": "ocr_timeout",
+    "content": "Scanned PDFs over 200 pages time out in OCR; we split them into 50 page batches before sending to docreader."
+   },
+   {
+    "key": "jwt_expiry",
+    "content": "Access tokens expire after 24 hours and refresh tokens after 7 days; the frontend refreshes silently on 401."
+   },
+   {
+    "key": "rbac_roles",
+    "content": "Tenant roles are owner, admin, contributor and viewer; viewers can read knowledge bases but never edit them."
+   },
+   {
+    "key": "deploy_day",
+    "content": "Production deploys happen on Wednesday mornings after the staging smoke test passes."
+   },
+   {
+    "key": "rollback",
+    "content": "To roll back a release, redeploy the previous image tag and run migrate force only on the core stream."
+   },
+   {
+    "key": "helm_values",
+    "content": "Helm chart values for production live in deploy/helm/values-prod.yaml and are reviewed by the platform team."
+   },
+   {
+    "key": "frontend_dark",
+    "content": "The user prefers dark mode and compact tables in the admin console."
+   },
+   {
+    "key": "frontend_i18n",
+    "content": "Every new UI string must be added to all six locale files: zh-CN, en-US, ko-KR, vi-VN, ru-RU and ja-JP."
+   },
+   {
+    "key": "embedding_model",
+    "content": "We switched the embedding model to bge-m3 because it handles Vietnamese and English in the same vector space."
+   },
+   {
+    "key": "rerank_model",
+    "content": "Reranking uses bge-reranker-v2-m3 with top_k 20 before the final top 5 are sent to the LLM."
+   },
+   {
+    "key": "llm_timeout",
+    "content": "LLM calls time out after 120 seconds; long summaries are streamed to avoid gateway timeouts."
+   },
+   {
+    "key": "s3_bucket",
+    "content": "Uploaded files are stored in the MinIO bucket weknora-files with versioning enabled."
+   },
+   {
+    "key": "backup_policy",
+    "content": "Postgres is backed up nightly at 02:00 with pg_dump and kept for 30 days on S3."
+   },
+   {
+    "key": "incident_disk",
+    "content": "On 12 March the database disk filled up because WAL archiving was misconfigured; we added a disk usage alert at 80 percent."
+   },
+   {
+    "key": "incident_dns",
+    "content": "Last week an outage happened when internal DNS cached a stale IP for the docreader service."
+   },
+   {
+    "key": "code_review",
+    "content": "Every pull request needs one approval from the owning team and green CI before merge."
+   },
+   {
+    "key": "go_version",
+    "content": "The backend builds with Go 1.26; older toolchains fail on the new iterator syntax."
+   },
+   {
+    "key": "vi_pool",
+    "content": "Kết nối Postgres bị cạn khi tải cao vào giờ cao điểm; đã tăng max_open_conns lên 50 để khắc phục."
+   },
+   {
+    "key": "vi_deploy",
+    "content": "Lịch triển khai lên production là sáng thứ Tư, sau khi staging chạy smoke test thành công."
+   },
+   {
+    "key": "vi_backup",
+    "content": "Cơ sở dữ liệu được sao lưu hằng đêm lúc 2 giờ sáng bằng pg_dump và giữ trong 30 ngày."
+   },
+   {
+    "key": "vi_meeting",
+    "content": "Họp giao ban kỹ thuật diễn ra lúc 9 giờ sáng thứ Hai hằng tuần qua Google Meet."
+   },
+   {
+    "key": "vi_ocr",
+    "content": "Tài liệu PDF scan hơn 200 trang bị quá thời gian OCR, nên chia thành từng lô 50 trang trước khi gửi docreader."
+   },
+   {
+    "key": "vi_role",
+    "content": "Người dùng vai trò viewer chỉ được xem kho tri thức, không được chỉnh sửa hay xóa tài liệu."
+   },
+   {
+    "key": "vi_pref",
+    "content": "Anh Tú thích báo cáo ngắn gọn, ưu tiên bảng thay vì đoạn văn dài."
+   },
+   {
+    "key": "vi_decision_vector",
+    "content": "Nhóm đã quyết định dùng pgvector thay cho Milvus để giảm số dịch vụ phải vận hành."
+   },
+   {
+    "key": "vi_incident",
+    "content": "Hôm qua đã xảy ra sự cố mất kết nối Redis do hết bộ nhớ, đã bật chính sách allkeys-lru."
+   },
+   {
+    "key": "vi_gpu",
+    "content": "Máy chủ GPU dùng cho mô hình nhúng có 2 card A100 đặt tại trung tâm dữ liệu Hà Nội."
+   },
+   {
+    "key": "distract_cooking",
+    "content": "The team lunch on Friday will be Vietnamese pho at the place near the office."
+   },
+   {
+    "key": "distract_vi_party",
+    "content": "Tiệc cuối năm của công ty tổ chức vào tối thứ Bảy cuối tháng 12."
+   },
+   {
+    "key": "distract_hr",
+    "content": "Annual leave requests must be submitted in the HR portal at least two weeks in advance."
+   },
+   {
+    "key": "distract_parking",
+    "content": "Visitor parking is on level B2; register the license plate at reception."
+   },
+   {
+    "key": "distract_vi_wifi",
+    "content": "Mật khẩu wifi khách của văn phòng được dán ở quầy lễ tân."
+   },
+   {
+    "key": "deploy_friday",
+    "content": "Deploying on Friday afternoons broke the release pipeline twice because nobody was on call; releases now freeze at 3pm on Fridays."
+   },
+   {
+    "key": "staging_nodes",
+    "content": "The staging Kubernetes cluster runs on three nodes in ap-southeast-1 with autoscaling disabled."
+   },
+   {
+    "key": "prod_nodes",
+    "content": "Production runs on nine nodes across three availability zones; the cluster autoscaler may add up to six more."
+   },
+   {
+    "key": "feature_flags",
+    "content": "Feature flags are evaluated server-side with Unleash; frontend flags are read from the /api/v1/flags endpoint."
+   },
+   {
+    "key": "jwt_rotation",
+    "content": "JWT signing keys rotate every 30 days; old keys stay valid for 7 days so existing sessions survive the rotation."
+   },
+   {
+    "key": "rate_limit",
+    "content": "The public API rate limit is 120 writes per minute per user and 600 reads per minute per user."
+   },
+   {
+    "key": "log_retention",
+    "content": "Application logs are kept for 14 days in Loki; audit logs are kept for one year in cold storage."
+   },
+   {
+    "key": "backup_schedule",
+    "content": "Postgres is backed up with pgBackRest: a full backup every Sunday and incremental backups every six hours."
+   },
+   {
+    "key": "restore_drill",
+    "content": "The last restore drill took 42 minutes for a 300 GB database; the target recovery time is under one hour."
+   },
+   {
+    "key": "ci_cache",
+    "content": "CI caches Go modules and the npm store per branch; a cold build takes 11 minutes and a warm build 4 minutes."
+   },
+   {
+    "key": "flaky_test",
+    "content": "TestStreamManager_Concurrent is flaky under -race on CI runners with two CPUs; it is quarantined behind a build tag."
+   },
+   {
+    "key": "ocr_fallback",
+    "content": "Scanned PDFs without a text layer fall back to PaddleOCR; Vietnamese diacritics need the latin_vi model."
+   },
+   {
+    "key": "chunk_size",
+    "content": "Documents are chunked at 512 tokens with 64 tokens of overlap; tables are kept in one chunk when possible."
+   },
+   {
+    "key": "sso_oidc",
+    "content": "Single sign-on uses OIDC with Keycloak; the realm is weknora and the client id is weknora-web."
+   },
+   {
+    "key": "cors_origins",
+    "content": "Allowed CORS origins are configured through CORS_ALLOWED_ORIGINS; wildcards are rejected in production."
+   },
+   {
+    "key": "ssrf_whitelist",
+    "content": "Outbound model calls go through the SSRF guard; local model hosts must be listed in SSRF_WHITELIST."
+   },
+   {
+    "key": "neo4j_optional",
+    "content": "Neo4j is optional; without it the knowledge graph features are hidden in the UI."
+   },
+   {
+    "key": "node_version",
+    "content": "The frontend builds with Node 22 and pnpm is not supported; use npm ci."
+   },
+   {
+    "key": "i18n_locales",
+    "content": "The web UI ships six locales: zh-CN, en-US, ko-KR, vi-VN, ru-RU and ja-JP; zh-CN is the source locale."
+   },
+   {
+    "key": "oncall_rotation",
+    "content": "On-call rotates weekly on Monday at 10:00; the handover checklist lives in the runbooks repository."
+   },
+   {
+    "key": "pager_escalation",
+    "content": "Pages escalate to the secondary on-call after 15 minutes without acknowledgement."
+   },
+   {
+    "key": "incident_0412",
+    "content": "Incident 2026-04-12: an expired TLS certificate on the API gateway caused a 37-minute outage."
+   },
+   {
+    "key": "cert_renewal",
+    "content": "TLS certificates are renewed by cert-manager 30 days before expiry; alerts fire at 14 days."
+   },
+   {
+    "key": "cdn_cache",
+    "content": "Static assets are served through the CDN with a one-year cache; index.html is never cached."
+   },
+   {
+    "key": "vi_deploy_flow",
+    "content": "Quy trình triển khai: build image, chạy migrate trên staging, kiểm tra smoke test rồi mới promote lên production."
+   },
+   {
+    "key": "vi_backup_kms",
+    "content": "Bản sao lưu cơ sở dữ liệu được mã hoá bằng khoá KMS riêng và lưu ở vùng khác với cụm chính."
+   },
+   {
+    "key": "vi_oncall",
+    "content": "Người trực ca phải xác nhận cảnh báo trong vòng 15 phút, nếu không cảnh báo sẽ chuyển cho người trực phụ."
+   },
+   {
+    "key": "vi_rate_limit",
+    "content": "Giới hạn ghi của API công khai là 120 lần mỗi phút cho mỗi người dùng."
+   },
+   {
+    "key": "vi_logs",
+    "content": "Nhật ký ứng dụng được giữ 14 ngày; nhật ký kiểm toán được giữ một năm."
+   },
+   {
+    "key": "vi_ocr_model",
+    "content": "Tài liệu PDF dạng ảnh scan được xử lý bằng PaddleOCR, cần mô hình latin_vi để giữ dấu tiếng Việt."
+   },
+   {
+    "key": "vi_staging",
+    "content": "Cụm staging có ba node ở ap-southeast-1 và không bật tự động mở rộng."
+   },
+   {
+    "key": "vi_flags",
+    "content": "Cờ tính năng được đánh giá phía máy chủ bằng Unleash."
+   },
+   {
+    "key": "vi_cert",
+    "content": "Chứng chỉ TLS được cert-manager gia hạn trước 30 ngày; cảnh báo bật khi còn 14 ngày."
+   },
+   {
+    "key": "vi_minio",
+    "content": "Tệp tải lên được lưu trong bucket MinIO weknora-files có bật versioning."
+   },
+   {
+    "key": "es_primary",
+    "content": "Elasticsearch is our primary search engine for document retrieval."
+   },
+   {
+    "key": "es_decommissioned",
+    "content": "The Elasticsearch cluster was decommissioned in March 2026; Postgres with ParadeDB replaced it for search."
+   },
+   {
+    "key": "dup_redis_a",
+    "content": "Redis is only used as the asynq queue backend and never as a cache."
+   },
+   {
+    "key": "dup_redis_b",
+    "content": "Redis is used only as the asynq queue backend, never as a cache."
+   },
+   {
+    "key": "vi_long_minutes",
+    "content": "Biên bản họp kiến trúc quý 3: Mục 1: nhóm đã rà soát lại cấu hình kết nối cơ sở dữ liệu, giới hạn tài nguyên của dịch vụ và quy trình sao lưu, thống nhất giữ nguyên các tham số hiện tại cho đến đợt kiểm tra tải tiếp theo. Mục 2: nhóm đã rà soát lại cấu hình kết nối cơ sở dữ liệu, giới hạn tài nguyên của dịch vụ và quy trình sao lưu, thống nhất giữ nguyên các tham số hiện tại cho đến đợt kiểm tra tải tiếp theo. Mục 3: nhóm đã rà soát lại cấu hình kết nối cơ sở dữ liệu, giới hạn tài nguyên của dịch vụ và quy trình sao lưu, thống nhất giữ nguyên các tham số hiện tại cho đến đợt kiểm tra tải tiếp theo. Mục 4: nhóm đã rà soát lại cấu hình kết nối cơ sở dữ liệu, giới hạn tài nguyên của dịch vụ và quy trình sao lưu, thống nhất giữ nguyên các tham số hiện tại cho đến đợt kiểm tra tải tiếp theo. Mục 5: nhóm đã rà soát lại cấu hình kết nối cơ sở dữ liệu, giới hạn tài nguyên của dịch vụ và quy trình sao lưu, thống nhất giữ nguyên các tham số hiện tại cho đến đợt kiểm tra tải tiếp theo. Mục 6: nhóm đã rà soát lại cấu hình kết nối cơ sở dữ liệu, giới hạn tài nguyên của dịch vụ và quy trình sao lưu, thống nhất giữ nguyên các tham số hiện tại cho đến đợt kiểm tra tải tiếp theo. Mục 7: nhóm đã rà soát lại cấu hình kết nối cơ sở dữ liệu, giới hạn tài nguyên của dịch vụ và quy trình sao lưu, thống nhất giữ nguyên các tham số hiện tại cho đến đợt kiểm tra tải tiếp theo. Mục 8: nhóm đã rà soát lại cấu hình kết nối cơ sở dữ liệu, giới hạn tài nguyên của dịch vụ và quy trình sao lưu, thống nhất giữ nguyên các tham số hiện tại cho đến đợt kiểm tra tải tiếp theo. Mục 9: nhóm đã rà soát lại cấu hình kết nối cơ sở dữ liệu, giới hạn tài nguyên của dịch vụ và quy trình sao lưu, thống nhất giữ nguyên các tham số hiện tại cho đến đợt kiểm tra tải tiếp theo. Mục 10: nhóm đã rà soát lại cấu hình kết nối cơ sở dữ liệu, giới hạn tài nguyên của dịch vụ và quy trình sao lưu, thống nhất giữ nguyên các tham số hiện tại cho đến đợt kiểm tra tải tiếp theo. Mục 11: nhóm đã rà soát lại cấu hình kết nối cơ sở dữ liệu, giới hạn tài nguyên của dịch vụ và quy trình sao lưu, thống nhất giữ nguyên các tham số hiện tại cho đến đợt kiểm tra tải tiếp theo. Mục 12: nhóm đã rà soát lại cấu hình kết nối cơ sở dữ liệu, giới hạn tài nguyên của dịch vụ và quy trình sao lưu, thống nhất giữ nguyên các tham số hiện tại cho đến đợt kiểm tra tải tiếp theo. Mục 13: nhóm đã rà soát lại cấu hình kết nối cơ sở dữ liệu, giới hạn tài nguyên của dịch vụ và quy trình sao lưu, thống nhất giữ nguyên các tham số hiện tại cho đến đợt kiểm tra tải tiếp theo. Mục 14: nhóm đã rà soát lại cấu hình kết nối cơ sở dữ liệu, giới hạn tài nguyên của dịch vụ và quy trình sao lưu, thống nhất giữ nguyên các tham số hiện tại cho đến đợt kiểm tra tải tiếp theo. Mục 15: nhóm đã rà soát lại cấu hình kết nối cơ sở dữ liệu, giới hạn tài nguyên của dịch vụ và quy trình sao lưu, thống nhất giữ nguyên các tham số hiện tại cho đến đợt kiểm tra tải tiếp theo. Mục 16: nhóm đã rà soát lại cấu hình kết nối cơ sở dữ liệu, giới hạn tài nguyên của dịch vụ và quy trình sao lưu, thống nhất giữ nguyên các tham số hiện tại cho đến đợt kiểm tra tải tiếp theo. Mục 17: nhóm đã rà soát lại cấu hình kết nối cơ sở dữ liệu, giới hạn tài nguyên của dịch vụ và quy trình sao lưu, thống nhất giữ nguyên các tham số hiện tại cho đến đợt kiểm tra tải tiếp theo. Mục 18: nhóm đã rà soát lại cấu hình kết nối cơ sở dữ liệu, giới hạn tài nguyên của dịch vụ và quy trình sao lưu, thống nhất giữ nguyên các tham số hiện tại cho đến đợt kiểm tra tải tiếp theo. Mục 19: nhóm đã rà soát lại cấu hình kết nối cơ sở dữ liệu, giới hạn tài nguyên của dịch vụ và quy trình sao lưu, thống nhất giữ nguyên các tham số hiện tại cho đến đợt kiểm tra tải tiếp theo. Mục 20: nhóm đã rà soát lại cấu hình kết nối cơ sở dữ liệu, giới hạn tài nguyên của dịch vụ và quy trình sao lưu, thống nhất giữ nguyên các tham số hiện tại cho đến đợt kiểm tra tải tiếp theo. Mục 21: nhóm đã rà soát lại cấu hình kết nối cơ sở dữ liệu, giới hạn tài nguyên của dịch vụ và quy trình sao lưu, thống nhất giữ nguyên các tham số hiện tại cho đến đợt kiểm tra tải tiếp theo. Mục 22: nhóm đã rà soát lại cấu hình kết nối cơ sở dữ liệu, giới hạn tài nguyên của dịch vụ và quy trình sao lưu, thống nhất giữ nguyên các tham số hiện tại cho đến đợt kiểm tra tải tiếp theo. Mục 23: nhóm đã rà soát lại cấu hình kết nối cơ sở dữ liệu, giới hạn tài nguyên của dịch vụ và quy trình sao lưu, thống nhất giữ nguyên các tham số hiện tại cho đến đợt kiểm tra tải tiếp theo. Mục 24: nhóm đã rà soát lại cấu hình kết nối cơ sở dữ liệu, giới hạn tài nguyên của dịch vụ và quy trình sao lưu, thống nhất giữ nguyên các tham số hiện tại cho đến đợt kiểm tra tải tiếp theo. Mục 25: nhóm đã rà soát lại cấu hình kết nối cơ sở dữ liệu, giới hạn tài nguyên của dịch vụ và quy trình sao lưu, thống nhất giữ nguyên các tham số hiện tại cho đến đợt kiểm tra tải tiếp theo. Mục 26: nhóm đã rà soát lại cấu hình kết nối cơ sở dữ liệu, giới hạn tài nguyên của dịch vụ và quy trình sao lưu, thống nhất giữ nguyên các tham số hiện tại cho đến đợt kiểm tra tải tiếp theo. Mục 27: nhóm đã rà soát lại cấu hình kết nối cơ sở dữ liệu, giới hạn tài nguyên của dịch vụ và quy trình sao lưu, thống nhất giữ nguyên các tham số hiện tại cho đến đợt kiểm tra tải tiếp theo. Mục 28: nhóm đã rà soát lại cấu hình kết nối cơ sở dữ liệu, giới hạn tài nguyên của dịch vụ và quy trình sao lưu, thống nhất giữ nguyên các tham số hiện tại cho đến đợt kiểm tra tải tiếp theo. Mục 29: nhóm đã rà soát lại cấu hình kết nối cơ sở dữ liệu, giới hạn tài nguyên của dịch vụ và quy trình sao lưu, thống nhất giữ nguyên các tham số hiện tại cho đến đợt kiểm tra tải tiếp theo. Mục 30: nhóm đã rà soát lại cấu hình kết nối cơ sở dữ liệu, giới hạn tài nguyên của dịch vụ và quy trình sao lưu, thống nhất giữ nguyên các tham số hiện tại cho đến đợt kiểm tra tải tiếp theo. Mục 31: nhóm đã rà soát lại cấu hình kết nối cơ sở dữ liệu, giới hạn tài nguyên của dịch vụ và quy trình sao lưu, thống nhất giữ nguyên các tham số hiện tại cho đến đợt kiểm tra tải tiếp theo. Mục 32: nhóm đã rà soát lại cấu hình kết nối cơ sở dữ liệu, giới hạn tài nguyên của dịch vụ và quy trình sao lưu, thống nhất giữ nguyên các tham số hiện tại cho đến đợt kiểm tra tải tiếp theo. Mục 33: nhóm đã rà soát lại cấu hình kết nối cơ sở dữ liệu, giới hạn tài nguyên của dịch vụ và quy trình sao lưu, thống nhất giữ nguyên các tham số hiện tại cho đến đợt kiểm tra tải tiếp theo. Mục 34: nhóm đã rà soát lại cấu hình kết nối cơ sở dữ liệu, giới hạn tài nguyên của dịch vụ và quy trình sao lưu, thống nhất giữ nguyên các tham số hiện tại cho đến đợt kiểm tra tải tiếp theo. Mục 35: nhóm đã rà soát lại cấu hình kết nối cơ sở dữ liệu, giới hạn tài nguyên của dịch vụ và quy trình sao lưu, thống nhất giữ nguyên các tham số hiện tại cho đến đợt kiểm tra tải tiếp theo. Mục 36: nhóm đã rà soát lại cấu hình kết nối cơ sở dữ liệu, giới hạn tài nguyên của dịch vụ và quy trình sao lưu, thống nhất giữ nguyên các tham số hiện tại cho đến đợt kiểm tra tải tiếp theo. Mục 37: nhóm đã rà soát lại cấu hình kết nối cơ sở dữ liệu, giới hạn tài nguyên của dịch vụ và quy trình sao lưu, thống nhất giữ nguyên các tham số hiện tại cho đến đợt kiểm tra tải tiếp theo. Mục 38: nhóm đã rà soát lại cấu hình kết nối cơ sở dữ liệu, giới hạn tài nguyên của dịch vụ và quy trình sao lưu, thống nhất giữ nguyên các tham số hiện tại cho đến đợt kiểm tra tải tiếp theo. Mục 39: nhóm đã rà soát lại cấu hình kết nối cơ sở dữ liệu, giới hạn tài nguyên của dịch vụ và quy trình sao lưu, thống nhất giữ nguyên các tham số hiện tại cho đến đợt kiểm tra tải tiếp theo. Mục 40: nhóm đã rà soát lại cấu hình kết nối cơ sở dữ liệu, giới hạn tài nguyên của dịch vụ và quy trình sao lưu, thống nhất giữ nguyên các tham số hiện tại cho đến đợt kiểm tra tải tiếp theo. Mục 41: nhóm đã rà soát lại cấu hình kết nối cơ sở dữ liệu, giới hạn tài nguyên của dịch vụ và quy trình sao lưu, thống nhất giữ nguyên các tham số hiện tại cho đến đợt kiểm tra tải tiếp theo. Mục 42: nhóm đã rà soát lại cấu hình kết nối cơ sở dữ liệu, giới hạn tài nguyên của dịch vụ và quy trình sao lưu, thống nhất giữ nguyên các tham số hiện tại cho đến đợt kiểm tra tải tiếp theo. Mục 43: nhóm đã rà soát lại cấu hình kết nối cơ sở dữ liệu, giới hạn tài nguyên của dịch vụ và quy trình sao lưu, thống nhất giữ nguyên các tham số hiện tại cho đến đợt kiểm tra tải tiếp theo. Mục 44: nhóm đã rà soát lại cấu hình kết nối cơ sở dữ liệu, giới hạn tài nguyên của dịch vụ và quy trình sao lưu, thống nhất giữ nguyên các tham số hiện tại cho đến đợt kiểm tra tải tiếp theo. Mục 45: nhóm đã rà soát lại cấu hình kết nối cơ sở dữ liệu, giới hạn tài nguyên của dịch vụ và quy trình sao lưu, thống nhất giữ nguyên các tham số hiện tại cho đến đợt kiểm tra tải tiếp theo. Mục 46: nhóm đã rà soát lại cấu hình kết nối cơ sở dữ liệu, giới hạn tài nguyên của dịch vụ và quy trình sao lưu, thống nhất giữ nguyên các tham số hiện tại cho đến đợt kiểm tra tải tiếp theo. Mục 47: nhóm đã rà soát lại cấu hình kết nối cơ sở dữ liệu, giới hạn tài nguyên của dịch vụ và quy tr"
+   },
+   {
+    "key": "dns_failover",
+    "content": "DNS failover uses Route53 health checks against the regional gateway every ten seconds."
+   },
+   {
+    "key": "webhook_signature",
+    "content": "Webhook consumers verify an HMAC SHA256 signature before parsing the incoming event body."
+   },
+   {
+    "key": "dead_letter",
+    "content": "Failed invoice events move to a dead-letter queue after eight retries and require operator review."
+   },
+   {
+    "key": "tracing_sampling",
+    "content": "Distributed traces sample ten percent of successful requests and all server errors in production."
+   },
+   {
+    "key": "schema_compat",
+    "content": "Event schema changes must remain compatible with the two previous consumer versions."
+   },
+   {
+    "key": "image_signing",
+    "content": "Release container images are signed with Cosign; admission rejects unsigned images."
+   },
+   {
+    "key": "secret_mount",
+    "content": "Database credentials are mounted as files by the secrets operator, not baked into container images."
+   },
+   {
+    "key": "upload_quota",
+    "content": "Each workspace has a twenty gigabyte upload quota; exhausted workspaces can still read existing documents."
+   },
+   {
+    "key": "pdf_sandbox",
+    "content": "Untrusted PDF rendering runs in a network-disabled sandbox with a dedicated temporary directory."
+   },
+   {
+    "key": "grpc_deadline",
+    "content": "Document parsing RPCs carry a ninety second deadline and cancel the parser when the caller disconnects."
+   },
+   {
+    "key": "queue_fairness",
+    "content": "The ingestion scheduler uses weighted round robin so a bulk import cannot starve smaller workspaces."
+   },
+   {
+    "key": "connection_pool",
+    "content": "The API database pool allows forty open connections and retires connections after thirty minutes."
+   },
+   {
+    "key": "readonly_replica",
+    "content": "Analytics dashboards query the read replica; permission checks always read the primary database."
+   },
+   {
+    "key": "clock_sync",
+    "content": "Cluster machines synchronize clocks with chrony; drift over two seconds pages infrastructure support."
+   },
+   {
+    "key": "pagination_cursor",
+    "content": "Audit exports use a timestamp and UUID cursor rather than offset pagination to avoid missing concurrent inserts."
+   },
+   {
+    "key": "idempotency_window",
+    "content": "Payment webhook idempotency keys are retained for seventy two hours in a dedicated table."
+   },
+   {
+    "key": "reindex_bluegreen",
+    "content": "Search reindexing builds a shadow index and switches the alias only after document counts match."
+   },
+   {
+    "key": "grpc_compression",
+    "content": "Parser RPC compression is disabled for JPEG attachments because they are already compressed."
+   },
+   {
+    "key": "unicode_normalize",
+    "content": "Document title comparison normalizes Unicode to NFC without removing Vietnamese accents."
+   },
+   {
+    "key": "timezone_storage",
+    "content": "All persisted timestamps use UTC; tenant timezone preferences affect display only."
+   },
+   {
+    "key": "vi_dns",
+    "content": "Khi vùng chính mất kết nối, bộ cân bằng DNS chuyển lưu lượng sang vùng dự phòng sau ba lần kiểm tra thất bại."
+   },
+   {
+    "key": "vi_signature",
+    "content": "Chữ ký webhook được kiểm tra trên nội dung thô trước khi giải mã JSON để tránh sai lệch byte."
+   },
+   {
+    "key": "vi_accessibility",
+    "content": "Các nút biểu tượng phải có nhãn hỗ trợ trình đọc màn hình và sử dụng được bằng bàn phím."
+   },
+   {
+    "key": "vi_attachments",
+    "content": "Tệp đính kèm bị nghi nhiễm mã độc được đưa vào vùng cách ly, không tạo liên kết tải công khai."
+   },
+   {
+    "key": "vi_transactions",
+    "content": "Việc chuyển quyền sở hữu dự án và cập nhật nhật ký kiểm toán phải nằm trong cùng giao dịch."
+   },
+   {
+    "key": "vi_password_reset",
+    "content": "Liên kết đặt lại mật khẩu chỉ dùng một lần và hết hạn sau hai mươi phút."
+   },
+   {
+    "key": "vi_websocket",
+    "content": "Kết nối WebSocket gửi heartbeat mỗi hai mươi lăm giây và đóng sau ba lần không nhận phản hồi."
+   },
+   {
+    "key": "vi_csv",
+    "content": "Xuất CSV phải vô hiệu hoá công thức trong ô bắt đầu bằng dấu bằng để tránh spreadsheet injection."
+   },
+   {
+    "key": "vi_retry",
+    "content": "Client chỉ tự thử lại các lệnh ghi khi có idempotency key; không lặp mù sau timeout."
+   },
+   {
+    "key": "vi_email_queue",
+    "content": "Email thông báo chạy trong hàng đợi riêng để lỗi nhà cung cấp thư không làm chậm nhập tài liệu."
+   },
+   {
+    "key": "bug_zip_slip",
+    "content": "Fixed archive extraction traversal by rejecting entries whose canonical path escapes the temporary root."
+   },
+   {
+    "key": "bug_double_charge",
+    "content": "A duplicate billing callback caused double charging; a unique provider event index now prevents it."
+   },
+   {
+    "key": "bug_timezone",
+    "content": "The daily report shifted at daylight saving transitions; the scheduler now uses an explicit IANA timezone."
+   },
+   {
+    "key": "bug_cursor",
+    "content": "A nullable sort column skipped rows in the export cursor; explicit NULLS LAST resolved the gap."
+   },
+   {
+    "key": "decision_avif",
+    "content": "Decision: serve AVIF thumbnails with WebP fallback because older embedded browsers cannot decode AVIF."
+   },
+   {
+    "key": "decision_outbox",
+    "content": "Decision: use a transactional outbox for billing notifications so committed payments never lose their events."
+   },
+   {
+    "key": "preference_tests",
+    "content": "The platform team prefers table-driven unit tests with named cases over large assertion-heavy test functions."
+   },
+   {
+    "key": "preference_runbooks",
+    "content": "The operations team prefers runbooks with copyable diagnostic commands and explicit rollback conditions."
+   },
+   {
+    "key": "vi_bug_font",
+    "content": "Đã sửa lỗi thiếu dấu tiếng Việt trong bản in bằng cách nhúng phông Noto Sans vào bộ dựng PDF."
+   },
+   {
+    "key": "vi_decision_index",
+    "content": "Quyết định giữ chỉ mục tìm kiếm riêng theo loại tài liệu để kiểm soát chi phí cập nhật từng nhóm."
+   }
+  ],
+  "acme-hr": [
+   {
+    "key": "hr_leave",
+    "content": "Employees get 18 days of paid annual leave; unused days carry over until the end of March."
+   },
+   {
+    "key": "hr_remote",
+    "content": "Remote work is allowed up to three days per week; Tuesdays and Thursdays are office days."
+   },
+   {
+    "key": "hr_probation",
+    "content": "The probation period is two months for engineers and one month for interns."
+   },
+   {
+    "key": "hr_expenses",
+    "content": "Expenses under 2,000,000 VND are approved by the team lead; larger ones need the finance manager."
+   },
+   {
+    "key": "hr_laptop",
+    "content": "New hires receive a MacBook Pro on their first day; the laptop is returned within five days of leaving."
+   },
+   {
+    "key": "hr_review",
+    "content": "Performance reviews happen twice a year, in June and December."
+   },
+   {
+    "key": "hr_bonus",
+    "content": "The annual bonus is paid in January together with the thirteenth-month salary."
+   },
+   {
+    "key": "hr_insurance",
+    "content": "Health insurance covers employees and up to two dependants from the first month."
+   },
+   {
+    "key": "hr_training",
+    "content": "Each employee has a training budget of 10,000,000 VND per year for courses and conferences."
+   },
+   {
+    "key": "hr_overtime",
+    "content": "Overtime must be approved in advance and is compensated at 150% on weekdays and 200% on weekends."
+   },
+   {
+    "key": "hr_vi_nghi_phep",
+    "content": "Nhân viên có 18 ngày nghỉ phép năm có lương; ngày chưa dùng được chuyển sang đến hết tháng Ba."
+   },
+   {
+    "key": "hr_vi_lam_tu_xa",
+    "content": "Được làm việc từ xa tối đa ba ngày mỗi tuần; thứ Ba và thứ Năm làm tại văn phòng."
+   },
+   {
+    "key": "hr_vi_thu_viec",
+    "content": "Thời gian thử việc là hai tháng với kỹ sư và một tháng với thực tập sinh."
+   },
+   {
+    "key": "hr_vi_danh_gia",
+    "content": "Đánh giá hiệu suất diễn ra hai lần mỗi năm vào tháng Sáu và tháng Mười Hai."
+   },
+   {
+    "key": "hr_vi_thuong",
+    "content": "Thưởng năm được trả vào tháng Một cùng lương tháng mười ba."
+   },
+   {
+    "key": "hr_vi_bao_hiem",
+    "content": "Bảo hiểm sức khoẻ áp dụng cho nhân viên và tối đa hai người phụ thuộc ngay từ tháng đầu."
+   },
+   {
+    "key": "hr_vi_dao_tao",
+    "content": "Mỗi nhân viên có ngân sách đào tạo 10 triệu đồng mỗi năm cho khoá học và hội thảo."
+   },
+   {
+    "key": "hr_vi_tang_ca",
+    "content": "Làm thêm giờ phải được duyệt trước, tính 150% ngày thường và 200% cuối tuần."
+   },
+   {
+    "key": "hr_onboarding",
+    "content": "Onboarding takes one week: day one is accounts and laptop, day two security training, then a buddy project."
+   },
+   {
+    "key": "hr_offboarding",
+    "content": "On the last day, IT revokes access at 18:00 and the manager collects the badge."
+   },
+   {
+    "key": "hr_parental",
+    "content": "Parental leave requests are submitted confidentially to HR at least thirty days before the planned start."
+   },
+   {
+    "key": "hr_travel",
+    "content": "International business travel requires department approval before flights or accommodation are booked."
+   },
+   {
+    "key": "hr_meals",
+    "content": "Business trip meal reimbursement is capped at seven hundred thousand VND per day with receipts."
+   },
+   {
+    "key": "hr_referral",
+    "content": "Employee referral rewards are paid after the referred hire successfully completes probation."
+   },
+   {
+    "key": "hr_conflict",
+    "content": "Potential conflicts of interest must be disclosed to the ethics officer before accepting outside consulting."
+   },
+   {
+    "key": "hr_harassment",
+    "content": "Workplace harassment reports may be filed anonymously through the independent ethics hotline."
+   },
+   {
+    "key": "hr_accessibility",
+    "content": "Employees can request workplace accessibility accommodations without disclosing a diagnosis to their manager."
+   },
+   {
+    "key": "hr_emergency",
+    "content": "Emergency contact details are reviewed each January and are visible only to authorized HR staff."
+   },
+   {
+    "key": "hr_badge",
+    "content": "Lost office badges must be reported immediately so facilities can deactivate physical access."
+   },
+   {
+    "key": "hr_visitors",
+    "content": "Visitors sign in at reception and remain accompanied in engineering work areas."
+   },
+   {
+    "key": "hr_learning",
+    "content": "Language classes are reimbursed when included in an approved individual development plan."
+   },
+   {
+    "key": "hr_sabbatical",
+    "content": "A four week unpaid sabbatical is available after five continuous years of service."
+   },
+   {
+    "key": "hr_vi_cong_doan",
+    "content": "Đại diện người lao động tổ chức đối thoại định kỳ mỗi quý và tiếp nhận kiến nghị qua hộp thư riêng."
+   },
+   {
+    "key": "hr_vi_bao_mat",
+    "content": "Hồ sơ nhân sự chỉ được truy cập theo nhiệm vụ; quản lý nhóm không xem được thông tin y tế."
+   },
+   {
+    "key": "hr_vi_khach",
+    "content": "Khách đến văn phòng phải đăng ký tại lễ tân và có nhân viên đi cùng trong khu kỹ thuật."
+   },
+   {
+    "key": "hr_vi_the",
+    "content": "Khi mất thẻ ra vào, nhân viên phải báo ngay cho bộ phận hành chính để khoá quyền truy cập."
+   },
+   {
+    "key": "hr_vi_cong_tac",
+    "content": "Công tác nước ngoài cần được trưởng bộ phận duyệt trước khi đặt vé máy bay và khách sạn."
+   },
+   {
+    "key": "hr_vi_gioi_thieu",
+    "content": "Thưởng giới thiệu ứng viên được thanh toán sau khi nhân viên mới hoàn thành thử việc."
+   },
+   {
+    "key": "hr_vi_dao_duc",
+    "content": "Xung đột lợi ích tiềm ẩn phải được khai báo trước khi nhận tư vấn bên ngoài."
+   },
+   {
+    "key": "hr_vi_cham_cong",
+    "content": "Điều chỉnh chấm công của tháng trước phải gửi trước ngày mùng năm để kịp kỳ tính lương."
+   },
+   {
+    "key": "hr_vi_phong_hop",
+    "content": "Phòng họp được tự động giải phóng nếu không có người xác nhận trong mười phút đầu."
+   },
+   {
+    "key": "hr_vi_an_toan",
+    "content": "Diễn tập sơ tán toà nhà diễn ra mỗi sáu tháng; điểm tập kết nằm ở sân phía đông."
+   },
+   {
+    "key": "hr_vi_tai_san",
+    "content": "Thiết bị mượn dùng ở nhà phải được ghi nhận mã tài sản và người chịu trách nhiệm."
+   },
+   {
+    "key": "hr_vi_gop_y",
+    "content": "Khảo sát gắn kết nhân viên là ẩn danh và chỉ công bố kết quả cho nhóm có ít nhất năm người."
+   }
+  ],
+  "beta-ops": [
+   {
+    "key": "beta_region",
+    "content": "Beta runs its workloads in eu-central-1 and keeps backups in eu-west-1."
+   },
+   {
+    "key": "beta_oncall",
+    "content": "Beta on-call uses Opsgenie with a two-person rotation that changes every Wednesday."
+   },
+   {
+    "key": "beta_db",
+    "content": "Beta uses MySQL 8 for billing and Postgres 16 for analytics."
+   },
+   {
+    "key": "beta_release",
+    "content": "Beta releases every second Tuesday after the change advisory board meeting."
+   },
+   {
+    "key": "beta_sla",
+    "content": "Beta guarantees 99.9% monthly availability to its enterprise customers."
+   },
+   {
+    "key": "beta_vi_khu_vuc",
+    "content": "Hệ thống của Beta chạy ở eu-central-1 và sao lưu ở eu-west-1."
+   },
+   {
+    "key": "beta_vi_phat_hanh",
+    "content": "Beta phát hành hai tuần một lần vào thứ Ba sau cuộc họp hội đồng thay đổi."
+   },
+   {
+    "key": "beta_monitoring",
+    "content": "Beta monitors services with Prometheus and Grafana; alerts route to the #beta-alerts channel."
+   },
+   {
+    "key": "beta_billing_close",
+    "content": "Beta closes its billing ledger at midnight UTC on the final calendar day of each month."
+   },
+   {
+    "key": "beta_sftp",
+    "content": "Beta exchanges settlement files with its bank over SFTP using pinned host keys."
+   },
+   {
+    "key": "beta_drill",
+    "content": "Beta conducts disaster recovery exercises in September with an independent observer."
+   },
+   {
+    "key": "beta_vpn",
+    "content": "Beta administrative consoles require device certificates and the corporate VPN."
+   },
+   {
+    "key": "beta_artifact",
+    "content": "Beta retains signed firmware artifacts for seven years to satisfy support obligations."
+   },
+   {
+    "key": "beta_canary",
+    "content": "Beta rolls new firmware to one percent of devices before expanding the deployment ring."
+   },
+   {
+    "key": "beta_rollback",
+    "content": "Beta halts a firmware rollout when crash frequency doubles against the previous release baseline."
+   },
+   {
+    "key": "beta_timeouts",
+    "content": "Beta checkout has a twelve second overall deadline including downstream fraud screening."
+   },
+   {
+    "key": "beta_warehouse",
+    "content": "Beta refreshes the finance warehouse at 04:00 UTC after settlement reconciliation."
+   },
+   {
+    "key": "beta_keys",
+    "content": "Beta encrypts device enrollment keys with a dedicated hardware-backed regional key."
+   },
+   {
+    "key": "beta_vi_kiem_ke",
+    "content": "Beta kiểm kê thiết bị tại kho vào thứ Sáu cuối cùng của mỗi quý."
+   },
+   {
+    "key": "beta_vi_hoa_don",
+    "content": "Hoá đơn của Beta sử dụng số thứ tự riêng theo pháp nhân và năm tài chính."
+   },
+   {
+    "key": "beta_vi_doi_soat",
+    "content": "Tệp đối soát ngân hàng được kiểm tra tổng tiền trước khi nhập vào sổ cái."
+   },
+   {
+    "key": "beta_vi_khach_hang",
+    "content": "Yêu cầu xoá dữ liệu khách hàng tại Beta cần xác minh danh tính và phê duyệt tuân thủ."
+   },
+   {
+    "key": "beta_vi_quan_tri",
+    "content": "Phiên quản trị thiết bị của Beta được ghi lại và giữ trong kho kiểm toán hạn chế truy cập."
+   },
+   {
+    "key": "beta_vi_sua_chua",
+    "content": "Thiết bị gửi bảo hành phải được xoá khoá đăng nhập trước khi chuyển cho đối tác sửa chữa."
+   },
+   {
+    "key": "beta_vi_pin",
+    "content": "Lô pin có dấu hiệu phồng được cách ly ngay và không vận chuyển bằng đường hàng không."
+   },
+   {
+    "key": "beta_vi_nhiet_do",
+    "content": "Kho linh kiện Beta duy trì nhiệt độ từ mười tám đến hai mươi sáu độ C."
+   },
+   {
+    "key": "beta_vi_nha_cung_cap",
+    "content": "Nhà cung cấp linh kiện mới phải vượt qua đánh giá chất lượng trước đơn hàng thương mại đầu tiên."
+   },
+   {
+    "key": "beta_vi_van_chuyen",
+    "content": "Đơn hàng xuất khẩu của Beta phải có chứng từ nguồn gốc trước khi chuyển cho hãng vận chuyển."
+   }
+  ],
+  "gamma-private": [
+   {
+    "key": "gamma_1",
+    "content": "GAMMA-CANARY-7f3a the Gamma vault code is stored in a hardware security module in Hanoi."
+   },
+   {
+    "key": "gamma_2",
+    "content": "GAMMA-CANARY-7f3a Gamma payroll runs on the 25th of each month through an internal batch job."
+   },
+   {
+    "key": "gamma_3",
+    "content": "GAMMA-CANARY-7f3a the Gamma board meets every quarter in the Da Nang office."
+   },
+   {
+    "key": "gamma_4",
+    "content": "GAMMA-CANARY-7f3a Gamma customer contracts are archived for ten years in encrypted cold storage."
+   },
+   {
+    "key": "gamma_5",
+    "content": "GAMMA-CANARY-7f3a Gamma uses an air-gapped build server for its firmware releases."
+   },
+   {
+    "key": "gamma_6",
+    "content": "GAMMA-CANARY-7f3a the Gamma incident hotline is staffed around the clock by two engineers."
+   },
+   {
+    "key": "gamma_7",
+    "content": "GAMMA-CANARY-7f3a Gamma marketing launches are announced only after legal review."
+   },
+   {
+    "key": "gamma_8",
+    "content": "GAMMA-CANARY-7f3a Gamma laptops are reimaged every six months by the security team."
+   },
+   {
+    "key": "gamma_9",
+    "content": "GAMMA-CANARY-7f3a Gamma keeps its source code in a self-hosted Gitea instance."
+   },
+   {
+    "key": "gamma_10",
+    "content": "GAMMA-CANARY-7f3a the Gamma office Wi-Fi password changes on the first Monday of each month."
+   }
+  ]
+ },
+ "queries": [
+  {
+   "kb": "acme-eng",
+   "q": "postgres connection pool exhausted",
+   "want": [
+    "pg_pool",
+    "vi_pool"
+   ],
+   "kind": "en-keyword"
+  },
+  {
+   "kb": "acme-eng",
+   "q": "why did the database run out of connections?",
+   "want": [
+    "pg_pool",
+    "vi_pool",
+    "pgbouncer"
+   ],
+   "kind": "en-paraphrase"
+  },
+  {
+   "kb": "acme-eng",
+   "q": "how many connections can the app open to postgres",
+   "want": [
+    "pg_pool",
+    "vi_pool"
+   ],
+   "kind": "en-paraphrase"
+  },
+  {
+   "kb": "acme-eng",
+   "q": "connection pooler in front of the database",
+   "want": [
+    "pgbouncer"
+   ],
+   "kind": "en-paraphrase"
+  },
+  {
+   "kb": "acme-eng",
+   "q": "table maintenance after big imports",
+   "want": [
+    "pg_vacuum"
+   ],
+   "kind": "en-paraphrase"
+  },
+  {
+   "kb": "acme-eng",
+   "q": "vector index is huge and slow",
+   "want": [
+    "pg_index_bloat"
+   ],
+   "kind": "en-paraphrase"
+  },
+  {
+   "kb": "acme-eng",
+   "q": "redis eviction policy",
+   "want": [
+    "redis_eviction",
+    "vi_incident"
+   ],
+   "kind": "en-keyword"
+  },
+  {
+   "kb": "acme-eng",
+   "q": "where does the redis secret come from",
+   "want": [
+    "redis_password"
+   ],
+   "kind": "en-paraphrase"
+  },
+  {
+   "kb": "acme-eng",
+   "q": "what happens when parsing a document fails repeatedly",
+   "want": [
+    "asynq_retry"
+   ],
+   "kind": "en-paraphrase"
+  },
+  {
+   "kb": "acme-eng",
+   "q": "docreader port",
+   "want": [
+    "docreader_grpc"
+   ],
+   "kind": "en-keyword"
+  },
+  {
+   "kb": "acme-eng",
+   "q": "large scanned pdf ocr",
+   "want": [
+    "ocr_timeout",
+    "vi_ocr"
+   ],
+   "kind": "en-keyword"
+  },
+  {
+   "kb": "acme-eng",
+   "q": "how long is a login session valid",
+   "want": [
+    "jwt_expiry"
+   ],
+   "kind": "en-paraphrase"
+  },
+  {
+   "kb": "acme-eng",
+   "q": "can a viewer edit documents",
+   "want": [
+    "rbac_roles",
+    "vi_role"
+   ],
+   "kind": "en-paraphrase"
+  },
+  {
+   "kb": "acme-eng",
+   "q": "when do we release to production",
+   "want": [
+    "deploy_day",
+    "vi_deploy"
+   ],
+   "kind": "en-paraphrase"
+  },
+  {
+   "kb": "acme-eng",
+   "q": "how to revert a bad release",
+   "want": [
+    "rollback"
+   ],
+   "kind": "en-paraphrase"
+  },
+  {
+   "kb": "acme-eng",
+   "q": "UI theme preference",
+   "want": [
+    "frontend_dark"
+   ],
+   "kind": "en-paraphrase"
+  },
+  {
+   "kb": "acme-eng",
+   "q": "which languages must translations cover",
+   "want": [
+    "frontend_i18n"
+   ],
+   "kind": "en-paraphrase"
+  },
+  {
+   "kb": "acme-eng",
+   "q": "why bge-m3",
+   "want": [
+    "embedding_model"
+   ],
+   "kind": "en-keyword"
+  },
+  {
+   "kb": "acme-eng",
+   "q": "database backups retention",
+   "want": [
+    "backup_policy",
+    "vi_backup"
+   ],
+   "kind": "en-paraphrase"
+  },
+  {
+   "kb": "acme-eng",
+   "q": "disk full incident",
+   "want": [
+    "incident_disk"
+   ],
+   "kind": "en-paraphrase"
+  },
+  {
+   "kb": "acme-eng",
+   "q": "dns outage",
+   "want": [
+    "incident_dns"
+   ],
+   "kind": "en-keyword"
+  },
+  {
+   "kb": "acme-eng",
+   "q": "merge requirements for pull requests",
+   "want": [
+    "code_review"
+   ],
+   "kind": "en-paraphrase"
+  },
+  {
+   "kb": "acme-eng",
+   "q": "which Go version",
+   "want": [
+    "go_version"
+   ],
+   "kind": "en-keyword"
+  },
+  {
+   "kb": "acme-eng",
+   "q": "kết nối postgres bị cạn",
+   "want": [
+    "vi_pool",
+    "pg_pool"
+   ],
+   "kind": "vi-keyword"
+  },
+  {
+   "kb": "acme-eng",
+   "q": "tại sao database hết kết nối khi đông người dùng",
+   "want": [
+    "vi_pool",
+    "pg_pool"
+   ],
+   "kind": "vi-paraphrase"
+  },
+  {
+   "kb": "acme-eng",
+   "q": "khi nào triển khai production",
+   "want": [
+    "vi_deploy",
+    "deploy_day"
+   ],
+   "kind": "vi-paraphrase"
+  },
+  {
+   "kb": "acme-eng",
+   "q": "sao lưu cơ sở dữ liệu",
+   "want": [
+    "vi_backup",
+    "backup_policy"
+   ],
+   "kind": "vi-keyword"
+  },
+  {
+   "kb": "acme-eng",
+   "q": "họp giao ban",
+   "want": [
+    "vi_meeting"
+   ],
+   "kind": "vi-keyword"
+  },
+  {
+   "kb": "acme-eng",
+   "q": "OCR tài liệu dài bị lỗi",
+   "want": [
+    "vi_ocr",
+    "ocr_timeout"
+   ],
+   "kind": "vi-paraphrase"
+  },
+  {
+   "kb": "acme-eng",
+   "q": "quyền của viewer",
+   "want": [
+    "vi_role",
+    "rbac_roles"
+   ],
+   "kind": "vi-keyword"
+  },
+  {
+   "kb": "acme-eng",
+   "q": "sếp thích báo cáo kiểu gì",
+   "want": [
+    "vi_pref"
+   ],
+   "kind": "vi-paraphrase"
+  },
+  {
+   "kb": "acme-eng",
+   "q": "vì sao chọn pgvector",
+   "want": [
+    "vi_decision_vector"
+   ],
+   "kind": "vi-keyword"
+  },
+  {
+   "kb": "acme-eng",
+   "q": "sự cố Redis hết bộ nhớ",
+   "want": [
+    "vi_incident",
+    "redis_eviction"
+   ],
+   "kind": "vi-keyword"
+  },
+  {
+   "kb": "acme-eng",
+   "q": "máy chủ GPU ở đâu",
+   "want": [
+    "vi_gpu"
+   ],
+   "kind": "vi-paraphrase"
+  },
+  {
+   "kb": "acme-eng",
+   "q": "database backup schedule",
+   "want": [
+    "backup_policy",
+    "vi_backup"
+   ],
+   "kind": "cross-en-vi"
+  },
+  {
+   "kb": "acme-eng",
+   "q": "weekly engineering standup",
+   "want": [
+    "vi_meeting"
+   ],
+   "kind": "cross-en-vi"
+  },
+  {
+   "kb": "acme-eng",
+   "q": "where are the GPU servers located",
+   "want": [
+    "vi_gpu"
+   ],
+   "kind": "cross-en-vi"
+  },
+  {
+   "kb": "acme-eng",
+   "q": "why did we choose pgvector over Milvus",
+   "want": [
+    "vi_decision_vector"
+   ],
+   "kind": "cross-en-vi"
+  },
+  {
+   "kb": "acme-eng",
+   "q": "chính sách giữ bản sao lưu bao lâu",
+   "want": [
+    "vi_backup",
+    "backup_policy"
+   ],
+   "kind": "cross-vi-en"
+  },
+  {
+   "kb": "acme-eng",
+   "q": "mô hình nhúng xử lý tiếng Việt",
+   "want": [
+    "embedding_model"
+   ],
+   "kind": "cross-vi-en"
+  },
+  {
+   "kb": "acme-eng",
+   "q": "token đăng nhập hết hạn sau bao lâu",
+   "want": [
+    "jwt_expiry"
+   ],
+   "kind": "cross-vi-en"
+  },
+  {
+   "kb": "acme-eng",
+   "q": "when are releases frozen on friday",
+   "want": [
+    "deploy_friday"
+   ],
+   "kind": "en-paraphrase"
+  },
+  {
+   "kb": "acme-eng",
+   "q": "how often do jwt keys rotate",
+   "want": [
+    "jwt_rotation"
+   ],
+   "kind": "en-keyword"
+  },
+  {
+   "kb": "acme-eng",
+   "q": "người trực ca phải xác nhận cảnh báo trong bao lâu",
+   "want": [
+    "vi_oncall",
+    "pager_escalation"
+   ],
+   "kind": "vi"
+  },
+  {
+   "kb": "acme-eng",
+   "q": "giới hạn số lần ghi API mỗi phút",
+   "want": [
+    "vi_rate_limit",
+    "rate_limit"
+   ],
+   "kind": "vi"
+  },
+  {
+   "kb": "acme-eng",
+   "q": "what replaced elasticsearch",
+   "want": [
+    "es_decommissioned"
+   ],
+   "kind": "en-paraphrase"
+  },
+  {
+   "kb": "acme-hr",
+   "q": "how many days of annual leave",
+   "want": [
+    "hr_leave",
+    "hr_vi_nghi_phep"
+   ],
+   "kind": "en-keyword"
+  },
+  {
+   "kb": "acme-hr",
+   "q": "ngày làm việc tại văn phòng",
+   "want": [
+    "hr_vi_lam_tu_xa",
+    "hr_remote"
+   ],
+   "kind": "vi"
+  },
+  {
+   "kb": "acme-hr",
+   "q": "when is the bonus paid",
+   "want": [
+    "hr_bonus",
+    "hr_vi_thuong"
+   ],
+   "kind": "en-paraphrase"
+  },
+  {
+   "kb": "beta-ops",
+   "q": "which region does beta run in",
+   "want": [
+    "beta_region",
+    "beta_vi_khu_vuc"
+   ],
+   "kind": "en-paraphrase"
+  }
+ ]
+}

@@ -23,6 +23,7 @@ func RegisterMemoryV2Routes(v1 *gin.RouterGroup, handler *handler.MemoryV2Handle
 		memories.GET("", g.Viewer(), handler.ListMemories)
 		memories.GET("/search", g.Viewer(), handler.SearchMemories)
 		memories.GET("/stats", g.Viewer(), handler.GetMemoryStats)
+		memories.GET("/metrics", g.SystemAdmin(), handler.MemoryMetrics)
 		memories.GET("/health", g.Viewer(), handler.GetHealthReport)
 		memories.GET("/graph", g.Viewer(), handler.GetMemoryGraphOverview)
 		memories.GET("/graph/:id", g.Viewer(), handler.GetMemoryGraph)

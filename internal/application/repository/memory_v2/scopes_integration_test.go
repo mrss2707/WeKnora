@@ -41,7 +41,7 @@ func TestPostgresMemoryRepository_CosineSearchFiltersEmbeddingModel(t *testing.T
 		ids[r.Memory.ID] = true
 	}
 	assert.True(t, ids[modelA.ID], "same model kept")
-	assert.True(t, ids[legacy.ID], "legacy rows stay comparable")
+	assert.False(t, ids[legacy.ID], "unknown legacy vectors require re-embedding before comparison")
 	assert.False(t, ids[modelB.ID], "vectors of another model are never compared")
 
 	all, err := repo.CosineSearch(context.Background(), &types.MemoryFilter{TenantID: "1", KbID: "kb"}, []float32{1, 0}, 10)

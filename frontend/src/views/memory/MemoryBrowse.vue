@@ -19,6 +19,12 @@
           </template>
         </t-input>
 
+        <t-checkbox
+          :checked="!!memoryStore.filter.hybrid"
+          data-testid="memory-search-hybrid"
+          @change="(value: boolean) => memoryStore.setFilter({ hybrid: value })"
+        >{{ $t('memory.browse.hybridSearch') }}</t-checkbox>
+
         <!-- Type filter -->
         <t-select
           :value="memoryStore.filter.type"
@@ -309,7 +315,10 @@
     </div>
 
     <!-- Pagination -->
-    <div class="browse-pagination">
+    <div v-if="memoryStore.filter.hybrid && memoryStore.filter.keyword" class="browse-pagination" data-testid="memory-search-topk">
+      {{ $t('memory.browse.hybridTopK', { count: memoryStore.filter.pageSize }) }}
+    </div>
+    <div v-else class="browse-pagination">
       <t-pagination
         :current="memoryStore.pagination.page"
         :page-size="memoryStore.pagination.pageSize"

@@ -375,3 +375,5 @@ dev-app:
 
 dev-frontend:
 	./scripts/dev.sh frontend
+
+include e2e/memory_v2/Makefile

@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "memory-e2e": {
+      "type": "http",
+      "url": "${MEMV2_E2E_MCP_URL}",
+      "headers": {
+        "Authorization": "Bearer ${MEMV2_E2E_MCP_TOKEN}"
+      }
+    }
+  }
+}

@@ -51,10 +51,15 @@ func (r *MemoryRepository) UpdateFieldsIf(
 	updates["updated_at"] = time.Now()
 	q := r.db.WithContext(ctx).Model(&types.AgentMemory{}).
 		Where("tenant_id = ? AND id = ? AND deleted_at IS NULL", tenantID, id)
+	if isAutomatedActor(ctx) {
+		// Recheck in the UPDATE itself: a human may protect the memory
+		// after the earlier read and before this statement executes.
+		q = q.Where("verdict NOT IN ?", []types.MemoryVerdict{types.VerdictDecision, types.VerdictFixed})
+	}
 	if expectedUpdatedAt != nil {
-		// Compare at microsecond precision: PostgreSQL timestamps carry no
-		// more, while Go times parsed from JSON may.
-		q = q.Where("date_trunc('milliseconds', updated_at) = date_trunc('milliseconds', ?::timestamptz)", expectedUpdatedAt.UTC())
+		// Preserve PostgreSQL's full timestamp precision; millisecond
+		// comparison incorrectly accepts two versions within the same ms.
+		q = q.Where("date_trunc('microseconds', updated_at) = date_trunc('microseconds', ?::timestamptz)", expectedUpdatedAt.UTC())
 	}
 	res := q.Updates(updates)
 	if res.Error != nil {
@@ -64,6 +69,11 @@ func (r *MemoryRepository) UpdateFieldsIf(
 		return res.Error
 	}
 	if res.RowsAffected == 0 {
+		if isAutomatedActor(ctx) {
+			if current, err := r.GetByID(ctx, tenantID, id); err == nil && current.Verdict.IsProtected() {
+				return &types.ErrProtectedVerdict{}
+			}
+		}
 		if expectedUpdatedAt != nil {
 			if _, err := r.GetByID(ctx, tenantID, id); err == nil {
 				return &types.MemoryV2ConflictError{Message: "the memory was changed by someone else; reload and try again"}

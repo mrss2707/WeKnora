@@ -10,10 +10,12 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Tencent/WeKnora/internal/application/service/memory_v2/telemetry"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
+	"github.com/google/uuid"
 )
 
 // DreamApplier performs the dreamer's changes through the service, so every
@@ -203,8 +205,23 @@ func (d *DreamerWorker) dreamPass(ctx context.Context) {
 }
 
 // executeScopePass runs one pass for one scope.
-func (d *DreamerWorker) executeScopePass(ctx context.Context, sc Scope, opts passOptions) (*types.DreamResult, error) {
-	result := &types.DreamResult{Actions: []types.DreamAction{}}
+func (d *DreamerWorker) executeScopePass(ctx context.Context, sc Scope, opts passOptions) (result *types.DreamResult, runErr error) {
+	result = &types.DreamResult{Actions: []types.DreamAction{}}
+	started := time.Now()
+	defer func() {
+		outcome := "skipped"
+		if runErr != nil {
+			outcome = "failed"
+		} else if result.TokenUsed > 0 {
+			outcome = "completed"
+			if opts.preview {
+				outcome = "preview"
+			}
+		}
+		telemetry.WorkerRun("dreamer", outcome, started)
+		telemetry.DreamTokens(result.TokenUsed)
+		telemetry.WorkerActions("dreamer", "applied", result.ActionsApplied)
+	}()
 	lock, ok := d.repo.(interfaces.MemoryV2ScopeLock)
 	if !ok {
 		return result, fmt.Errorf("dreamer: repository cannot lock scopes")
@@ -218,9 +235,11 @@ func (d *DreamerWorker) executeScopePass(ctx context.Context, sc Scope, opts pas
 	if !acquired {
 		return result, nil
 	}
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
 	ran := false
 	stats := map[string]interface{}{}
-	stopHeartbeat := d.heartbeat(ctx, lock, sc)
+	stopHeartbeat := d.heartbeat(ctx, lock, sc, cancel)
 	defer func() {
 		stopHeartbeat()
 		if err := lock.ReleaseScopeLock(context.WithoutCancel(ctx), sc.TenantID, sc.KbID, d.workerID, ran, stats); err != nil {
@@ -234,7 +253,8 @@ func (d *DreamerWorker) executeScopePass(ctx context.Context, sc Scope, opts pas
 			return result, err
 		}
 	}
-	if !d.withinBudget(sc.TenantID) {
+	_, hasSharedBudget := d.repo.(interfaces.MemoryV2DreamerBudget)
+	if !hasSharedBudget && !d.withinBudget(sc.TenantID) {
 		stats["skipped"] = "daily token budget exhausted"
 		return result, nil
 	}
@@ -252,24 +272,56 @@ func (d *DreamerWorker) executeScopePass(ctx context.Context, sc Scope, opts pas
 	}
 
 	prompt := d.buildPrompt(batch)
+	reservation := ""
+	ledger, sharedBudget := d.repo.(interfaces.MemoryV2DreamerBudget)
+	if sharedBudget && d.config.DailyTokenBudget > 0 {
+		reservation = uuid.NewString()
+		maximum := estimateTokens(dreamerSystemPrompt) + estimateTokens(prompt) + d.config.TokenBudget
+		reserved, err := ledger.ReserveDreamerTokens(ctx, sc.TenantID, reservation, d.now(), maximum, d.config.DailyTokenBudget)
+		if err != nil {
+			return result, fmt.Errorf("dreamer: reserve token budget: %w", err)
+		}
+		if !reserved {
+			stats["skipped"] = "daily token budget exhausted"
+			return result, nil
+		}
+	}
 	readAt := d.now()
+	modelStarted := time.Now()
 	resp, err := chatModel.Chat(ctx, []chat.Message{
 		{Role: "system", Content: dreamerSystemPrompt},
 		{Role: "user", Content: prompt},
 	}, &chat.ChatOptions{MaxTokens: d.config.TokenBudget, Temperature: 0})
+	telemetry.Observe("dreamer", "model", modelStarted)
 	if err != nil {
 		return result, fmt.Errorf("dreamer: LLM call failed: %w", err)
 	}
-	ran = !opts.preview
-	result.TokenUsed = estimateTokens(prompt) + estimateTokens(resp.Content)
+	result.TokenUsed = estimateTokens(dreamerSystemPrompt) + estimateTokens(prompt) + estimateTokens(resp.Content)
 	d.spend(sc.TenantID, result.TokenUsed)
+	if reservation != "" {
+		settleCtx, settleCancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		err := ledger.SettleDreamerTokens(settleCtx, sc.TenantID, reservation, result.TokenUsed)
+		settleCancel()
+		if err != nil {
+			logger.Warnf(ctx, "dreamer: settle token budget: %v", err)
+		}
+	}
+	// Revalidate ownership after the model call, including implementations
+	// that return a response despite cancellation. Never mutate under a lost lock.
+	if err := ctx.Err(); err != nil {
+		return result, err
+	}
+	if owned, err := lock.HeartbeatScopeLock(ctx, sc.TenantID, sc.KbID, d.workerID, dreamerLockTTL); err != nil || !owned {
+		return result, fmt.Errorf("dreamer: scope lock lost after model call: %v", err)
+	}
+	ran = !opts.preview
 
 	ids := make([]string, len(batch))
 	for i, m := range batch {
 		ids[i] = m.ID
 	}
 	defer func() {
-		if opts.preview {
+		if opts.preview || ctx.Err() != nil {
 			return
 		}
 		if err := lock.MarkDreamed(context.WithoutCancel(ctx), sc.TenantID, ids, readAt); err != nil {
@@ -277,12 +329,15 @@ func (d *DreamerWorker) executeScopePass(ctx context.Context, sc Scope, opts pas
 		}
 	}()
 
-	actions := d.resolveActions(parseDreamActions(resp.Content), batch)
+	proposals := parseDreamActions(resp.Content)
+	actions := d.resolveActions(proposals, batch)
+	telemetry.WorkerActions("dreamer", "blocked_validation", len(proposals)-len(actions))
 	result.ActionsProposed = len(actions)
 	stats["proposed"] = len(actions)
 
 	limit := int(math.Max(3, math.Ceil(d.config.MaxChangeRatio*float64(len(batch)))))
 	if len(actions) > limit {
+		telemetry.WorkerActions("dreamer", "blocked_circuit_breaker", len(actions))
 		stats["aborted"] = fmt.Sprintf("circuit breaker: %d proposals for %d memories", len(actions), len(batch))
 		logger.Warnf(ctx, "dreamer: %s/%s %s", sc.TenantID, sc.KbID, stats["aborted"])
 		result.ActionsProposed = 0
@@ -294,9 +349,13 @@ func (d *DreamerWorker) executeScopePass(ctx context.Context, sc Scope, opts pas
 
 	mergeLive := d.config.MergeLiveAfterRuns > 0 && state.Runs >= d.config.MergeLiveAfterRuns
 	for _, a := range actions {
+		if err := ctx.Err(); err != nil {
+			return result, err
+		}
 		dry := opts.preview || d.config.DryRun || d.applier == nil || (a.Type == "merge" && !mergeLive)
 		if !dry {
 			if err := d.apply(ctx, sc, a, readAt); err != nil {
+				telemetry.WorkerActions("dreamer", "blocked_apply", 1)
 				logger.Infof(ctx, "dreamer: skipped %s on %s: %v", a.Type, a.TargetID, err)
 				continue
 			}
@@ -310,7 +369,7 @@ func (d *DreamerWorker) executeScopePass(ctx context.Context, sc Scope, opts pas
 
 // heartbeat extends the scope lock while a pass runs (a slow model call can
 // outlast the TTL); the returned func stops it.
-func (d *DreamerWorker) heartbeat(ctx context.Context, lock interfaces.MemoryV2ScopeLock, sc Scope) func() {
+func (d *DreamerWorker) heartbeat(ctx context.Context, lock interfaces.MemoryV2ScopeLock, sc Scope, cancel context.CancelFunc) func() {
 	done := make(chan struct{})
 	stopped := make(chan struct{})
 	go func() {
@@ -326,6 +385,8 @@ func (d *DreamerWorker) heartbeat(ctx context.Context, lock interfaces.MemoryV2S
 			case <-t.C:
 				if ok, err := lock.HeartbeatScopeLock(ctx, sc.TenantID, sc.KbID, d.workerID, dreamerLockTTL); err != nil || !ok {
 					logger.Warnf(ctx, "dreamer: lost lock heartbeat for %s/%s: %v", sc.TenantID, sc.KbID, err)
+					cancel()
+					return
 				}
 			}
 		}
@@ -548,13 +609,13 @@ func (d *DreamerWorker) withinBudget(tenantID string) bool {
 	d.budgetMu.Lock()
 	defer d.budgetMu.Unlock()
 	b := d.budget[tenantID]
-	return b.day != d.now().Format("2006-01-02") || b.used < d.config.DailyTokenBudget
+	return b.day != d.now().UTC().Format("2006-01-02") || b.used < d.config.DailyTokenBudget
 }
 
 func (d *DreamerWorker) spend(tenantID string, tokens int) {
 	d.budgetMu.Lock()
 	defer d.budgetMu.Unlock()
-	day := d.now().Format("2006-01-02")
+	day := d.now().UTC().Format("2006-01-02")
 	b := d.budget[tenantID]
 	if b.day != day {
 		b = dailyBudget{day: day}

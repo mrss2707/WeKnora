@@ -90,6 +90,9 @@ func (r *MemoryRepository) Update(ctx context.Context, memory *types.AgentMemory
 		return err
 	}
 	memory.UpdatedAt = time.Now()
+	if isAutomatedActor(ctx) {
+		return r.updateAutomated(ctx, memory)
+	}
 	return r.db.WithContext(ctx).Save(memory).Error
 }
 
@@ -137,7 +140,17 @@ func (r *MemoryRepository) Delete(ctx context.Context, tenantID, id string) erro
 	// The memory and its relations go together: an edge to a deleted memory
 	// would otherwise linger in the graph and in hub scores.
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		res := tx.Where("tenant_id = ? AND id = ?", tenantID, id).Delete(&types.AgentMemory{})
+		q := tx.Where("tenant_id = ? AND id = ?", tenantID, id)
+		if isAutomatedActor(ctx) {
+			q = q.Where("verdict NOT IN ?", []types.MemoryVerdict{types.VerdictDecision, types.VerdictFixed})
+		}
+		res := q.Delete(&types.AgentMemory{})
+		if res.Error == nil && res.RowsAffected == 0 && isAutomatedActor(ctx) {
+			var current types.AgentMemory
+			if err := tx.Where("tenant_id = ? AND id = ?", tenantID, id).First(&current).Error; err == nil && current.Verdict.IsProtected() {
+				return &types.ErrProtectedVerdict{}
+			}
+		}
 		if res.Error != nil || res.RowsAffected == 0 {
 			return res.Error
 		}

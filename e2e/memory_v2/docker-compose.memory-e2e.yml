@@ -1,0 +1,80 @@
+name: memv2-e2e-compose
+
+# An alternative to stack.sh, never run both on the same ports. Only the
+# compose project's own volumes are removed by `down --volumes`.
+services:
+  postgres:
+    image: paradedb/paradedb:v0.22.6-pg17
+    environment:
+      POSTGRES_PASSWORD: e2e
+      POSTGRES_DB: weknora_e2e
+    ports: ["127.0.0.1:55441:5432"]
+    volumes: ["postgres:/var/lib/postgresql/data"]
+    healthcheck:
+      test: ["CMD-SHELL", "PGPASSWORD=e2e psql -h 127.0.0.1 -U postgres -d weknora_e2e -c 'select 1'"]
+      interval: 3s
+      retries: 40
+  redis:
+    image: redis:7-alpine
+    ports: ["127.0.0.1:56380:6379"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 3s
+      retries: 20
+  docreader:
+    profiles: ["documents"]
+    build:
+      context: ../..
+      dockerfile: docker/Dockerfile.docreader
+    expose: ["50051"]
+  app:
+    build:
+      context: ../..
+      dockerfile: docker/Dockerfile.app
+    ports: ["127.0.0.1:18080:8080"]
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+    environment:
+      GIN_MODE: release
+      AUTO_MIGRATE: "true"
+      SERVER_PORT: "8080"
+      DB_DRIVER: postgres
+      DB_HOST: postgres
+      DB_PORT: "5432"
+      DB_USER: postgres
+      DB_PASSWORD: e2e
+      DB_NAME: weknora_e2e
+      RETRIEVE_DRIVER: postgres
+      STORAGE_TYPE: local
+      LOCAL_STORAGE_BASE_DIR: /app/e2e-files
+      REDIS_ADDR: redis:6379
+      STREAM_MANAGER_TYPE: redis
+      DOCREADER_ADDR: docreader:50051
+      OLLAMA_BASE_URL: http://host.docker.internal:11434
+      OLLAMA_OPTIONAL: "true"
+      SSRF_WHITELIST: host.docker.internal
+      JWT_SECRET: memv2-e2e-jwt-secret-0123456789abcdef
+      SYSTEM_AES_KEY: 0123456789abcdef0123456789abcdef
+      MEMORY_V2_ENABLED: "true"
+      MEMORY_V2_WORKER_MUTATIONS: "true"
+      MEMORY_V2_DREAMER_ENABLED: "true"
+      MEMORY_V2_WRITE_LIMIT_PER_MIN: "600"
+      MEMORY_V2_DREAM_COOLDOWN: 5s
+    extra_hosts: ["host.docker.internal:host-gateway"]
+    volumes: ["files:/app/e2e-files"]
+  frontend:
+    image: node:22-bookworm-slim
+    working_dir: /workspace/frontend
+    command: ["sh", "-c", "npm ci && npm run dev -- --host 0.0.0.0 --port 15173 --strictPort"]
+    ports: ["127.0.0.1:15173:15173"]
+    environment:
+      VITE_DEV_PROXY_TARGET: http://app:8080
+    volumes:
+      - ../../frontend:/workspace/frontend:ro
+      - frontend-modules:/workspace/frontend/node_modules
+    depends_on: [app]
+volumes:
+  postgres:
+  files:
+  frontend-modules:

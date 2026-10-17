@@ -6,7 +6,7 @@
         <span class="toolbar-label">{{ t('memory.graph.depth') }}:</span>
         <t-radio-group
           :value="depth"
-          variant="default"
+          variant="outline"
           size="small"
           @change="(val: number) => { depth = val; reloadForDepth() }"
         >
@@ -15,6 +15,9 @@
           <t-radio-button :value="3">3</t-radio-button>
         </t-radio-group>
       </div>
+      <span v-if="!centerNodeId" class="toolbar-label" data-testid="memory-graph-limit">
+        {{ t('memory.graph.overviewLimit', { count: memoryStore.graphData?.nodes.length || 0 }) }}
+      </span>
       <div class="toolbar-right">
         <t-button
           v-if="centerNodeId"
@@ -40,6 +43,7 @@
           variant="text"
           size="small"
           :title="t('memory.graph.fitToScreen')"
+          data-testid="memory-graph-fit"
           @click="fitToScreen"
         >
           <t-icon name="fullscreen" />
@@ -54,6 +58,10 @@
         </t-button>
       </div>
     </div>
+
+    <p class="graph-node-readout" aria-live="polite" data-testid="memory-graph-readout">
+      {{ displayNodes.find(node => node.id === hoveredNodeId)?.label || ' ' }}
+    </p>
 
     <!-- Graph canvas -->
     <div class="graph-canvas-wrapper">
@@ -137,6 +145,13 @@
                 v-for="(node, idx) in displayNodes"
                 :key="'node-' + idx"
                 :data-node-id="node.id"
+                tabindex="0"
+                role="button"
+                :aria-label="node.label"
+                @focus="onNodeHover(node)"
+                @blur="onNodeBlur"
+                @keydown.enter.prevent="setCenterNode(node.id)"
+                @keydown.space.prevent="setCenterNode(node.id)"
                 :data-testid="`memory-graph-node-${node.id}`"
                 :class="['graph-node-group', { 'node-dragging': draggingNodeId === node.id }]"
                 :transform="`translate(${npx(node.x)},${npx(node.y)})`"
@@ -146,6 +161,8 @@
                 @mouseenter="onNodeHover(node)"
                 @mouseleave="onNodeBlur"
               >
+                <title>{{ node.label }}</title>
+                <circle :r="Math.max(nodeRadius(node), 12 / zoomScale)" fill="transparent" />
                 <!-- Decision ring -->
                 <circle
                   v-if="node.verdict === 'decision'"
@@ -193,13 +210,13 @@
                 <!-- Label -->
                 <text
                   :x="npx(0)"
-                  :y="npx(nodeRadius(node) + 14)"
+                  :y="npx(nodeRadius(node) + 14 / Math.min(1, zoomScale))"
                   text-anchor="middle"
                   class="graph-node-label"
                   :font-size="npx(nodeLabelFontSize(node))"
                   :opacity="labelOpacity(node)"
                 >
-                  {{ node.label }}
+                  {{ memoryGraphLabel(node.label, node.type, displayNodes.length > 20, hoveredNodeId === node.id || centerNodeId === node.id) }}
                 </text>
               </g>
             </g>
@@ -221,7 +238,7 @@
                 class="legend-item"
               >
                 <span class="legend-dot" :style="{ background: item.color }" />
-                <span class="legend-label">{{ item.label }}</span>
+                <span class="legend-label"><code>{{ MEMORY_GRAPH_TYPE_CODES[item.key] }}</code> {{ item.label }}</span>
               </div>
             </div>
             <div class="legend-section">
@@ -270,9 +287,10 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
+import { ref, computed, watch, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useMemoryStore } from '@/stores/memory'
+import { MEMORY_GRAPH_TYPE_CODES, memoryGraphNodeRadius, memoryGraphLabel } from './memoryGraphPresentation'
 import type { GraphNode, GraphEdge, GraphData } from '@/api/memory/index'
 
 const props = defineProps<{
@@ -328,19 +346,22 @@ const centerNodeId = ref<string | null>(null)
 
 let animFrameId = 0
 let simAlpha = 1.0
+let autoFitPending = true
 let allSimNodes: SimNode[] = []
 let allSimEdges: SimEdge[] = []
 
 // ---------------------------------------------------------------------------
 // Node colors by type
 // ---------------------------------------------------------------------------
+// Three perceptually distinct families; protocol codes distinguish the two
+// types within each family without relying on color alone.
 const NODE_TYPE_COLORS: Record<string, string> = {
-  episodic: '#1890ff',
-  semantic: '#52c41a',
-  procedural: '#fa8c16',
-  decision: '#722ed1',
-  preference: '#eb2f96',
-  fact: '#8c8c8c',
+  episodic: 'var(--graph-source)',
+  fact: 'var(--graph-source)',
+  semantic: 'var(--graph-knowledge)',
+  procedural: 'var(--graph-knowledge)',
+  decision: 'var(--graph-intent)',
+  preference: 'var(--graph-intent)',
 }
 
 const NODE_TYPE_LABELS: Record<string, string> = {
@@ -379,11 +400,11 @@ function nodeBorder(node: SimNode): string {
 }
 
 function nodeRadius(node: SimNode): number {
-  return Math.max(8, Math.min(20, 8 + Math.log(node.importance + 1) * 2))
+  return memoryGraphNodeRadius(node.importance)
 }
 
 function nodeLabelFontSize(node: SimNode): number {
-  return nodeRadius(node) > 12 ? 11 : 10
+  return (nodeRadius(node) > 12 ? 11 : 10) / Math.min(1, zoomScale.value)
 }
 
 function nodeOpacity(node: SimNode): number {
@@ -588,6 +609,7 @@ function applyDepthFilter() {
 // ---------------------------------------------------------------------------
 function startSimulation() {
   stopSimulation()
+  autoFitPending = true
   simAlpha = 1.0
   animFrameId = requestAnimationFrame(tick)
 }
@@ -608,6 +630,7 @@ function tick() {
   simAlpha *= 0.99
   if (simAlpha < 0.02) {
     animFrameId = 0
+    if (autoFitPending) fitToScreen()
     return
   }
 
@@ -714,6 +737,7 @@ const zoomScale = ref(1)
 
 function fitToScreen() {
   if (!displayNodes.value.length || !svgContainerRef.value) return
+  autoFitPending = false
 
   const nodes = displayNodes.value
   const padding = 60
@@ -732,7 +756,7 @@ function fitToScreen() {
   const graphH = maxY - minY || 1
   const scaleX = (width - padding * 2) / graphW
   const scaleY = (height - padding * 2) / graphH
-  const s = Math.min(scaleX, scaleY, 2)
+  const s = Math.max(0.05, Math.min(scaleX, scaleY, 2))
 
   zoomScale.value = s
   panX.value = (width - (minX + maxX) * s) / 2
@@ -763,6 +787,7 @@ function applyTransform() {
 // Mouse wheel zoom and pan
 // ---------------------------------------------------------------------------
 function onWheel(e: WheelEvent) {
+  autoFitPending = false
   e.preventDefault()
   const delta = e.deltaY > 0 ? 0.92 : 1.08
   zoomScale.value = Math.max(0.2, Math.min(5, zoomScale.value * delta))
@@ -776,6 +801,7 @@ let bgPanStartX = 0
 let bgPanStartY = 0
 
 function onBgMouseDown(e: MouseEvent) {
+  autoFitPending = false
   if (e.button !== 0) return
   bgDragging = true
   bgDragStartX = e.clientX
@@ -799,6 +825,7 @@ function onBgMouseUp() {
 // Node drag
 // ---------------------------------------------------------------------------
 function onNodeMouseDown(e: MouseEvent, node: SimNode) {
+  autoFitPending = false
   if (e.button !== 0) return
   e.stopPropagation()
   draggingNodeId.value = node.id
@@ -859,47 +886,73 @@ function onNodeClick(node: SimNode) {
 // ---------------------------------------------------------------------------
 // Pan/zoom via container events
 // ---------------------------------------------------------------------------
-onMounted(() => {
-  const container = svgContainerRef.value
+// The SVG container is created only after the async graph response arrives.
+// onMounted sees null, so bind to the actual ref and clean up on every reload.
+watch(svgContainerRef, (container, _previous, onCleanup) => {
   if (!container) return
-
   container.addEventListener('wheel', onWheel, { passive: false })
   container.addEventListener('mousedown', onBgMouseDown)
   window.addEventListener('mousemove', onBgMouseMove)
   window.addEventListener('mouseup', onBgMouseUp)
-
-  // Resize observer
-  const ro = new ResizeObserver(() => {
-    if (svgContainerRef.value) {
-      svgWidth.value = svgContainerRef.value.clientWidth || 800
-      svgHeight.value = svgContainerRef.value.clientHeight || 600
-    }
-  })
-  ro.observe(container)
-
-  // Also re-apply transform after mount
+  const resize = () => {
+    svgWidth.value = container.clientWidth || 800
+    svgHeight.value = container.clientHeight || 600
+    if (simAlpha < 0.02 && autoFitPending) fitToScreen()
+  }
+  const observer = new ResizeObserver(resize)
+  observer.observe(container)
+  resize()
   applyTransform()
-})
-
-onUnmounted(() => {
-  const container = svgContainerRef.value
-  if (container) {
+  onCleanup(() => {
+    observer.disconnect()
     container.removeEventListener('wheel', onWheel)
     container.removeEventListener('mousedown', onBgMouseDown)
-  }
-  window.removeEventListener('mousemove', onBgMouseMove)
-  window.removeEventListener('mouseup', onBgMouseUp)
+    window.removeEventListener('mousemove', onBgMouseMove)
+    window.removeEventListener('mouseup', onBgMouseUp)
+  })
+}, { flush: 'post' })
 
-  stopSimulation()
-})
+onUnmounted(stopSimulation)
 </script>
 
 <style scoped lang="less">
 .memory-graph {
+  --graph-source: #2a78d6;
+  --graph-knowledge: #eb6834;
+  --graph-intent: #1baf7a;
   display: flex;
   flex-direction: column;
   height: 100%;
   gap: 8px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :global(:root:not([theme-mode="light"])) .memory-graph {
+    --graph-source: #3987e5;
+    --graph-knowledge: #d95926;
+    --graph-intent: #199e70;
+  }
+}
+:global(:root[theme-mode="dark"]) .memory-graph {
+  --graph-source: #3987e5;
+  --graph-knowledge: #d95926;
+  --graph-intent: #199e70;
+}
+
+.graph-node-readout {
+  height: 2.6em;
+  flex-shrink: 0;
+  margin: 0;
+  padding-inline: var(--app-space-2);
+  overflow: auto;
+  overflow-wrap: anywhere;
+  color: var(--td-text-color-secondary);
+  font-size: var(--app-text-sm);
+  line-height: 1.3;
+}
+.graph-node-group:focus-visible {
+  outline: 2px solid var(--td-text-color-primary);
+  outline-offset: 4px;
 }
 
 // -----------------------------------------------------------------------
@@ -907,6 +960,7 @@ onUnmounted(() => {
 // -----------------------------------------------------------------------
 .graph-toolbar {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   flex-shrink: 0;

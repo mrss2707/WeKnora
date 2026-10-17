@@ -12,14 +12,16 @@ export function useMcpConfigCredentials(endpointId: Ref<string | null | undefine
 
   watch(
     endpointId,
-    async (id) => {
+    async (id, _previous, onCleanup) => {
+      let current = true
+      onCleanup(() => { current = false })
       token.value = ''
       tokenRetrievable.value = false
       if (!id) return
       try {
         const res = await getMcpEndpointToken(id)
         const data = res?.data
-        if (data?.retrievable && data.token) {
+        if (current && data?.retrievable && data.token) {
           token.value = data.token
           tokenRetrievable.value = true
         }

@@ -19,6 +19,7 @@ type EntityExtractor struct {
 	repo      interfaces.MemoryRepositoryV2
 	chat      chat.Chat
 	resolver  ModelResolver
+	patcher   interfaces.MemoryV2Patcher
 	mu        sync.Mutex
 	buffer    []*types.AgentMemory
 	ticker    *time.Ticker
@@ -41,11 +42,21 @@ func (e *EntityExtractor) WithResolver(r ModelResolver) *EntityExtractor {
 	return e
 }
 
+func (e *EntityExtractor) WithPatcher(p interfaces.MemoryV2Patcher) *EntityExtractor {
+	e.patcher = p
+	return e
+}
+
 // Enqueue adds a memory to the extraction queue.
 func (e *EntityExtractor) Enqueue(memory *types.AgentMemory) {
+	if memory == nil || memory.Verdict.IsProtected() {
+		return
+	}
+	snapshot := *memory
+	snapshot.Tags = append(types.TagsArray(nil), memory.Tags...)
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	e.buffer = append(e.buffer, memory)
+	e.buffer = append(e.buffer, &snapshot)
 
 	if len(e.buffer) >= e.batchSize {
 		go e.flush(context.Background())
@@ -176,8 +187,16 @@ Memories:
 				mem.Tags = append(mem.Tags, ent.Name)
 			}
 		}
-		// Persist tag updates to DB
-		if err := e.repo.Update(ctx, mem); err != nil {
+		// Persist only tags, with the version the model reviewed, through
+		// the audited service path when wired by the production container.
+		var err error
+		if e.patcher != nil {
+			tags := []string(mem.Tags)
+			_, err = e.patcher.PatchMemory(ctx, mem.TenantID, mem.ID, interfaces.MemoryV2Patch{Tags: &tags, ExpectedUpdatedAt: &mem.UpdatedAt})
+		} else {
+			err = e.repo.Update(ctx, mem)
+		}
+		if err != nil {
 			logger.Errorf(ctx, "entity extractor: failed to update memory tags for %s: %v", mem.ID, err)
 		}
 	}

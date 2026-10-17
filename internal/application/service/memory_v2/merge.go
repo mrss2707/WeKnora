@@ -54,10 +54,19 @@ func (s *MemoryServiceV2Impl) mergeMemories(
 	merged := *survivor
 
 	parts := []string{survivor.Content}
+	// A part already present (e.g. the same fact saved again after an earlier
+	// merge) is not appended twice.
+	seen := map[string]bool{}
+	for _, p := range strings.Split(survivor.Content, mergeSeparator) {
+		seen[strings.TrimSpace(p)] = true
+	}
 	tags := append([]string(nil), survivor.Tags...)
 	mergedFrom := []string{}
 	add := func(m *types.AgentMemory) {
-		parts = append(parts, m.Content)
+		if c := strings.TrimSpace(m.Content); !seen[c] {
+			seen[c] = true
+			parts = append(parts, m.Content)
+		}
 		tags = append(tags, m.Tags...)
 		if m.Importance > merged.Importance {
 			merged.Importance = m.Importance
@@ -70,6 +79,11 @@ func (s *MemoryServiceV2Impl) mergeMemories(
 	if extra != nil {
 		add(extra)
 	}
+	if len(losers) == 0 && len(parts) == 1 {
+		// An incoming near-duplicate adds nothing the survivor does not
+		// already say: keep the survivor untouched.
+		return survivor, nil
+	}
 	merged.Content = strings.Join(parts, mergeSeparator)
 	if utf8.RuneCountInString(merged.Content) > s.mergeCap() {
 		return nil, errMergeTooLong
@@ -78,11 +92,11 @@ func (s *MemoryServiceV2Impl) mergeMemories(
 
 	embedder, modelID, err := s.embedderFor(ctx, merged.TenantID, merged.KbID)
 	if err != nil {
-		return nil, fmt.Errorf("embedder not available: %w", err)
+		return nil, &types.MemoryV2ModelUnavailable{Cause: err}
 	}
 	vec, err := embedder.Embed(ctx, merged.Content)
 	if err != nil {
-		return nil, fmt.Errorf("embedding failed: %w", err)
+		return nil, &types.MemoryV2ModelUnavailable{Cause: err}
 	}
 	merged.Embedding = pgvector.NewVector(vec)
 	if modelID != "" {
@@ -110,7 +124,11 @@ func (s *MemoryServiceV2Impl) mergeMemories(
 	}
 
 	store, ok := s.repo.(interfaces.MemoryV2MergeStore)
-	if !ok {
+	if versioned, supportsVersion := s.repo.(interfaces.MemoryV2VersionedMergeStore); supportsVersion {
+		if err := versioned.MergeIntoVersioned(ctx, &before, &merged, losers, audit); err != nil {
+			return nil, fmt.Errorf("merge failed: %w", err)
+		}
+	} else if !ok {
 		// Repositories without transactional merge support (test fakes) fall
 		// back to updating the survivor and deleting the losers.
 		if err := s.repo.Update(ctx, &merged); err != nil {
@@ -208,25 +226,33 @@ func (s *MemoryServiceV2Impl) UndoMerge(ctx context.Context, tenantID, kbID, sur
 	if err != nil {
 		return nil, err
 	}
-	audit := []*types.MemoryAuditEntry{newAudit(ctx, types.MemoryAuditUnmerged, current, before, map[string]interface{}{"restored": details.Losers})}
-	if err := store.RestoreMerge(ctx, before, losers, audit); err != nil {
-		return nil, err
+	// Prepare the restored vector before touching storage. A model failure
+	// must not commit restored text paired with the old merged embedding.
+	emb, modelID, err := s.embedderFor(ctx, tenantID, kbID)
+	if err != nil {
+		return nil, &types.MemoryV2ModelUnavailable{Cause: err}
 	}
-	restored, err := s.repo.GetByID(ctx, tenantID, survivorID)
+	vec, err := emb.Embed(ctx, before.Content)
+	if err != nil {
+		return nil, &types.MemoryV2ModelUnavailable{Cause: err}
+	}
+	before.Embedding = pgvector.NewVector(vec)
+	if len(before.Metadata) == 0 {
+		before.Metadata = legacyUndoMetadata(current.Metadata, details.Losers)
+	}
+	if modelID != "" {
+		before.Metadata = setMetadataString(before.Metadata, metadataEmbeddingModel, modelID)
+	}
+	audit := []*types.MemoryAuditEntry{newAudit(ctx, types.MemoryAuditUnmerged, current, before, map[string]interface{}{"restored": details.Losers})}
+	if versioned, ok := s.repo.(interfaces.MemoryV2VersionedMergeStore); ok {
+		err = versioned.RestoreMergeVersioned(ctx, current, before, losers, last.Details, last.ID, audit)
+	} else {
+		err = store.RestoreMerge(ctx, before, losers, audit)
+	}
 	if err != nil {
 		return nil, err
 	}
-	// The vector still describes the merged text: re-embed the restored one.
-	if emb, modelID, err := s.embedderFor(ctx, tenantID, kbID); err == nil {
-		if vec, err := emb.Embed(ctx, restored.Content); err == nil {
-			restored.Embedding = pgvector.NewVector(vec)
-			if modelID != "" {
-				restored.Metadata = setMetadataString(restored.Metadata, metadataEmbeddingModel, modelID)
-			}
-			_ = store.MergeInto(ctx, restored, nil, nil)
-		}
-	}
-	return restored, nil
+	return s.repo.GetByID(ctx, tenantID, survivorID)
 }
 
 // MergeInto folds losers into survivor through the audited merge transaction

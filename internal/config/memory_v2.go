@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"strings"
+	"time"
 
 	"github.com/Tencent/WeKnora/internal/types"
 )
@@ -33,6 +34,9 @@ func applyMemoryV2Defaults(cfg *Config) {
 	}
 	if v := envFlag("MEMORY_V2_DREAMER_ENABLED"); v != nil {
 		cfg.MemoryV2.Dreamer.Enabled = *v
+	}
+	if interval, err := time.ParseDuration(os.Getenv("MEMORY_V2_DREAMER_INTERVAL")); err == nil && interval > 0 {
+		cfg.MemoryV2.Dreamer.Interval = interval.String()
 	}
 }
 

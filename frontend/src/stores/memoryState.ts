@@ -6,6 +6,8 @@ export interface MemoryFilterState {
   verdict: string
   tier: number | undefined
   keyword: string
+  /** Semantic/BM25 top-k search instead of paginated keyword listing. */
+  hybrid?: boolean
   /** Only the caller's own memories. */
   mineOnly: boolean
   page: number

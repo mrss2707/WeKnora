@@ -326,7 +326,9 @@ const hasMergeHistory = computed(() => history.value.some((e) => e.action === 'm
 // -----------------------------------------------------------------------
 // Loading
 // -----------------------------------------------------------------------
+let detailsRequest = 0
 async function loadDetails(id: string) {
+  const request = ++detailsRequest
   loading.value = true
   try {
     const [mem, hist, graph] = await Promise.allSettled([
@@ -334,6 +336,7 @@ async function loadDetails(id: string) {
       getMemoryHistory({ memory_id: id, page_size: 20 }),
       getMemoryGraph(id, { depth: 1, limit: 30 }),
     ])
+    if (request !== detailsRequest || !props.visible || props.memory?.id !== id) return
     if (mem.status === 'fulfilled' && mem.value?.data?.id === id) localMemory.value = { ...mem.value.data }
     history.value = hist.status === 'fulfilled' ? hist.value.data?.items ?? [] : []
     if (graph.status === 'fulfilled' && graph.value.data) {
@@ -348,13 +351,15 @@ async function loadDetails(id: string) {
       relations.value = []
     }
   } finally {
-    loading.value = false
+    if (request === detailsRequest) loading.value = false
   }
 }
 
 watch(
   () => [props.visible, props.memory?.id] as const,
   ([visible]) => {
+    ++detailsRequest
+    loading.value = false
     showTagInput.value = false
     newTag.value = ''
     editingContent.value = false
@@ -405,6 +410,8 @@ function promptReload(message?: string) {
     cancelBtn: t('common.cancel'),
     onConfirm: async () => {
       dialog.hide()
+      editingContent.value = false
+      contentDraft.value = ''
       if (localMemory.value) await loadDetails(localMemory.value.id)
     },
     onClose: () => dialog.hide(),

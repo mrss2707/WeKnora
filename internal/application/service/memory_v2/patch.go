@@ -51,7 +51,7 @@ func (s *MemoryServiceV2Impl) PatchMemory(
 	if err != nil {
 		return nil, err
 	}
-	updater, ok := s.repo.(interfaces.MemoryV2FieldUpdater)
+	_, ok := s.repo.(interfaces.MemoryV2FieldUpdater)
 	if !ok {
 		return nil, fmt.Errorf("memory V2: repository does not support partial updates")
 	}
@@ -71,14 +71,10 @@ func (s *MemoryServiceV2Impl) PatchMemory(
 	if len(fields) == 0 {
 		return before, nil
 	}
-	if err := updater.UpdateFieldsIf(ctx, tenantID, id, fields, patch.ExpectedUpdatedAt); err != nil {
-		return nil, err
-	}
-	after, err := s.repo.GetByID(ctx, tenantID, id)
+	after, err := s.writeAuditedFields(ctx, before, fields, patch.ExpectedUpdatedAt, map[string]interface{}{"fields": fieldNames(fields)})
 	if err != nil {
 		return nil, err
 	}
-	s.recordAudit(ctx, newAudit(ctx, types.MemoryAuditPatched, before, after, map[string]interface{}{"fields": fieldNames(fields)}))
 	if _, changed := fields["content"]; changed && s.autoLinker != nil {
 		s.autoLinker.LinkMemory(ctx, after)
 	}
@@ -101,11 +97,11 @@ func (s *MemoryServiceV2Impl) contentFields(
 	}
 	embedder, modelID, err := s.embedderFor(ctx, m.TenantID, m.KbID)
 	if err != nil {
-		return fmt.Errorf("embedder not available: %w", err)
+		return &types.MemoryV2ModelUnavailable{Cause: err}
 	}
 	vec, err := embedder.Embed(ctx, content)
 	if err != nil {
-		return fmt.Errorf("embedding failed: %w", err)
+		return &types.MemoryV2ModelUnavailable{Cause: err}
 	}
 	fields["content"] = content
 	fields["fingerprint"] = fp
@@ -207,6 +203,11 @@ func (s *MemoryServiceV2Impl) DeleteMemory(ctx context.Context, tenantID, id str
 	}
 	if before == nil {
 		return gorm.ErrRecordNotFound
+	}
+	if atomic, ok := s.repo.(interfaces.MemoryV2AtomicDeleter); ok {
+		return atomic.DeleteAndAudit(ctx, tenantID, id, func(lockedBefore, _ *types.AgentMemory) *types.MemoryAuditEntry {
+			return newAudit(ctx, types.MemoryAuditDeleted, lockedBefore, nil, nil)
+		})
 	}
 	if err := s.repo.Delete(ctx, tenantID, id); err != nil {
 		return err

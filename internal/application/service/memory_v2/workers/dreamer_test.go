@@ -36,6 +36,7 @@ type dreamStore struct {
 	marked    []string
 	released  []map[string]interface{}
 	lockCalls int
+	lostLock  bool
 }
 
 func newDreamStore(mems ...*types.AgentMemory) *dreamStore {
@@ -78,7 +79,7 @@ func (s *dreamStore) TryScopeLock(_ context.Context, t, k, w string, _ time.Dura
 }
 
 func (s *dreamStore) HeartbeatScopeLock(context.Context, string, string, string, time.Duration) (bool, error) {
-	return true, nil
+	return !s.lostLock, nil
 }
 
 func (s *dreamStore) ReleaseScopeLock(_ context.Context, t, k, w string, ran bool, stats map[string]interface{}) error {
@@ -225,6 +226,19 @@ func TestDreamer_AppliesVerdictAndImportanceWithLocks(t *testing.T) {
 	assert.Zero(t, llm.opts.Temperature, "deterministic")
 	assert.ElementsMatch(t, []string{"a", "b"}, store.marked, "the batch is marked reviewed")
 	assert.NotContains(t, llm.prompt, "\"a\"", "the model sees indexes, never database ids")
+}
+
+func TestDreamer_LostLockAfterModelFailsClosed(t *testing.T) {
+	store := newDreamStore(dmem("a", types.VerdictNone, 1))
+	store.lostLock = true
+	llm := &scriptedChat{reply: `{"actions":[{"type":"update_verdict","index":1,"new_verdict":"gotcha",` + conf + `}]}`}
+	app := &recordingApplier{}
+	res, err := newDreamer(store, llm, app).RunScopePass(context.Background(), "1", "kb")
+	require.ErrorContains(t, err, "scope lock lost")
+	assert.Zero(t, res.ActionsApplied)
+	assert.Empty(t, app.patches)
+	assert.Empty(t, store.marked)
+	assert.Empty(t, store.released, "aborted pass must not count toward merge probation")
 }
 
 func TestDreamer_NeverTouchesProtectedVerdicts(t *testing.T) {

@@ -267,6 +267,16 @@ func TestConsolidator_DecaysOnlyLongUnusedUnprotectedMemories(t *testing.T) {
 	require.NotNil(t, repo.fieldUpdates[0].expected, "optimistic lock: a concurrent edit wins")
 }
 
+func TestConsolidator_DecayUsesAuditedService(t *testing.T) {
+	repo := &mockConsolidatorRepo{searchFunc: searchReturning(memAged("old", types.VerdictNone, 3, 400*24*time.Hour, nil))}
+	app := &recordingApplier{}
+	n, err := newTestConsolidator(repo).WithPatcher(app).decayOldMemories(context.Background(), testScope)
+	require.NoError(t, err)
+	assert.Equal(t, 1, n)
+	assert.Equal(t, []string{"old importance=2"}, app.patches)
+	assert.Empty(t, repo.fieldUpdates, "production decay must not bypass service auditing")
+}
+
 func TestConsolidator_DecayConflictIsSkipped(t *testing.T) {
 	repo := &mockConsolidatorRepo{updateErr: assert.AnError, searchFunc: searchReturning(memAged("old", types.VerdictNone, 3, 400*24*time.Hour, nil))}
 	n, err := newTestConsolidator(repo).decayOldMemories(context.Background(), testScope)

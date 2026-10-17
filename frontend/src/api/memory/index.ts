@@ -451,12 +451,18 @@ export function searchMemories(params: {
   kb_id?: string
   q: string
   type?: string
+  verdict?: string
+  tier?: number
+  author?: string
   limit?: number
 }) {
   const query = new URLSearchParams()
   if (params.kb_id) query.set('kb_id', params.kb_id)
   query.set('q', params.q)
   if (params.type) query.set('type', params.type)
+  if (params.verdict) query.set('verdict', params.verdict)
+  if (params.author) query.set('author', params.author)
+  if (params.tier != null) query.set('tier', String(params.tier))
   if (params.limit != null) query.set('limit', String(params.limit))
   return get<{ data: MemorySearchResult[] }>(`/api/v1/memories/search?${query.toString()}`)
 }
@@ -471,7 +477,7 @@ export function getMemoryGraph(id: string, params?: { depth?: number; limit?: nu
 }
 
 /** Get a knowledge base's graph overview: its most connected memories and their relations. */
-export function getMemoryGraphOverview(kbId: string, limit = 100) {
+export function getMemoryGraphOverview(kbId: string, limit = 30) {
   const query = new URLSearchParams({ kb_id: kbId, limit: String(limit) })
   return get<{ data: GraphData }>(`/api/v1/memories/graph?${query.toString()}`)
 }

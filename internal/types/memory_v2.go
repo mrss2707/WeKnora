@@ -623,6 +623,7 @@ type MemoryStats struct {
 
 // MemoryRelinkResult reports a knowledge-base relink pass.
 type MemoryRelinkResult struct {
-	Memories  int `json:"memories"`
-	Relations int `json:"relations"`
+	Memories   int `json:"memories"`
+	Relations  int `json:"relations"`
+	Reembedded int `json:"reembedded"`
 }

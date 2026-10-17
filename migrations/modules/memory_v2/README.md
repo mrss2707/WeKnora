@@ -14,6 +14,12 @@ Native Go + PostgreSQL/pgvector memory module (per-KB, multi-tenant). Schema:
 | 900079 | `memory_v2_audit` | Per-memory audit trail (actor, before/after) for History and merge undo |
 | 900080 | `memory_v2_access_trigger` | Reads (access_count) no longer bump updated_at |
 | 900081 | `memory_v2_dreamer_scope` | Dreamer lock/state per (tenant, knowledge base) with heartbeat |
+| 900082 | `memory_v2_dreamer_budget` | Durable UTC daily token reservations per tenant across KBs and app replicas |
+
+Dreamer reserves its maximum estimated prompt/output budget before calling the model.
+Successful calls settle once to their estimated usage. Failed/uncertain calls and
+crashes leave the reservation charged for that UTC day; restarting an app does not
+reset the cap. This is an **estimated-token** budget, not a provider billing guarantee.
 
 Module migrations live in the reserved range **900000–909999** so they can never
 collide with core migrations in `migrations/versioned/` (which upstream `main`

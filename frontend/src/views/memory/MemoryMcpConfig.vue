@@ -1,5 +1,5 @@
 <template>
-  <div class="memory-mcp-config">
+  <div class="memory-mcp-config" data-testid="memory-mcp-config">
     <!-- Connection: per-agent MCP config guides (Claude Code / Codex / Antigravity) -->
     <section class="mcp-config-section">
       <h4 class="mcp-config-section__title">{{ $t('memory.mcpConfig.connectionTitle') }}</h4>
@@ -47,7 +47,8 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
+import { useAuthStore } from '@/stores/auth'
 import { useI18n } from 'vue-i18n'
 import { copyWithToast } from '@/utils/clipboard'
 import { useApiBaseUrlDisplay } from '@/composables/useApiBaseUrlDisplay'
@@ -67,7 +68,7 @@ import {
 import { MEMORY_PROTOCOL_INSTRUCTION } from './memoryProtocolInstruction'
 import { useMcpConfigCredentials } from './useMcpConfigCredentials'
 
-const props = defineProps<{ kbId: string }>()
+const props = defineProps<{ kbId: string; ownerTenantId?: number | string }>()
 
 const { t } = useI18n()
 const { apiBaseUrlDisplay } = useApiBaseUrlDisplay()
@@ -76,10 +77,14 @@ const loading = ref(true)
 const endpoints = ref<McpEndpoint[]>([])
 const agentTab = ref('claudeCode')
 
-/** Endpoints that cover this KB: empty scope means "all knowledge bases". */
+/** Empty scope covers only the endpoint's own workspace, never shared KBs. */
 const matchingEndpoints = computed(() =>
   endpoints.value.filter(
-    (ep) => !ep.knowledge_base_ids?.length || ep.knowledge_base_ids.includes(props.kbId),
+    (ep) => ep.enabled && ep.tools.includes('memory_recall') && (
+      ep.knowledge_base_ids?.length
+        ? ep.knowledge_base_ids.includes(props.kbId)
+        : !!props.ownerTenantId && String(ep.tenant_id) === String(props.ownerTenantId)
+    ),
   ),
 )
 
@@ -131,16 +136,21 @@ function copy(text: string) {
   copyWithToast(text, 'memory.mcpConfig.copied')
 }
 
-onMounted(async () => {
+const auth = useAuthStore()
+watch(() => [props.kbId, auth.effectiveTenantId], async (_scope, _previous, onCleanup) => {
+  let current = true
+  onCleanup(() => { current = false })
+  endpoints.value = []
+  loading.value = true
   try {
     const res = await listMcpEndpoints()
-    endpoints.value = res?.data ?? []
+    if (current) endpoints.value = res?.data ?? []
   } catch {
-    endpoints.value = []
+    if (current) endpoints.value = []
   } finally {
-    loading.value = false
+    if (current) loading.value = false
   }
-})
+}, { immediate: true })
 </script>
 
 <style scoped lang="less">

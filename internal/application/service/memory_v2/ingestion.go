@@ -81,18 +81,18 @@ func (s *MemoryServiceV2Impl) SaveMemory(ctx context.Context, memory *types.Agen
 	// different models are never compared.
 	embedder, modelID, err := s.embedderFor(ctx, memory.TenantID, memory.KbID)
 	if err != nil {
-		return nil, fmt.Errorf("embedder not available: %w", err)
+		return nil, &types.MemoryV2ModelUnavailable{Cause: err}
 	}
 	embedding, err := embedder.Embed(ctx, memory.Content)
 	if err != nil {
-		return nil, fmt.Errorf("embedding failed: %w", err)
+		return nil, &types.MemoryV2ModelUnavailable{Cause: err}
 	}
 	memory.Embedding = pgvector.NewVector(embedding)
 	if modelID != "" {
 		memory.Metadata = setMetadataString(memory.Metadata, metadataEmbeddingModel, modelID)
 	}
 
-	semResult, err := s.checkSemanticDedup(ctx, memory, embedding)
+	semResult, err := s.semanticDedupWithRetry(ctx, memory, embedding)
 	if err != nil {
 		return nil, err
 	}
@@ -124,10 +124,12 @@ func (s *MemoryServiceV2Impl) SaveMemory(ctx context.Context, memory *types.Agen
 	memory.UpdatedAt = now
 
 	// Step 8: Store (already has embedding)
-	if err := s.repo.Create(ctx, memory); err != nil {
+	if err := s.createAuditedMemory(ctx, memory); err != nil {
+		if duplicate := s.recoverExactCreateRace(ctx, memory, err); duplicate != nil {
+			return duplicate, nil
+		}
 		return nil, fmt.Errorf("store failed: %w", err)
 	}
-	s.recordAudit(ctx, newAudit(ctx, types.MemoryAuditCreated, nil, memory, nil))
 
 	// Step 9: Lint on write (pass pre-computed embedding to avoid re-embed)
 	lintIssues := RunLintOnWrite(ctx, memory, s.repo, s.config.LintOnWrite, embedding)

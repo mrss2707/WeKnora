@@ -103,6 +103,23 @@ func TestMergeMemories_UnionsAndAuditsAtomically(t *testing.T) {
 	assert.Equal(t, "l", repo.audit[1].MemoryID)
 }
 
+func TestMergeMemories_ContentAlreadyPresentIsNotRepeated(t *testing.T) {
+	svc, repo := newMergeFixture()
+	survivor := mem("s", "kb", "Vault code rotates on day 1\n---\nVault code rotates on day 2", 1)
+	repo.memories["s"] = survivor
+
+	got, err := svc.mergeMemories(context.Background(), survivor, nil, mem("", "kb", "  Vault code rotates on day 2 ", 1))
+
+	require.NoError(t, err)
+	assert.Equal(t, "Vault code rotates on day 1\n---\nVault code rotates on day 2", got.Content, "a fact saved again is not appended twice")
+	assert.Nil(t, repo.merged, "nothing new: no write")
+	assert.Empty(t, repo.audit, "nothing new: no audit row")
+
+	got, err = svc.mergeMemories(context.Background(), survivor, nil, mem("", "kb", "Vault code rotates on day 3", 1))
+	require.NoError(t, err)
+	assert.Equal(t, "Vault code rotates on day 1\n---\nVault code rotates on day 2\n---\nVault code rotates on day 3", got.Content)
+}
+
 func TestMergeMemories_Guards(t *testing.T) {
 	svc, _ := newMergeFixture()
 	ctx := context.Background()

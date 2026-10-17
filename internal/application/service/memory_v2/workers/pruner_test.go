@@ -192,6 +192,8 @@ func TestPruner_PolicyKeepsEverythingButExpiredAndUnusedEdgeMemories(t *testing.
 	notYet.ExpiresAt = &future
 	expiredDecision := pmem("expired-decision", 1, 5, 2*day, 0, types.VerdictDecision)
 	expiredDecision.ExpiresAt = &past
+	expiredCritical := pmem("expired-critical", 0, 0, 60*day, 0, types.VerdictNone)
+	expiredCritical.ExpiresAt = &past
 
 	mems := []*types.AgentMemory{
 		expired,
@@ -205,6 +207,7 @@ func TestPruner_PolicyKeepsEverythingButExpiredAndUnusedEdgeMemories(t *testing.
 		pmem("edge-fixed", 3, 0, 60*day, 0, types.VerdictFixed),
 		pmem("edge-permanent", 3, 0, 60*day, 0, types.VerdictNone, "Permanent"),
 		expiredDecision,
+		expiredCritical,
 	}
 	p := newTestPruner(&mockPrunerRepo{})
 	var pruned []string

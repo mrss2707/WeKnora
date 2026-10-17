@@ -446,7 +446,9 @@ func TestSaveMemoryEmbeddingAndStoreErrors(t *testing.T) {
 
 		assert.Nil(t, result)
 		require.Error(t, err)
-		assert.Contains(t, err.Error(), "embedding failed")
+		var unavailable *types.MemoryV2ModelUnavailable
+		assert.ErrorAs(t, err, &unavailable)
+		assert.Contains(t, err.Error(), "embedding provider down")
 		assert.Zero(t, repo.createCalls)
 	})
 

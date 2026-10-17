@@ -26,6 +26,7 @@ var memoryV2RouteCases = []struct {
 	{http.MethodGet, "/api/v1/memories", "/api/v1/memories", types.TenantRoleViewer},
 	{http.MethodGet, "/api/v1/memories/search", "/api/v1/memories/search", types.TenantRoleViewer},
 	{http.MethodGet, "/api/v1/memories/stats", "/api/v1/memories/stats", types.TenantRoleViewer},
+	{http.MethodGet, "/api/v1/memories/metrics", "/api/v1/memories/metrics", types.TenantRole("system_admin")}, // separately tested: not a tenant role
 	{http.MethodGet, "/api/v1/memories/health", "/api/v1/memories/health", types.TenantRoleViewer},
 	{http.MethodGet, "/api/v1/memories/graph", "/api/v1/memories/graph", types.TenantRoleViewer},
 	{http.MethodGet, "/api/v1/memories/graph/:id", "/api/v1/memories/graph/m1", types.TenantRoleViewer},

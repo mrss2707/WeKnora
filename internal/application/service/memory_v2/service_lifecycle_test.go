@@ -277,75 +277,15 @@ func memoryLifecycleModels() []*types.Model {
 	}
 }
 
-func TestMemoryCache_SetGetLenKeysInvalidate(t *testing.T) {
-	cache := NewMemoryCache()
-
-	cache.Set("tenant:one", "permanent", 0)
-	cache.Set("tenant:two", "ttl", 60)
-
-	assert.Equal(t, "permanent", cache.Get("tenant:one"))
-	assert.Equal(t, "ttl", cache.Get("tenant:two"))
-	assert.Equal(t, 2, cache.Len())
-	assert.ElementsMatch(t, []string{"tenant:one", "tenant:two"}, cache.Keys())
-
-	cache.Invalidate("tenant:one")
-	assert.Nil(t, cache.Get("tenant:one"))
-	assert.Equal(t, 1, cache.Len())
-
-	cache.Set("tenant:three", "prefix", 0)
-	cache.Set("other:four", "keep", 0)
-	cache.InvalidateByPrefix("tenant:")
-	assert.Nil(t, cache.Get("tenant:two"))
-	assert.Nil(t, cache.Get("tenant:three"))
-	assert.Equal(t, "keep", cache.Get("other:four"))
-}
-
-func TestMemoryCache_ExpiredEntries(t *testing.T) {
-	cache := NewMemoryCache()
-	cache.items["expired"] = cacheEntry{value: "old", expiresAt: time.Now().Add(-time.Second)}
-	cache.items["fresh"] = cacheEntry{value: "new", expiresAt: time.Now().Add(time.Hour)}
-
-	assert.Nil(t, cache.Get("expired"))
-	assert.Equal(t, 2, cache.Len(), "Get should not evict expired entries by itself")
-
-	cache.evictExpired()
-	assert.Nil(t, cache.Get("expired"))
-	assert.Equal(t, "new", cache.Get("fresh"))
-	assert.Equal(t, 1, cache.Len())
-}
-
-func TestMemoryCache_MaxSizeEvictsOne(t *testing.T) {
-	cache := NewMemoryCache()
-	cache.maxSize = 1
-
-	cache.Set("first", "one", 0)
-	cache.Set("second", "two", 0)
-
-	assert.Equal(t, 1, cache.Len())
-}
-
-func TestMemoryCache_StartCleanupReturnsOnceButDoesNotAssertSingleton(t *testing.T) {
-	cache := NewMemoryCache()
-	once := cache.StartCleanup(time.Hour)
-
-	require.NotNil(t, once)
-}
-
-func TestNewMemoryServiceV2_WiresCacheWorkersAndTenantIDs(t *testing.T) {
+func TestNewMemoryServiceV2_WiresScopedWorkersWithoutLegacyCache(t *testing.T) {
 	repo := &serviceLifecycleRepoFake{}
 	config := types.DefaultMemoryV2Config()
-	svc := NewMemoryServiceV2(repo, nil, config, []string{"tenant-1", "tenant-2"})
+	svc := NewMemoryServiceV2(repo, nil, config, []string{"legacy-scope-is-ignored"})
 
-	repo.mu.Lock()
-	invalidator := repo.cacheInvalidator
-	repo.mu.Unlock()
-
-	assert.Same(t, svc.cache, invalidator)
+	assert.Nil(t, repo.cacheInvalidator, "no unused cache or immortal cleanup goroutine")
 	assert.NotNil(t, svc.tokenBudget)
-	assert.NotNil(t, svc.cache)
 	assert.NotNil(t, svc.pruner)
 	assert.NotNil(t, svc.healthChecker)
-	assert.Equal(t, []string{"tenant-1", "tenant-2"}, svc.tenantIDs)
 }
 
 func TestInitWorkers_ConstructsAllWorkersWithoutAnyModel(t *testing.T) {

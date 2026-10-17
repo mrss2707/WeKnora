@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Tencent/WeKnora/internal/application/service/memory_v2/telemetry"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
@@ -46,7 +47,9 @@ func (s *MemoryServiceV2Impl) SearchMemories(ctx context.Context, query string, 
 	candidates := filter.Limit * 3
 
 	// Step 1: Keyword ranking (BM25)
+	dbStarted := time.Now()
 	bm25Results, err := s.fullTextSearch(ctx, query, filter, candidates)
+	telemetry.Observe("recall_keyword", "database", dbStarted)
 	if err != nil {
 		logger.Errorf(ctx, "full-text search failed: %v", err)
 		bm25Results = nil
@@ -100,7 +103,9 @@ func (s *MemoryServiceV2Impl) vectorSearch(ctx context.Context, query string, fi
 		logger.Errorf(ctx, "embedder not available: %v", err)
 		return nil
 	}
+	modelStarted := time.Now()
 	vector, err := embedder.Embed(ctx, query)
+	telemetry.Observe("recall_embedding", "model", modelStarted)
 	if err != nil {
 		logger.Errorf(ctx, "embedding query failed: %v", err)
 		return nil
@@ -111,7 +116,9 @@ func (s *MemoryServiceV2Impl) vectorSearch(ctx context.Context, query string, fi
 	f := *filter
 	f.Query = ""
 	f.EmbeddingModelID = modelID
+	dbStarted := time.Now()
 	results, err := s.repo.CosineSearch(ctx, &f, vector, limit)
+	telemetry.Observe("recall_vector", "database", dbStarted)
 	if err != nil {
 		if isDimensionMismatch(err) {
 			logger.Warnf(ctx, "[MemoryV2] Embedding dimension mismatch: %v. "+

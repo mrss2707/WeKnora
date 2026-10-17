@@ -237,6 +237,12 @@ func (h *MemoryV2Handler) SearchMemories(c *gin.Context) {
 		AuthorUserID: h.authorFilter(c),
 	}
 
+	if tierStr := strings.TrimSpace(c.Query("tier")); tierStr != "" {
+		if tier, err := strconv.Atoi(tierStr); err == nil && tier >= 0 && tier <= 3 {
+			filter.Tier = &tier
+		}
+	}
+
 	if limitStr := strings.TrimSpace(c.Query("limit")); limitStr != "" {
 		limit, err := strconv.Atoi(limitStr)
 		if err == nil && limit > 0 {

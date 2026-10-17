@@ -163,10 +163,9 @@ func (r *MemoryRepository) CosineSearch(ctx context.Context, filter *types.Memor
 			Where("embedding IS NOT NULL").
 			Select(memoryColumns+", 1 - (embedding <=> ?) AS score", vec)
 		if filter.EmbeddingModelID != "" {
-			// Vectors from different embedding models are not comparable:
-			// restrict to the query's model, keeping legacy rows that
-			// predate model tracking.
-			q = q.Where("(metadata->>'embedding_model_id' = ? OR COALESCE(metadata->>'embedding_model_id', '') = '')", filter.EmbeddingModelID)
+			// Unknown legacy vectors are not evidence of model compatibility.
+			// Admin relink re-embeds them; keyword recall remains available.
+			q = q.Where("metadata->>'embedding_model_id' = ?", filter.EmbeddingModelID)
 		}
 		return q.Clauses(clause.OrderBy{Expression: clause.Expr{SQL: "embedding <=> ?", Vars: []interface{}{vec}}}).Limit(limit)
 	}

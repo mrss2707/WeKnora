@@ -4,6 +4,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/Tencent/WeKnora/internal/application/service/memory_v2/telemetry"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/models/embedding"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -23,6 +24,7 @@ const (
 // through the audited merge transaction).
 type Consolidator struct {
 	repo     interfaces.MemoryRepositoryV2
+	patcher  interfaces.MemoryV2Patcher
 	interval time.Duration
 	now      func() time.Time
 }
@@ -35,6 +37,12 @@ func NewConsolidator(repo interfaces.MemoryRepositoryV2, _ embedding.Embedder) *
 
 // WithResolver is kept for wiring compatibility; the consolidator needs no model.
 func (c *Consolidator) WithResolver(ModelResolver) *Consolidator { return c }
+
+// WithPatcher routes importance decay through the audited service path.
+func (c *Consolidator) WithPatcher(p interfaces.MemoryV2Patcher) *Consolidator {
+	c.patcher = p
+	return c
+}
 
 // Run starts the consolidation worker loop.
 func (c *Consolidator) Run(ctx context.Context) {
@@ -54,9 +62,12 @@ func (c *Consolidator) Run(ctx context.Context) {
 // consolidateAll processes every scope that holds memories. Nothing runs when
 // scopes cannot be enumerated.
 func (c *Consolidator) consolidateAll(ctx context.Context) {
+	started, outcome := time.Now(), "completed"
+	defer func() { telemetry.WorkerRun("consolidator", outcome, started) }()
 	ctx = context.WithValue(ctx, types.ActorKey{}, "system")
 	scopes, err := listScopes(ctx, c.repo)
 	if err != nil {
+		outcome = "failed"
 		logger.Errorf(ctx, "consolidator: list scopes failed: %v", err)
 		return
 	}
@@ -64,6 +75,7 @@ func (c *Consolidator) consolidateAll(ctx context.Context) {
 	decayed := 0
 	for _, sc := range scopes {
 		if ctx.Err() != nil {
+			outcome = "cancelled"
 			return
 		}
 		if sc.TenantID == "" {
@@ -72,15 +84,18 @@ func (c *Consolidator) consolidateAll(ctx context.Context) {
 		if !hubDone[sc.TenantID] {
 			hubDone[sc.TenantID] = true
 			if err := c.repo.ComputeHubScores(ctx, sc.TenantID); err != nil {
+				outcome = "failed"
 				logger.Errorf(ctx, "consolidator: hub scores for tenant %s: %v", sc.TenantID, err)
 			}
 		}
 		n, err := c.decayOldMemories(ctx, sc)
 		if err != nil {
+			outcome = "failed"
 			logger.Errorf(ctx, "consolidator: decay %s/%s: %v", sc.TenantID, sc.KbID, err)
 		}
 		decayed += n
 	}
+	telemetry.WorkerActions("consolidator", "applied", decayed)
 	logger.Infof(ctx, "consolidator: cycle complete over %d scope(s), %d memories decayed", len(scopes), decayed)
 }
 
@@ -110,7 +125,14 @@ func (c *Consolidator) decayOldMemories(ctx context.Context, sc Scope) (int, err
 			continue
 		}
 		version := m.UpdatedAt
-		if err := updater.UpdateFieldsIf(ctx, sc.TenantID, m.ID, map[string]interface{}{"importance": m.Importance - 1}, &version); err != nil {
+		importance := m.Importance - 1
+		var err error
+		if c.patcher != nil {
+			_, err = c.patcher.PatchMemory(ctx, sc.TenantID, m.ID, interfaces.MemoryV2Patch{Importance: &importance, ExpectedUpdatedAt: &version})
+		} else {
+			err = updater.UpdateFieldsIf(ctx, sc.TenantID, m.ID, map[string]interface{}{"importance": importance}, &version)
+		}
+		if err != nil {
 			logger.Infof(ctx, "consolidator: skip decay of %s: %v", m.ID, err)
 			continue
 		}

@@ -23,6 +23,7 @@ type auditImage struct {
 	Tags        []string            `json:"tags"`
 	Fingerprint *string             `json:"fingerprint,omitempty"`
 	SessionID   string              `json:"session_id,omitempty"`
+	Metadata    json.RawMessage     `json:"metadata,omitempty"`
 }
 
 func imageOf(m *types.AgentMemory) []byte {
@@ -32,7 +33,7 @@ func imageOf(m *types.AgentMemory) []byte {
 	b, err := json.Marshal(auditImage{
 		ID: m.ID, KbID: m.KbID, UserID: m.UserID, Content: m.Content, MemoryType: m.MemoryType,
 		Importance: m.Importance, Tier: m.Tier, Verdict: m.Verdict, Tags: append([]string(nil), m.Tags...),
-		Fingerprint: m.Fingerprint, SessionID: m.SessionID,
+		Fingerprint: m.Fingerprint, SessionID: m.SessionID, Metadata: m.Metadata,
 	})
 	if err != nil {
 		return nil
@@ -49,7 +50,7 @@ func memoryFromImage(tenantID string, raw []byte) (*types.AgentMemory, error) {
 	return &types.AgentMemory{
 		ID: img.ID, TenantID: tenantID, KbID: img.KbID, UserID: img.UserID, Content: img.Content,
 		MemoryType: img.MemoryType, Importance: img.Importance, Tier: img.Tier, Verdict: img.Verdict,
-		Tags: types.TagsArray(img.Tags), Fingerprint: img.Fingerprint, SessionID: img.SessionID,
+		Tags: types.TagsArray(img.Tags), Fingerprint: img.Fingerprint, SessionID: img.SessionID, Metadata: img.Metadata,
 	}, nil
 }
 

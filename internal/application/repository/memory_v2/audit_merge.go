@@ -70,7 +70,7 @@ func (r *MemoryRepository) ListAudit(ctx context.Context, f types.MemoryAuditFil
 		offset = 0
 	}
 	var rows []*types.MemoryAuditEntry
-	err := q.Order("created_at DESC, id DESC").Limit(limit).Offset(offset).Find(&rows).Error
+	err := q.Order("id DESC").Limit(limit).Offset(offset).Find(&rows).Error
 	return rows, total, err
 }
 
@@ -164,6 +164,16 @@ func (r *MemoryRepository) RestoreMerge(
 			"fingerprint": survivorBefore.Fingerprint,
 			"tags":        survivorBefore.Tags,
 			"updated_at":  time.Now(),
+		}
+		if len(survivorBefore.Embedding.Slice()) > 0 {
+			padded, err := padEmbedding(survivorBefore.Embedding.Slice())
+			if err != nil {
+				return err
+			}
+			updates["embedding"] = pgvector.NewVector(padded)
+		}
+		if len(survivorBefore.Metadata) > 0 {
+			updates["metadata"] = survivorBefore.Metadata
 		}
 		res := tx.Model(&types.AgentMemory{}).
 			Where("tenant_id = ? AND id = ? AND deleted_at IS NULL", survivorBefore.TenantID, survivorBefore.ID).

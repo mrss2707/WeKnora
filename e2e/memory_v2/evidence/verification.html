@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="vi"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Kiểm chứng Memory V2</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=Source+Sans+3:wght@400;600&display=swap">
+<style>
+/* Engineering verification memo: conclusions first, reproducible evidence next. */
+:root{--bg:#f5f8fb;--paper:#ffffff;--ink:#192f40;--muted:#526b7b;--rule:#ccdae4;--accent:#176681;--heading:"IBM Plex Sans",Arial,sans-serif;--body:"Source Sans 3",Arial,sans-serif;--mono:ui-monospace,Menlo,monospace}
+@media(prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#131e27;--paper:#1b2a35;--ink:#e0edf5;--muted:#a8c0cf;--rule:#3a5160;--accent:#79c6df;color-scheme:dark}}
+:root[data-theme="dark"]{--bg:#131e27;--paper:#1b2a35;--ink:#e0edf5;--muted:#a8c0cf;--rule:#3a5160;--accent:#79c6df;color-scheme:dark}
+*{box-sizing:border-box}body{background:var(--bg);color:var(--ink);font:18px/1.6 var(--body);padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));padding-block:40px 64px}main{max-width:960px;margin:auto;display:grid;gap:40px;min-width:0}header,section{display:grid;gap:16px;min-width:0}h1,h2,h3,p,ul,figure{margin:0}h1,h2,h3{font-family:var(--heading);text-wrap:balance;line-height:1.25}h1{font-size:34px;font-weight:600}h2{font-size:24px}h3{font-size:19px}p,li{max-width:74ch}ul{padding-left:22px;display:grid;gap:10px}.eyebrow,figcaption,.meta{font-size:14px;color:var(--muted)}.eyebrow{font-family:var(--mono);letter-spacing:.07em;text-transform:uppercase}.summary{padding:24px;background:var(--paper);border:1px solid var(--rule);display:grid;gap:12px}strong{font-weight:600}a{color:var(--accent);text-underline-offset:3px}a:focus-visible{outline:2px solid var(--accent);outline-offset:4px}.toc{display:flex;gap:20px;flex-wrap:wrap}.table-wrap{overflow-x:auto;max-width:100%}table{border-collapse:collapse;width:100%;font-size:16px;font-variant-numeric:tabular-nums}th,td{text-align:left;vertical-align:top;padding:13px 12px;border-bottom:1px solid var(--rule)}th{font:500 14px var(--heading);color:var(--muted)}td:first-child{padding-left:0}th:first-child{padding-left:0}.result{font-weight:600;color:var(--accent);white-space:nowrap}code,pre{font-family:var(--mono);font-size:.85em}code{overflow-wrap:anywhere}pre{background:var(--paper);border:1px solid var(--rule);padding:18px;max-width:100%;overflow:auto;line-height:1.6}figure{display:grid;gap:10px}img{width:100%;height:auto;border:1px solid var(--rule);background:var(--paper)}.fine{font-size:15px;color:var(--muted);border-top:1px solid var(--rule);padding-top:16px}@media(max-width:540px){body{padding-block:24px 40px}h1{font-size:28px}.summary{padding:18px}th,td{padding:10px 8px;font-size:14px}}
+</style>
+</head><body><main>
+<header>
+<p class="eyebrow">Memory V2 · Phase 7 · 18/10/2026</p>
+<h1>Kiểm chứng nhiều người dùng trên hệ thống thật</h1>
+<p class="meta">Nhánh <code>memory-v2/phase-7-e2e</code> · mô hình local · PostgreSQL/ParadeDB thật · chưa push hoặc mở PR.</p>
+<div class="summary"><h2>Kết luận tại checkpoint</h2><p>Luồng Memory chính đã có bằng chứng thực thi qua MCP và giao diện. Các test hiện qua, nhưng <strong>chưa ký xác nhận hoàn tất toàn bộ kế hoạch production</strong>: hàng đợi graph bền vững, một phần kiểm thử vận hành và backlog dependency vẫn còn cần xử lý hoặc quyết định rõ trước phát hành.</p><p>Không dùng kết quả smoke của mô hình 3B để suy ra chất lượng reasoning production. Không xem test xanh là chứng nhận không còn lỗ hổng bảo mật.</p></div>
+<nav class="toc" aria-label="Mục lục"><a href="#results">Kết quả</a><a href="#fixes">Sửa lỗi</a><a href="#evidence">Bằng chứng UI</a><a href="#risks">Phần chưa đóng</a><a href="#reproduce">Chạy lại</a></nav>
+</header>
+<section id="results"><h2>Kết quả đã đo</h2><div class="table-wrap"><table><thead><tr><th>Phép kiểm</th><th>Kết quả</th><th>Phạm vi</th></tr></thead><tbody>
+<tr><td>Playwright trên app thật</td><td class="result">17/17 qua</td><td>Duyệt, phân trang, keyword/hybrid, create/edit/delete, metadata/bulk, 409 hai tài khoản, graph zoom/pan/keyboard, history, dream preview, undo, chia sẻ và i18n.</td></tr>
+<tr><td>Recall qua MCP</td><td class="result">44/49 = 89,8%</td><td>Lượt đầy đủ gần nhất; ngưỡng 80%. Ba lượt sạch trước đó đạt 45/49. Vẫn có câu hỏi về session/token expiry, backup và cross-lingual embedding bị miss.</td></tr>
+<tr><td>Ghi đồng thời</td><td class="result">5 × 50 lượt qua</td><td>Năm lần chạy riêng; mỗi lần 50 agents. Không có lỗi ghi; 10 lần gửi cùng một fact hội tụ về một ID. Dữ liệu test được dọn sau mỗi ca.</td></tr>
+<tr><td>Dreamer theo lịch</td><td class="result">3 lượt thật qua</td><td>Engineering: 118 dòng sống trước/sau, hai ký ức được bảo vệ không đổi. Interval thử 5 giây đã trả về mặc định.</td></tr>
+<tr><td>Frontend unit / type / build</td><td class="result">1.381 pass, 1 skip</td><td>Không fail; vue-tsc và production build đã qua sau toàn bộ thay đổi graph. Có regression riêng cho radius âm, nhãn và zoom/pan/keyboard.</td></tr>
+<tr><td>Backend PostgreSQL + race</td><td class="result">Qua</td><td>Repository, service, workers, handler, router, container, MCP server, config, database. Bao gồm rollback audit, budget nhiều caller và race protected verdict.</td></tr>
+<tr><td>Fresh / upgrade / backfill</td><td class="result">114 / 900082, clean</td><td>DB mới và clone E2E dựng lại mốc 900081 đều nâng cấp qua. Re-embed ba dòng legacy bằng model thật, giữ nguyên 118 ký ức và dữ liệu do người dùng ghi.</td></tr>
+<tr><td>Model outage / token rotation</td><td class="result">Qua</td><td>Model lỗi trả 503 rõ ràng, recall còn BM25. Token sai/cũ trả 401; endpoint tắt trả 403; rotation chặn cả MCP session đã initialize.</td></tr>
+</tbody></table></div><p class="fine">Bộ dữ liệu có 201 đầu vào EN/VI; một near-duplicate được giữ lại cho test, tạo baseline 200 dòng sống: engineering 118, HR 44, Beta 28, Gamma 10. Accounts, tenants và nội dung trong bằng chứng đều là dữ liệu giả lập.</p></section>
+<section id="fixes"><h2>Các lỗi được phát hiện khi kiểm chứng</h2><ul>
+<li><strong>UI không biên dịch:</strong> sửa nhiều child độc lập trong KeepAlive thành chuỗi điều kiện hợp lệ; thêm build thật ngoài vue-tsc.</li>
+<li><strong>Quyền và state:</strong> tách quyền Memory khỏi quyền sở hữu tài liệu; reset cache theo user/tenant/KB; chặn response cũ; reload 409 đóng editor cũ thay vì giữ draft lỗi.</li>
+<li><strong>Graph:</strong> gắn event sau khi canvas async thực sự xuất hiện, cleanup observer/listener, tự fit, hỗ trợ bàn phím, chống NaN từ importance âm và giảm nhãn chồng lấn. Overview giới hạn 30 nút được ghi rõ.</li>
+<li><strong>Audit nguyên tử:</strong> tạo/sửa/xóa và audit nằm trong cùng giao dịch. Test gây lỗi INSERT audit xác nhận memory và relations cùng rollback.</li>
+<li><strong>Merge/undo:</strong> khóa và so phiên bản tất cả participants; giữ metadata snapshot; re-embed trước khi restore; phục hồi vector và graph trong cùng giao dịch cho audit mới.</li>
+<li><strong>Tranh chấp:</strong> optimistic lock dùng đầy đủ microsecond; UPDATE/DELETE có SQL guard nếu người dùng vừa bảo vệ verdict. Near-merge retry trên snapshot mới; khi vẫn tranh chấp, giữ fact riêng thay vì ghi đè.</li>
+<li><strong>Worker:</strong> mất heartbeat làm hủy pass; ledger PostgreSQL giữ budget tenant/ngày qua restart và nhiều replica. Pruner giữ tier 0; decay đi qua service có audit; bỏ cache cũ có cleanup goroutine không dừng.</li>
+<li><strong>Provenance:</strong> không so vector legacy chưa rõ model như thể tương thích. Admin relink re-embeds đúng model; keyword recall vẫn hoạt động trong lúc chờ backfill.</li>
+<li><strong>MCP config:</strong> không chọn endpoint tắt hoặc endpoint home-only cho KB được chia sẻ; token cũ không được hiện lại khi đổi scope.</li>
+</ul></section>
+<section id="evidence"><h2>Bằng chứng giao diện</h2><p>Ảnh từ Playwright MCP trên thế giới test. Không chứa MCP bearer token hoặc thông tin người dùng thật. Các ca theo role và conflict được kiểm chứng trong spec; không tuyên bố mọi ca đều đã được thao tác lại thủ công bằng MCP.</p>
+<figure><img src="graph-overview.png" alt="Graph overview Memory V2 với 30 nút, mã loại và chú giải quan hệ"><figcaption>Graph có dữ liệu độc lập với Browse; có focus/hover, mở chi tiết, zoom và pan. Kiểu nút có mã riêng, không chỉ phân biệt bằng màu.</figcaption></figure>
+<figure><img src="browse-vi.png" alt="Bảng ký ức tiếng Việt với tìm kiếm, bộ lọc, nút tạo và lựa chọn bulk"><figcaption>Duyệt và lọc phía server; toggle ngữ nghĩa dùng API hybrid top-k thay vì phân trang giả ở client.</figcaption></figure>
+</section>
+<section id="risks"><h2>Phần chưa đóng trước production sign-off</h2><ul>
+<li><strong>Persistent graph jobs:</strong> auto-link hiện còn trên write path, best-effort; relink là recovery. Hàng đợi graph bền vững trong kế hoạch chưa được triển khai ở checkpoint này.</li>
+<li><strong>Dependency:</strong> lockfile frontend hiện có 14 advisory: 1 critical, 8 high, 3 moderate, 2 low. Critical nằm ở transitive <code>shell-quote</code>. Không thay đổi version dependency trong phần Memory này.</li>
+<li><strong>Môi trường:</strong> host stack đã chạy thật; Compose chỉ validate cấu hình. Chưa chạy Compose/docreader, chưa clone một DB develop/production thực của người dùng.</li>
+<li><strong>Giới hạn bằng chứng:</strong> 200 dòng và 50 saves đồng thời không thay thế benchmark KB lớn hoặc soak dài. Chưa replay độc lập mọi role/use case qua Playwright MCP.</li>
+<li><strong>Model:</strong> bge-m3 1024d và qwen2.5:3b dùng cho luồng hiện tại. Zero proposal là kết quả hợp lệ trong smoke, không chứng minh model đủ tốt cho phân xử production.</li>
+<li><strong>Lịch sử cũ:</strong> merge audit trước khi lưu relation snapshot không thể phục hồi chính xác graph lịch sử. Audit mới có snapshot; text restore cũ vẫn được hỗ trợ.</li>
+</ul><p>Không push, không mở PR và không triển khai production nếu chưa có xác nhận của người dùng.</p></section>
+<section id="reproduce"><h2>Chạy lại bằng chứng</h2><pre>make memory-e2e-up
+make memory-e2e-seed
+make memory-e2e-test
+
+# Kiểm chứng upgrade + backfill trên clone E2E
+./e2e/memory_v2/migration_smoke.sh
+
+# Regression PostgreSQL/ParadeDB + race
+WEKNORA_TEST_POSTGRES_DSN='&lt;isolated test DSN&gt;' \
+WEKNORA_TEST_PARADEDB=1 go test -race \
+  ./internal/application/repository/memory_v2 \
+  ./internal/application/service/memory_v2/...</pre><p>Hướng dẫn đầy đủ: <code>e2e/memory_v2/README.md</code>. Test storage state, seed bearer tokens, trace và log nằm trong các đường dẫn Git-ignore; không đưa vào bằng chứng chia sẻ.</p></section>
+<footer class="fine">Snapshot kỹ thuật, không phải chứng nhận hoàn tất release gate. Kết quả test có phạm vi cụ thể như bảng ở trên; mọi giới hạn đã biết được giữ lại để người review quyết định trên đúng bằng chứng.</footer>
+</main>
+</body></html>

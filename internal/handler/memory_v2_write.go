@@ -60,6 +60,9 @@ func (h *MemoryV2Handler) CreateMemory(c *gin.Context) {
 		return
 	}
 
+	if result.LintIssues == nil {
+		result.LintIssues = []types.MemoryLintIssue{}
+	}
 	statusCode := http.StatusOK
 	if result.Created {
 		statusCode = http.StatusCreated
@@ -126,7 +129,11 @@ func (h *MemoryV2Handler) writeMemoryError(c *gin.Context, err error, msg, tenan
 	var validation *types.ErrMemoryValidation
 	var protected *types.ErrProtectedVerdict
 	var conflict *types.MemoryV2ConflictError
+	var modelUnavailable *types.MemoryV2ModelUnavailable
 	switch {
+	case stderrors.As(err, &modelUnavailable):
+		logger.ErrorWithFields(c.Request.Context(), err, map[string]interface{}{"tenant_id": tenantID, "memory_id": memoryID})
+		c.Error(errors.NewServiceUnavailableError("Memory embedding model is temporarily unavailable; try again later"))
 	case stderrors.As(err, &conflict):
 		appErr := errors.NewConflictError(conflict.Message)
 		if conflict.ExistingID != "" {
