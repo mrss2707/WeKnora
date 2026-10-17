@@ -46,16 +46,33 @@ func (p *Pruner) Run(ctx context.Context) {
 	}
 }
 
-// pruneAll runs all pruning operations.
+// pruneAll runs all pruning operations, one (tenant, knowledge base) scope at
+// a time. Nothing runs when scopes cannot be enumerated.
 func (p *Pruner) pruneAll(ctx context.Context) {
 	ctx = context.WithValue(ctx, types.ActorKey{}, "system")
-	logger.Infof(ctx, "pruner: starting pruning cycle")
+	scopes, err := listScopes(ctx, p.repo)
+	if err != nil {
+		logger.Errorf(ctx, "pruner: list scopes failed: %v", err)
+		return
+	}
+	logger.Infof(ctx, "pruner: starting pruning cycle over %d scope(s)", len(scopes))
 
-	// Step 1: Soft-delete expired memories
-	p.softDeleteExpired(ctx)
-
-	// Step 2: Hard-delete eligible soft-deleted memories
-	p.hardDeleteSoftDeleted(ctx)
+	tenants := map[string]bool{}
+	for _, sc := range scopes {
+		if ctx.Err() != nil {
+			return
+		}
+		if sc.TenantID == "" {
+			continue
+		}
+		tenants[sc.TenantID] = true
+		// Step 1: Soft-delete expired memories
+		p.softDeleteExpired(ctx, sc)
+	}
+	// Step 2: Hard-delete eligible soft-deleted memories, per tenant
+	for tenantID := range tenants {
+		p.hardDeleteSoftDeleted(ctx, tenantID)
+	}
 
 	logger.Infof(ctx, "pruner: pruning cycle complete")
 }
@@ -66,9 +83,11 @@ func (p *Pruner) pruneAll(ctx context.Context) {
 // - Tier-1 (Core): Delete if expired AND not accessed >30 days
 // - Tier-0 (Critical): NEVER delete
 // - Tagged "critical" or "permanent": NEVER delete
-func (p *Pruner) softDeleteExpired(ctx context.Context) {
+func (p *Pruner) softDeleteExpired(ctx context.Context, sc Scope) {
 	filter := &types.MemoryFilter{
-		Limit: 1000,
+		TenantID: sc.TenantID,
+		KbID:     sc.KbID,
+		Limit:    1000,
 	}
 	results, _, err := p.repo.Search(ctx, filter)
 	if err != nil {
@@ -124,8 +143,8 @@ func (p *Pruner) softDeleteExpired(ctx context.Context) {
 
 // hardDeleteSoftDeleted permanently deletes tier-3 soft-deleted memories
 // that have been deleted for >14 days with access_count=0.
-func (p *Pruner) hardDeleteSoftDeleted(ctx context.Context) {
-	count, err := p.repo.HardDeleteExpired(ctx, "", time.Now().Add(-14*24*time.Hour))
+func (p *Pruner) hardDeleteSoftDeleted(ctx context.Context, tenantID string) {
+	count, err := p.repo.HardDeleteExpired(ctx, tenantID, time.Now().Add(-14*24*time.Hour))
 	if err != nil {
 		logger.Errorf(ctx, "pruner: hard-delete failed: %v", err)
 		return

@@ -132,12 +132,12 @@ func TestMemoryV2SaveMemory_ScopeAndReadiness(t *testing.T) {
 		svc := NewMemoryServiceV2(repo, modelSvc, enabledMemoryConfig(), nil)
 
 		_, err := svc.SaveMemory(ctx, &types.AgentMemory{
-			TenantID: "tenant-A",
+			TenantID: "101",
 			Content:  "The project deploys on Wednesday mornings",
 		})
 		require.NoError(t, err)
 		_, err = svc.SaveMemory(ctx, &types.AgentMemory{
-			TenantID: "tenant-B",
+			TenantID: "202",
 			Content:  "A completely different memory for another workspace",
 		})
 		require.NoError(t, err)
@@ -145,8 +145,8 @@ func TestMemoryV2SaveMemory_ScopeAndReadiness(t *testing.T) {
 		repo.mu.Lock()
 		defer repo.mu.Unlock()
 		require.Len(t, repo.created, 2)
-		assert.Equal(t, "tenant-A", repo.created[0].TenantID)
-		assert.Equal(t, "tenant-B", repo.created[1].TenantID)
+		assert.Equal(t, "101", repo.created[0].TenantID)
+		assert.Equal(t, "202", repo.created[1].TenantID)
 		assert.NotEqual(t, repo.created[0].TenantID, repo.created[1].TenantID)
 	})
 }

@@ -33,6 +33,7 @@ type mockPrunerRepo struct {
 	// Tracking
 	deleteCalls     []deleteCall
 	searchCalls     int
+	searchFilters   []types.MemoryFilter
 	hardDeleteCalls int
 	hardDeleteRows  int64
 	hardDeleteErr   error
@@ -72,6 +73,7 @@ func (m *mockPrunerRepo) Delete(ctx context.Context, tenantID, id string) error 
 func (m *mockPrunerRepo) Search(ctx context.Context, filter *types.MemoryFilter) ([]*types.MemorySearchResult, int64, error) {
 	m.mu.Lock()
 	m.searchCalls++
+	m.searchFilters = append(m.searchFilters, *filter)
 	m.mu.Unlock()
 	if m.searchFunc != nil {
 		return m.searchFunc(ctx, filter)
@@ -158,6 +160,10 @@ func makePrunerMemory(id, tenantID, content string, tier int, tags []string, cre
 	}
 }
 
+func (m *mockPrunerRepo) ListMemoryScopes(context.Context) ([]Scope, error) {
+	return []Scope{testScope}, nil
+}
+
 func newTestPruner(repo *mockPrunerRepo) *Pruner {
 	return &Pruner{repo: repo}
 }
@@ -181,7 +187,7 @@ func TestPruner_SoftDeleteExpired_Tier3PastTTL(t *testing.T) {
 	}
 	p := newTestPruner(repo)
 
-	p.softDeleteExpired(context.Background())
+	p.softDeleteExpired(context.Background(), testScope)
 
 	require.Len(t, repo.deleteCalls, 1, "tier-3 past 7d TTL should be soft-deleted")
 	assert.Equal(t, "mem-1", repo.deleteCalls[0].ID)
@@ -203,7 +209,7 @@ func TestPruner_SoftDeleteExpired_Tier3BeforeTTL(t *testing.T) {
 	}
 	p := newTestPruner(repo)
 
-	p.softDeleteExpired(context.Background())
+	p.softDeleteExpired(context.Background(), testScope)
 
 	assert.Empty(t, repo.deleteCalls, "tier-3 within TTL should not be deleted")
 }
@@ -228,7 +234,7 @@ func TestPruner_SoftDeleteExpired_Tier2ExpiredAndInactive(t *testing.T) {
 	}
 	p := newTestPruner(repo)
 
-	p.softDeleteExpired(context.Background())
+	p.softDeleteExpired(context.Background(), testScope)
 
 	require.Len(t, repo.deleteCalls, 1, "tier-2 expired and inactive should be soft-deleted")
 	assert.Equal(t, "mem-2", repo.deleteCalls[0].ID)
@@ -250,7 +256,7 @@ func TestPruner_SoftDeleteExpired_Tier1ExpiredAndInactive(t *testing.T) {
 	}
 	p := newTestPruner(repo)
 
-	p.softDeleteExpired(context.Background())
+	p.softDeleteExpired(context.Background(), testScope)
 
 	require.Len(t, repo.deleteCalls, 1, "tier-1 expired and inactive should be soft-deleted")
 	assert.Equal(t, "mem-1", repo.deleteCalls[0].ID)
@@ -276,7 +282,7 @@ func TestPruner_SoftDeleteExpired_Tier2ExpiredButActive(t *testing.T) {
 	}
 	p := newTestPruner(repo)
 
-	p.softDeleteExpired(context.Background())
+	p.softDeleteExpired(context.Background(), testScope)
 
 	assert.Empty(t, repo.deleteCalls, "tier-2 expired but recently accessed should not be deleted")
 }
@@ -297,7 +303,7 @@ func TestPruner_SoftDeleteExpired_Tier1ExpiredButActive(t *testing.T) {
 	}
 	p := newTestPruner(repo)
 
-	p.softDeleteExpired(context.Background())
+	p.softDeleteExpired(context.Background(), testScope)
 
 	assert.Empty(t, repo.deleteCalls, "tier-1 expired but recently accessed should not be deleted")
 }
@@ -321,7 +327,7 @@ func TestPruner_SoftDeleteExpired_Tier0NeverDeleted(t *testing.T) {
 	}
 	p := newTestPruner(repo)
 
-	p.softDeleteExpired(context.Background())
+	p.softDeleteExpired(context.Background(), testScope)
 
 	assert.Empty(t, repo.deleteCalls, "tier-0 memories should never be deleted")
 }
@@ -345,7 +351,7 @@ func TestPruner_SoftDeleteExpired_TaggedCriticalNeverDeleted(t *testing.T) {
 	}
 	p := newTestPruner(repo)
 
-	p.softDeleteExpired(context.Background())
+	p.softDeleteExpired(context.Background(), testScope)
 
 	assert.Empty(t, repo.deleteCalls, "memories tagged 'critical' should never be deleted")
 }
@@ -365,7 +371,7 @@ func TestPruner_SoftDeleteExpired_TaggedPermanentNeverDeleted(t *testing.T) {
 	}
 	p := newTestPruner(repo)
 
-	p.softDeleteExpired(context.Background())
+	p.softDeleteExpired(context.Background(), testScope)
 
 	assert.Empty(t, repo.deleteCalls, "memories tagged 'permanent' should never be deleted")
 }
@@ -385,7 +391,7 @@ func TestPruner_SoftDeleteExpired_TaggedCriticalCaseInsensitive(t *testing.T) {
 	}
 	p := newTestPruner(repo)
 
-	p.softDeleteExpired(context.Background())
+	p.softDeleteExpired(context.Background(), testScope)
 
 	assert.Empty(t, repo.deleteCalls, "case-insensitive 'CRITICAL' tag should also protect")
 }
@@ -405,7 +411,7 @@ func TestPruner_SoftDeleteExpired_TaggedPermanentMixedCase(t *testing.T) {
 	}
 	p := newTestPruner(repo)
 
-	p.softDeleteExpired(context.Background())
+	p.softDeleteExpired(context.Background(), testScope)
 
 	assert.Empty(t, repo.deleteCalls, "case-insensitive 'Permanent' tag should also protect")
 }
@@ -425,7 +431,7 @@ func TestPruner_SoftDeleteExpired_NonProtectedTagDoesNotProtect(t *testing.T) {
 	}
 	p := newTestPruner(repo)
 
-	p.softDeleteExpired(context.Background())
+	p.softDeleteExpired(context.Background(), testScope)
 
 	require.Len(t, repo.deleteCalls, 1, "non-protected tag should not prevent deletion")
 	assert.Equal(t, "mem-tag", repo.deleteCalls[0].ID)
@@ -439,7 +445,7 @@ func TestPruner_HardDeleteSoftDeleted_RowsAffected(t *testing.T) {
 	repo := &mockPrunerRepo{hardDeleteRows: 3}
 	p := newTestPruner(repo)
 
-	p.hardDeleteSoftDeleted(context.Background())
+	p.hardDeleteSoftDeleted(context.Background(), testScope.TenantID)
 
 	assert.Empty(t, repo.deleteCalls, "hard-delete should not call repo.Delete")
 	assert.Equal(t, 1, repo.hardDeleteCalls)
@@ -449,7 +455,7 @@ func TestPruner_HardDeleteSoftDeleted_Error(t *testing.T) {
 	repo := &mockPrunerRepo{hardDeleteErr: assert.AnError}
 	p := newTestPruner(repo)
 
-	p.hardDeleteSoftDeleted(context.Background())
+	p.hardDeleteSoftDeleted(context.Background(), testScope.TenantID)
 
 	assert.Equal(t, 1, repo.hardDeleteCalls)
 }
@@ -466,6 +472,10 @@ func TestPruner_pruneAll_CallsHardDeleteSoftDeleted(t *testing.T) {
 	p.pruneAll(context.Background())
 
 	assert.Equal(t, 1, repo.searchCalls, "search should be called during pruneAll")
+	assert.Equal(t, 1, repo.hardDeleteCalls, "hard-delete runs once per tenant")
+	require.Len(t, repo.searchFilters, 1)
+	assert.Equal(t, testScope.TenantID, repo.searchFilters[0].TenantID, "never an unscoped search")
+	assert.Equal(t, testScope.KbID, repo.searchFilters[0].KbID)
 }
 
 // ---------------------------------------------------------------------------
@@ -480,7 +490,7 @@ func TestPruner_SoftDeleteExpired_EmptyResults(t *testing.T) {
 	}
 	p := newTestPruner(repo)
 
-	p.softDeleteExpired(context.Background())
+	p.softDeleteExpired(context.Background(), testScope)
 
 	assert.Empty(t, repo.deleteCalls, "no deletions should occur with empty results")
 	assert.Equal(t, 1, repo.searchCalls, "search should be called once")
@@ -500,7 +510,7 @@ func TestPruner_SoftDeleteExpired_SkipsNilMemory(t *testing.T) {
 	}
 	p := newTestPruner(repo)
 
-	p.softDeleteExpired(context.Background())
+	p.softDeleteExpired(context.Background(), testScope)
 
 	assert.Empty(t, repo.deleteCalls, "nil memory entries should be skipped")
 }
@@ -518,7 +528,7 @@ func TestPruner_SoftDeleteExpired_SearchError(t *testing.T) {
 	p := newTestPruner(repo)
 
 	// Should not panic — logs the error and returns
-	p.softDeleteExpired(context.Background())
+	p.softDeleteExpired(context.Background(), testScope)
 
 	assert.Empty(t, repo.deleteCalls, "no deletions should occur after search error")
 }
@@ -556,7 +566,7 @@ func TestPruner_SoftDeleteExpired_DeleteErrorContinues(t *testing.T) {
 	p := newTestPruner(repo)
 
 	// Should not panic when first delete fails — should continue to second
-	p.softDeleteExpired(context.Background())
+	p.softDeleteExpired(context.Background(), testScope)
 
 	assert.Equal(t, 2, deleteAttempted, "both memories should be attempted")
 	require.Len(t, repo.deleteCalls, 2, "both should be attempted")
@@ -608,7 +618,7 @@ func TestPruner_SoftDeleteExpired_MixedTiers(t *testing.T) {
 	}
 	p := newTestPruner(repo)
 
-	p.softDeleteExpired(context.Background())
+	p.softDeleteExpired(context.Background(), testScope)
 
 	// Only tier3Old, tier2Old, and tier1Old should be deleted
 	require.Len(t, repo.deleteCalls, 3)

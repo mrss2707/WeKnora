@@ -34,3 +34,9 @@ type MemoryV2Patcher interface {
 type MemoryV2FieldUpdater interface {
 	UpdateFields(ctx context.Context, tenantID, id string, fields map[string]interface{}) error
 }
+
+// MemoryV2ScopedDreamer is an optional capability of MemoryServiceV2 that runs
+// a dreamer pass restricted to one knowledge base of a tenant.
+type MemoryV2ScopedDreamer interface {
+	ConsolidateDreamScope(ctx context.Context, tenantID, kbID string) (*types.DreamResult, error)
+}

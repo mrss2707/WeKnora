@@ -27,12 +27,12 @@ func TestWorkerGate_DefaultIsDisarmed(t *testing.T) {
 }
 
 func TestWorkerGate_DisarmedStartsNoMutatingWorker(t *testing.T) {
-	repo := &serviceLifecycleRepoFake{}
+	repo := &serviceLifecycleRepoFake{scopes: []types.MemoryScope{{TenantID: "1", KbID: "kb-1"}}}
 	svc := newGateTestService(repo, false)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	svc.ensureWorkers(ctx)
+	svc.StartWorkers(ctx)
 	// The consolidator recomputes hub scores immediately when it starts.
 	time.Sleep(50 * time.Millisecond)
 	cancel()
@@ -44,11 +44,11 @@ func TestWorkerGate_DisarmedStartsNoMutatingWorker(t *testing.T) {
 }
 
 func TestWorkerGate_ArmedStartsMutatingWorkers(t *testing.T) {
-	repo := &serviceLifecycleRepoFake{}
+	repo := &serviceLifecycleRepoFake{scopes: []types.MemoryScope{{TenantID: "1", KbID: "kb-1"}}}
 	svc := newGateTestService(repo, true)
 	ctx, cancel := context.WithCancel(context.Background())
 
-	svc.ensureWorkers(ctx)
+	svc.StartWorkers(ctx)
 	require.Eventually(t, func() bool { return repo.hubScoreCallCount() > 0 }, time.Second, 10*time.Millisecond,
 		"consolidator runs once on start when armed")
 	cancel()

@@ -38,6 +38,14 @@ type serviceLifecycleRepoFake struct {
 	hardDeleteRows   int64
 	hardDeleteErr    error
 	hubScoreCalls    int
+	scopes           []types.MemoryScope
+}
+
+// ListMemoryScopes reports the configured scopes (none by default).
+func (r *serviceLifecycleRepoFake) ListMemoryScopes(context.Context) ([]types.MemoryScope, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return append([]types.MemoryScope(nil), r.scopes...), nil
 }
 
 var _ interfaces.MemoryRepositoryV2 = (*serviceLifecycleRepoFake)(nil)
@@ -310,123 +318,14 @@ func TestNewMemoryServiceV2_WiresCacheWorkersAndTenantIDs(t *testing.T) {
 	assert.Equal(t, []string{"tenant-1", "tenant-2"}, svc.tenantIDs)
 }
 
-func TestGetEmbedderAndChat_UseModelServiceAndCacheModelList(t *testing.T) {
-	modelSvc := &serviceLifecycleModelServiceFake{
-		models:    memoryLifecycleModels(),
-		embedder:  &mockEmbedder{},
-		chatModel: &mockChat{},
-	}
-	svc := NewMemoryServiceV2(&serviceLifecycleRepoFake{}, modelSvc, types.DefaultMemoryV2Config(), nil)
-
-	emb, err := svc.getEmbedder(context.Background())
-	require.NoError(t, err)
-	require.NotNil(t, emb)
-
-	ch, err := svc.getChat(context.Background())
-	require.NoError(t, err)
-	require.NotNil(t, ch)
-
-	modelSvc.mu.Lock()
-	defer modelSvc.mu.Unlock()
-	assert.Equal(t, 1, modelSvc.listCalls)
-	assert.Equal(t, 1, modelSvc.embedderCalls)
-	assert.Equal(t, 1, modelSvc.chatCalls)
-	assert.Len(t, svc.cachedModels, 2)
-}
-
-func TestGetEmbedder_ModelServiceNilAndMissingEmbedding(t *testing.T) {
-	t.Run("nil model service", func(t *testing.T) {
-		svc := &MemoryServiceV2Impl{}
-		_, err := svc.getEmbedder(context.Background())
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "model service not available")
-	})
-
-	t.Run("missing embedding model", func(t *testing.T) {
-		svc := NewMemoryServiceV2(&serviceLifecycleRepoFake{}, &serviceLifecycleModelServiceFake{
-			models: []*types.Model{{ID: "chat-model", Type: types.ModelTypeKnowledgeQA}},
-		}, types.DefaultMemoryV2Config(), nil)
-		_, err := svc.getEmbedder(context.Background())
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "no Embedding model configured")
-	})
-}
-
-func TestGetChat_ModelServiceNilAndMissingChat(t *testing.T) {
-	t.Run("nil model service", func(t *testing.T) {
-		svc := &MemoryServiceV2Impl{}
-		_, err := svc.getChat(context.Background())
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "model service not available")
-	})
-
-	t.Run("missing chat model", func(t *testing.T) {
-		svc := NewMemoryServiceV2(&serviceLifecycleRepoFake{}, &serviceLifecycleModelServiceFake{
-			models: []*types.Model{{ID: "embed-model", Type: types.ModelTypeEmbedding}},
-		}, types.DefaultMemoryV2Config(), nil)
-		_, err := svc.getChat(context.Background())
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "no KnowledgeQA model configured")
-	})
-}
-
-func TestGetEmbedderAndChat_RecoverListModelsPanic(t *testing.T) {
-	for _, tt := range []struct {
-		name string
-		call func(*MemoryServiceV2Impl) error
-		want string
-	}{
-		{
-			name: "embedder",
-			call: func(svc *MemoryServiceV2Impl) error {
-				_, err := svc.getEmbedder(context.Background())
-				return err
-			},
-			want: "getEmbedder recovered from panic: boom",
-		},
-		{
-			name: "chat",
-			call: func(svc *MemoryServiceV2Impl) error {
-				_, err := svc.getChat(context.Background())
-				return err
-			},
-			want: "getChat recovered from panic: boom",
-		},
-	} {
-		t.Run(tt.name, func(t *testing.T) {
-			svc := NewMemoryServiceV2(&serviceLifecycleRepoFake{}, &serviceLifecycleModelServiceFake{listPanic: "boom"}, types.DefaultMemoryV2Config(), nil)
-			err := tt.call(svc)
-			require.Error(t, err)
-			assert.Contains(t, err.Error(), tt.want)
-		})
-	}
-}
-
-func TestEnsureWorkers_ModelInitFailureLeavesWorkersNil(t *testing.T) {
+func TestInitWorkers_ConstructsAllWorkersWithoutAnyModel(t *testing.T) {
+	// Construction must not depend on models, a tenant or a request: a failing
+	// model catalog leaves the workers in place (they resolve models per scope).
 	svc := NewMemoryServiceV2(&serviceLifecycleRepoFake{}, &serviceLifecycleModelServiceFake{
 		listErr: errors.New("model catalog unavailable"),
 	}, types.DefaultMemoryV2Config(), nil)
 
-	svc.ensureWorkers(context.Background())
-
-	assert.Nil(t, svc.entityExtractor)
-	assert.Nil(t, svc.autoLinker)
-	assert.Nil(t, svc.dreamer)
-	assert.Nil(t, svc.cacheWarmer)
-}
-
-func TestEnsureWorkers_InitializesEmbedderDependentWorkers(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-
-	svc := NewMemoryServiceV2(&serviceLifecycleRepoFake{}, &serviceLifecycleModelServiceFake{
-		models:    memoryLifecycleModels(),
-		embedder:  &mockEmbedder{},
-		chatModel: &mockChat{},
-	}, types.DefaultMemoryV2Config(), []string{"tenant-1"})
-
-	svc.ensureWorkers(ctx)
-	svc.Cleanup()
+	svc.initWorkers()
 
 	assert.NotNil(t, svc.entityExtractor)
 	assert.NotNil(t, svc.autoLinker)
@@ -435,28 +334,47 @@ func TestEnsureWorkers_InitializesEmbedderDependentWorkers(t *testing.T) {
 	assert.NotNil(t, svc.cacheWarmer)
 }
 
-func TestEnsureWorkers_ConcurrentCallsRaceCheck(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-
-	svc := NewMemoryServiceV2(&serviceLifecycleRepoFake{}, &serviceLifecycleModelServiceFake{
-		models:    memoryLifecycleModels(),
-		embedder:  &mockEmbedder{},
-		chatModel: &mockChat{},
-	}, types.DefaultMemoryV2Config(), []string{"tenant-1"})
+func TestInitWorkers_ConcurrentCallsBuildOnce(t *testing.T) {
+	svc := NewMemoryServiceV2(&serviceLifecycleRepoFake{}, &serviceLifecycleModelServiceFake{}, types.DefaultMemoryV2Config(), nil)
 
 	var wg sync.WaitGroup
-	for i := 0; i < 16; i++ {
+	seen := make([]*workers.DreamerWorker, 16)
+	for i := range seen {
 		wg.Add(1)
-		go func() {
+		go func(i int) {
 			defer wg.Done()
-			svc.ensureWorkers(ctx)
-		}()
+			svc.initWorkers()
+			svc.workerMu.Lock()
+			seen[i] = svc.dreamer
+			svc.workerMu.Unlock()
+		}(i)
 	}
 	wg.Wait()
-	svc.Cleanup()
+	for _, d := range seen {
+		assert.Same(t, seen[0], d, "workers are built exactly once")
+	}
+}
 
-	assert.NotNil(t, svc.entityExtractor)
+func TestStartWorkers_UsesServerContextNotRequest(t *testing.T) {
+	repo := &serviceLifecycleRepoFake{scopes: []types.MemoryScope{{TenantID: "1", KbID: "kb-1"}}}
+	cfg := types.DefaultMemoryV2Config()
+	cfg.WorkerMutations = true
+	cfg.CacheWarmer.Enabled = false
+	svc := NewMemoryServiceV2(repo, &serviceLifecycleModelServiceFake{}, cfg, nil)
+
+	serverCtx, stop := context.WithCancel(context.Background())
+	svc.StartWorkers(serverCtx)
+
+	// A finished request never stops background workers: only the server
+	// context (via Cleanup) does.
+	reqCtx, endRequest := context.WithCancel(context.Background())
+	_, _ = svc.SaveMemory(reqCtx, &types.AgentMemory{TenantID: "1", Content: "short"})
+	endRequest()
+
+	require.Eventually(t, func() bool { return repo.hubScoreCallCount() > 0 }, time.Second, 10*time.Millisecond,
+		"consolidator keeps running after the request that preceded it ended")
+	stop()
+	svc.Cleanup()
 }
 
 func TestAddEpisode_EmptyMessagesNoSave(t *testing.T) {
@@ -569,7 +487,7 @@ func TestServiceLifecycleModelServiceFake_ListError(t *testing.T) {
 	modelSvc := &serviceLifecycleModelServiceFake{listErr: fmt.Errorf("catalog down")}
 	svc := NewMemoryServiceV2(&serviceLifecycleRepoFake{}, modelSvc, types.DefaultMemoryV2Config(), nil)
 
-	_, err := svc.getEmbedder(context.Background())
+	_, _, err := svc.embedderFor(context.Background(), "1", "")
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "catalog down")

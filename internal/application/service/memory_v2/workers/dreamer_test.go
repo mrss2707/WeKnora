@@ -3,7 +3,9 @@ package workers
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"github.com/Tencent/WeKnora/internal/models/embedding"
 	"strings"
 	"sync"
 	"testing"
@@ -225,22 +227,94 @@ func TestDreamer_DreamPassRunsAllTenantsAndContinuesAfterTenantError(t *testing.
 	assert.Equal(t, []string{"t1", "t2"}, repo.unlockCalls)
 }
 
-func TestDreamer_DreamPassFallbackEmptyTenant(t *testing.T) {
-	repo := &mockDreamerRepo{
+// scopedDreamerRepo adds scope enumeration to the dreamer repo mock.
+type scopedDreamerRepo struct {
+	*mockDreamerRepo
+	scopes []Scope
+}
+
+func (r *scopedDreamerRepo) ListMemoryScopes(context.Context) ([]Scope, error) {
+	return r.scopes, nil
+}
+
+// fakeResolver hands out a per-scope chat client and records lookups.
+type fakeResolver struct {
+	mu    sync.Mutex
+	chats map[string]chat.Chat
+	calls []string
+}
+
+func (f *fakeResolver) Embedder(context.Context, string, string) (embedding.Embedder, string, error) {
+	return nil, "", errors.New("no embedder in this test")
+}
+
+func (f *fakeResolver) Chat(_ context.Context, tenantID, kbID string) (chat.Chat, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.calls = append(f.calls, tenantID+"/"+kbID)
+	if c, ok := f.chats[tenantID+"/"+kbID]; ok {
+		return c, nil
+	}
+	return nil, errors.New("no chat model")
+}
+
+func TestDreamer_DreamPassRunsPerScopeWithScopeModel(t *testing.T) {
+	var mu sync.Mutex
+	var filters []types.MemoryFilter
+	base := &mockDreamerRepo{
 		searchFunc: func(ctx context.Context, filter *types.MemoryFilter) ([]*types.MemorySearchResult, int64, error) {
-			assert.Equal(t, "", filter.TenantID)
-			return nil, 0, nil
+			mu.Lock()
+			filters = append(filters, *filter)
+			mu.Unlock()
+			mem := makeDreamerMemory("m-"+filter.KbID, filter.TenantID, "content", types.VerdictNone, 1, 2)
+			mem.KbID = filter.KbID
+			return []*types.MemorySearchResult{makeSearchResult(mem)}, 1, nil
 		},
 	}
-	d := NewDreamerWorker(repo, &mockDreamerChat{}, types.DreamerConfig{Enabled: true}, nil)
+	repo := &scopedDreamerRepo{mockDreamerRepo: base, scopes: []Scope{{TenantID: "1", KbID: "kb-a"}, {TenantID: "2", KbID: "kb-b"}}}
+	chatA := &mockDreamerChat{}
+	chatB := &mockDreamerChat{}
+	resolver := &fakeResolver{chats: map[string]chat.Chat{"1/kb-a": chatA, "2/kb-b": chatB}}
+	d := NewDreamerWorker(repo, nil, types.DreamerConfig{Enabled: true}, nil).WithResolver(resolver)
 
 	d.dreamPass(context.Background())
 
-	repo.mu.Lock()
-	defer repo.mu.Unlock()
-	require.Len(t, repo.tryLockCalls, 1)
-	assert.Equal(t, "", repo.tryLockCalls[0].TenantID)
-	assert.Equal(t, []string{""}, repo.unlockCalls)
+	assert.Equal(t, []string{"1/kb-a", "2/kb-b"}, resolver.calls, "each scope uses its own knowledge base's model")
+	require.Len(t, filters, 2)
+	assert.Equal(t, "1", filters[0].TenantID)
+	assert.Equal(t, "kb-a", filters[0].KbID, "a pass never mixes knowledge bases")
+	assert.Equal(t, "2", filters[1].TenantID)
+	assert.Equal(t, "kb-b", filters[1].KbID)
+	base.mu.Lock()
+	defer base.mu.Unlock()
+	require.Len(t, base.tryLockCalls, 2)
+	for _, call := range base.tryLockCalls {
+		assert.NotEmpty(t, call.TenantID, "never runs with an empty tenant")
+	}
+}
+
+func TestDreamer_EmptyTenantNeverRuns(t *testing.T) {
+	repo := &mockDreamerRepo{}
+	d := NewDreamerWorker(repo, &mockDreamerChat{}, types.DreamerConfig{Enabled: true}, nil)
+
+	// No scope lister: nothing to enumerate, nothing runs.
+	d.dreamPass(context.Background())
+	result, err := d.RunPass(context.Background(), "")
+
+	require.NoError(t, err)
+	assert.Zero(t, result.ActionsProposed)
+	assert.Empty(t, repo.tryLockCalls)
+	assert.Zero(t, repo.searchCalls)
+}
+
+func TestDreamer_ScopeWithoutModelIsSkipped(t *testing.T) {
+	repo := &scopedDreamerRepo{mockDreamerRepo: &mockDreamerRepo{}, scopes: []Scope{{TenantID: "1", KbID: "kb-a"}}}
+	d := NewDreamerWorker(repo, nil, types.DreamerConfig{Enabled: true}, nil).WithResolver(&fakeResolver{})
+
+	d.dreamPass(context.Background())
+
+	assert.Empty(t, repo.tryLockCalls, "no lock or search without a chat model")
+	assert.Zero(t, repo.searchCalls)
 }
 
 // dreamerActionJSON builds the JSON for the LLM to return for a list of actions.
@@ -1402,29 +1476,22 @@ func TestDreamer_MergeKeepsFullContent(t *testing.T) {
 // Test: Panic recovery in dreamPass
 // ---------------------------------------------------------------------------
 
-func TestDreamer_dreamPass_PanicRecovery(t *testing.T) {
-	// dreamPass calls executePass which could panic. The dreamPass function
-	// doesn't have a recover, but the test verifies that a panic in executePass
-	// doesn't crash the whole test suite and is logged.
+func TestDreamer_RunPass_PanicPropagates(t *testing.T) {
+	// executePass has no recover of its own; the service's runWorker wrapper
+	// recovers panics. Verify a panic is not swallowed silently here.
 	repo := &mockDreamerRepo{
 		searchFunc: func(ctx context.Context, filter *types.MemoryFilter) ([]*types.MemorySearchResult, int64, error) {
 			panic("simulated panic in dreamer")
 		},
 	}
-	chatClient := &mockDreamerChat{}
-	config := types.DreamerConfig{Enabled: true, MaxActions: 5, TokenBudget: 4000}
-	d := newTestDreamer(repo, chatClient, config)
+	d := newTestDreamer(repo, &mockDreamerChat{}, types.DreamerConfig{Enabled: true, MaxActions: 5, TokenBudget: 4000})
 
-	// dreamPass does not have a recover, so a panic will propagate.
-	// We wrap it in a recover here to verify it doesn't do something unexpected.
 	defer func() {
 		r := recover()
-		require.NotNil(t, r, "expected panic to propagate from dreamPass")
+		require.NotNil(t, r, "expected panic to propagate from RunPass")
 		assert.Contains(t, r, "simulated panic in dreamer")
 	}()
-
-	// Also ensure lock is not left acquired after panic
-	d.dreamPass(context.Background())
+	_, _ = d.RunPass(context.Background(), "tenant-1")
 }
 
 // ---------------------------------------------------------------------------

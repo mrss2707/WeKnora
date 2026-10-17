@@ -71,11 +71,26 @@ func (h *HealthChecker) AssessHealth(ctx context.Context, tenantID, kbID string,
 	return report, nil
 }
 
-// runChecks runs all 6 health checks for all tenants.
+// runChecks runs all health checks for every (tenant, knowledge base) scope
+// that holds memories. Nothing runs when scopes cannot be enumerated.
 func (h *HealthChecker) runChecks(ctx context.Context) {
-	logger.Infof(ctx, "health-checker: starting daily health check")
+	scopes, err := listScopes(ctx, h.repo)
+	if err != nil {
+		logger.Errorf(ctx, "health-checker: list scopes failed: %v", err)
+		return
+	}
+	logger.Infof(ctx, "health-checker: starting daily health check over %d scope(s)", len(scopes))
 
-	issues := h.runAllChecks(ctx, "", "", 0)
+	var issues []*types.MemoryHealthIssue
+	for _, sc := range scopes {
+		if ctx.Err() != nil {
+			return
+		}
+		if sc.TenantID == "" {
+			continue
+		}
+		issues = append(issues, h.runAllChecks(ctx, sc.TenantID, sc.KbID, 0)...)
+	}
 
 	total := len(issues)
 	bySeverity := make(map[string]int)

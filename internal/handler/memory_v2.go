@@ -468,7 +468,13 @@ func (h *MemoryV2Handler) TriggerDream(c *gin.Context) {
 		return
 	}
 
-	result, err := h.memorySvc.ConsolidateDream(ctx, tenantID)
+	var result *types.DreamResult
+	var err error
+	if scoped, ok := h.memorySvc.(interfaces.MemoryV2ScopedDreamer); ok && kbID != "" {
+		result, err = scoped.ConsolidateDreamScope(ctx, tenantID, kbID)
+	} else {
+		result, err = h.memorySvc.ConsolidateDream(ctx, tenantID)
+	}
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{
 			"tenant_id": tenantID,

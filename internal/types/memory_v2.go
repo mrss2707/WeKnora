@@ -148,6 +148,12 @@ func (DreamerState) TableName() string {
 // Filter types
 // ---------------------------------------------------------------------------
 
+// MemoryScope is one (tenant, knowledge base) partition of the memory store.
+type MemoryScope struct {
+	TenantID string `json:"tenant_id"`
+	KbID     string `json:"kb_id"`
+}
+
 // MemoryFilter represents search/filter parameters for memories.
 type MemoryFilter struct {
 	TenantID string `json:"tenant_id"`
@@ -163,9 +169,12 @@ type MemoryFilter struct {
 	SessionID    string          `json:"session_id,omitempty"`
 	Verdicts     []MemoryVerdict `json:"verdicts,omitempty"`
 	MinScore     float64         `json:"min_score,omitempty"`
-	DeepGraph    bool            `json:"deep_graph,omitempty"`
-	Limit        int             `json:"limit,omitempty"`
-	Offset       int             `json:"offset,omitempty"`
+	// EmbeddingModelID restricts vector search to rows embedded by this model
+	// (plus legacy rows with no recorded model). Empty disables the filter.
+	EmbeddingModelID string `json:"embedding_model_id,omitempty"`
+	DeepGraph        bool   `json:"deep_graph,omitempty"`
+	Limit            int    `json:"limit,omitempty"`
+	Offset           int    `json:"offset,omitempty"`
 }
 
 // ---------------------------------------------------------------------------

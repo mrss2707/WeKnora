@@ -422,6 +422,11 @@ func (r *MemoryRepository) CosineSearch(ctx context.Context, filter *types.Memor
 	if filter.KbID != "" {
 		query = query.Where("kb_id = ?", filter.KbID)
 	}
+	// Vectors from different embedding models are not comparable: restrict to
+	// the query's model, keeping legacy rows that predate model tracking.
+	if filter.EmbeddingModelID != "" {
+		query = query.Where("(metadata->>'embedding_model_id' = ? OR COALESCE(metadata->>'embedding_model_id', '') = '')", filter.EmbeddingModelID)
+	}
 
 	query = query.Clauses(clause.OrderBy{
 		Expression: clause.Expr{SQL: "embedding <=> ?", Vars: []interface{}{vec}},

@@ -21,8 +21,8 @@ type ErrMemoryValidation = types.ErrMemoryValidation
 
 // SaveMemory runs the full ingestion pipeline and returns the result.
 func (s *MemoryServiceV2Impl) SaveMemory(ctx context.Context, memory *types.AgentMemory) (*types.SaveMemoryResult, error) {
-	// Step 0: Ensure background workers are initialized
-	s.ensureWorkers(ctx)
+	// Step 0: Workers are constructed once; auto-linking needs them.
+	s.initWorkers()
 
 	if memory == nil {
 		return nil, fmt.Errorf("memory_v2: SaveMemory called with nil memory")
@@ -75,8 +75,10 @@ func (s *MemoryServiceV2Impl) SaveMemory(ctx context.Context, memory *types.Agen
 		}, nil
 	}
 
-	// Step 3: Semantic dedup (requires embedding)
-	embedder, err := s.getEmbedder(ctx)
+	// Step 3: Semantic dedup (requires embedding). The knowledge base's own
+	// embedding model is used; its id is recorded on the row so vectors from
+	// different models are never compared.
+	embedder, modelID, err := s.embedderFor(ctx, memory.TenantID, memory.KbID)
 	if err != nil {
 		return nil, fmt.Errorf("embedder not available: %w", err)
 	}
@@ -85,6 +87,9 @@ func (s *MemoryServiceV2Impl) SaveMemory(ctx context.Context, memory *types.Agen
 		return nil, fmt.Errorf("embedding failed: %w", err)
 	}
 	memory.Embedding = pgvector.NewVector(embedding)
+	if modelID != "" {
+		memory.Metadata = setMetadataString(memory.Metadata, metadataEmbeddingModel, modelID)
+	}
 
 	semResult, err := s.checkSemanticDedup(ctx, memory, embedding)
 	if err != nil {
@@ -201,8 +206,9 @@ func (s *MemoryServiceV2Impl) checkSemanticDedup(ctx context.Context, memory *ty
 
 	// Search for semantically similar memories
 	filter := &types.MemoryFilter{
-		TenantID: memory.TenantID,
-		KbID:     memory.KbID,
+		TenantID:         memory.TenantID,
+		KbID:             memory.KbID,
+		EmbeddingModelID: metadataString(memory.Metadata, metadataEmbeddingModel),
 	}
 	filter.Limit = s.config.SemanticDedup.MaxMerges
 	if filter.Limit <= 0 {

@@ -11,9 +11,17 @@ import (
 )
 
 // AutoLinker creates relations between memories based on tag overlap and semantic similarity.
+// With a resolver it embeds with the memory's own knowledge base model.
 type AutoLinker struct {
 	repo     interfaces.MemoryRepositoryV2
 	embedder embedding.Embedder
+	resolver ModelResolver
+}
+
+// WithResolver makes the linker resolve each memory's embedding model.
+func (a *AutoLinker) WithResolver(r ModelResolver) *AutoLinker {
+	a.resolver = r
+	return a
 }
 
 // NewAutoLinker creates a new AutoLinker.
@@ -38,8 +46,21 @@ func (a *AutoLinker) LinkMemory(ctx context.Context, memory *types.AgentMemory) 
 		return
 	}
 
+	embedder := a.embedder
+	if a.resolver != nil {
+		emb, _, err := a.resolver.Embedder(ctx, memory.TenantID, memory.KbID)
+		if err != nil {
+			logger.Errorf(ctx, "auto-linker: resolve embedder: %v", err)
+			return
+		}
+		embedder = emb
+	}
+	if embedder == nil {
+		return
+	}
+
 	// Embed the new memory for cosine comparison
-	vector, err := a.embedder.Embed(ctx, memory.Content)
+	vector, err := embedder.Embed(ctx, memory.Content)
 	if err != nil {
 		logger.Errorf(ctx, "auto-linker: embedding failed: %v", err)
 		return
@@ -51,7 +72,7 @@ func (a *AutoLinker) LinkMemory(ctx context.Context, memory *types.AgentMemory) 
 		}
 
 		// Get embedding for candidate (embed on demand)
-		candidateVec, err := a.embedder.Embed(ctx, candidate.Content)
+		candidateVec, err := embedder.Embed(ctx, candidate.Content)
 		if err != nil {
 			continue
 		}

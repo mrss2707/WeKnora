@@ -15,9 +15,12 @@ import (
 )
 
 // DreamerWorker periodically runs LLM-driven consolidation (the "dreamer").
+// With a resolver it runs once per (tenant, knowledge base) scope using that
+// knowledge base's chat model; without one it uses the fixed chat client.
 type DreamerWorker struct {
 	repo      interfaces.MemoryRepositoryV2
 	chat      chat.Chat
+	resolver  ModelResolver
 	config    types.DreamerConfig
 	interval  time.Duration
 	workerID  string
@@ -34,6 +37,12 @@ func NewDreamerWorker(repo interfaces.MemoryRepositoryV2, chat chat.Chat, config
 		workerID:  fmt.Sprintf("dreamer-%d", time.Now().UnixNano()),
 		tenantIDs: tenantIDs,
 	}
+}
+
+// WithResolver makes the dreamer resolve each scope's chat model.
+func (d *DreamerWorker) WithResolver(r ModelResolver) *DreamerWorker {
+	d.resolver = r
+	return d
 }
 
 // Run starts the dreamer worker loop.
@@ -59,24 +68,39 @@ func (d *DreamerWorker) Run(ctx context.Context) {
 // RunPass executes a single dreamer pass for a given tenant.
 // This is the public entry point called from the HTTP handler (TriggerDream).
 func (d *DreamerWorker) RunPass(ctx context.Context, tenantID string) (*types.DreamResult, error) {
+	return d.RunScopePass(ctx, tenantID, "")
+}
+
+// RunScopePass executes a single dreamer pass restricted to one knowledge
+// base of a tenant (all of the tenant's memories when kbID is empty).
+func (d *DreamerWorker) RunScopePass(ctx context.Context, tenantID, kbID string) (*types.DreamResult, error) {
 	if !d.config.Enabled {
 		return &types.DreamResult{}, nil
 	}
-
-	return d.executePass(ctx, tenantID)
+	return d.executeScopePass(ctx, tenantID, kbID)
 }
 
-// dreamPass runs the dreamer for each known tenant.
+// dreamPass runs the dreamer for every (tenant, knowledge base) scope that
+// holds memories, or for the configured tenants when given explicitly.
 func (d *DreamerWorker) dreamPass(ctx context.Context) {
 	if len(d.tenantIDs) == 0 {
-		// Fallback to empty tenant for backward compatibility
-		result, err := d.executePass(ctx, "")
+		scopes, err := listScopes(ctx, d.repo)
 		if err != nil {
-			logger.Errorf(ctx, "dreamer: pass failed: %v", err)
+			logger.Errorf(ctx, "dreamer: list scopes failed: %v", err)
 			return
 		}
-		logger.Infof(ctx, "dreamer: pass complete: %d proposed, %d applied, %d tokens used",
-			result.ActionsProposed, result.ActionsApplied, result.TokenUsed)
+		for _, sc := range scopes {
+			if ctx.Err() != nil {
+				return
+			}
+			result, err := d.executeScopePass(ctx, sc.TenantID, sc.KbID)
+			if err != nil {
+				logger.Errorf(ctx, "dreamer: pass failed for tenant %s kb %s: %v", sc.TenantID, sc.KbID, err)
+				continue
+			}
+			logger.Infof(ctx, "dreamer: pass complete for tenant %s kb %s: %d proposed, %d applied, %d tokens used",
+				sc.TenantID, sc.KbID, result.ActionsProposed, result.ActionsApplied, result.TokenUsed)
+		}
 		return
 	}
 
@@ -93,8 +117,29 @@ func (d *DreamerWorker) dreamPass(ctx context.Context) {
 
 // executePass runs the full dreamer pipeline for a tenant.
 func (d *DreamerWorker) executePass(ctx context.Context, tenantID string) (*types.DreamResult, error) {
+	return d.executeScopePass(ctx, tenantID, "")
+}
+
+// executeScopePass runs the full dreamer pipeline for one scope. A scope
+// without a tenant is never processed: it would match no rows and could
+// otherwise act across tenants.
+func (d *DreamerWorker) executeScopePass(ctx context.Context, tenantID, kbID string) (*types.DreamResult, error) {
 	result := &types.DreamResult{
 		Actions: []types.DreamAction{},
+	}
+	if tenantID == "" {
+		return result, nil
+	}
+	chatModel := d.chat
+	if d.resolver != nil {
+		ch, err := d.resolver.Chat(ctx, tenantID, kbID)
+		if err != nil {
+			return result, fmt.Errorf("dreamer: resolve chat model: %w", err)
+		}
+		chatModel = ch
+	}
+	if chatModel == nil {
+		return result, fmt.Errorf("dreamer: no chat model for tenant %s", tenantID)
 	}
 
 	// 1. Acquire dreamer lock
@@ -117,6 +162,7 @@ func (d *DreamerWorker) executePass(ctx context.Context, tenantID string) (*type
 	// 2. Fetch candidate memories
 	filter := &types.MemoryFilter{
 		TenantID: tenantID,
+		KbID:     kbID,
 		Limit:    50,
 	}
 	candidates, _, err := d.repo.Search(ctx, filter)
@@ -147,7 +193,7 @@ func (d *DreamerWorker) executePass(ctx context.Context, tenantID string) (*type
 	}
 
 	// 5. Call LLM
-	resp, err := d.chat.Chat(ctx, []chat.Message{
+	resp, err := chatModel.Chat(ctx, []chat.Message{
 		{Role: "system", Content: "You are a memory consolidation system. Analyze memories and propose actions to improve the knowledge base. Output ONLY valid JSON."},
 		{Role: "user", Content: prompt},
 	}, opts)

@@ -39,11 +39,12 @@ func registerMemoryV2(container *dig.Container) error {
 		return err
 	}
 
-	// Memory V2 service — embedder and chat model are resolved lazily at first
-	// use to avoid tenant context dependency during DI registration.
+	// Memory V2 service — models are resolved per (tenant, knowledge base) at
+	// use, so registration needs no tenant context.
 	if err := container.Provide(func(
 		repo interfaces.MemoryRepositoryV2,
 		modelSvc interfaces.ModelService,
+		kbRepo interfaces.KnowledgeBaseRepository,
 		cfg *config.Config,
 	) interfaces.MemoryServiceV2 {
 		memCfg := cfg.MemoryV2
@@ -52,6 +53,10 @@ func registerMemoryV2(container *dig.Container) error {
 			memCfg = &defaults
 		}
 		var svc *memoryServiceV2.MemoryServiceV2Impl = memoryServiceV2.NewMemoryServiceV2(repo, modelSvc, *memCfg, nil)
+		// Each memory uses its knowledge base's own embedding/summary models.
+		if kbRepo != nil {
+			svc.SetKBLookup(kbRepo)
+		}
 		// Lite mode (SQLite) cannot host the pgvector-backed memory tables;
 		// mark the module not ready with the concrete reason so workers stay
 		// down and every entry point rejects work instead of hitting SQLite.

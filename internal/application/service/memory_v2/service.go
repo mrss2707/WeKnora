@@ -143,20 +143,22 @@ func (c *MemoryCache) evictExpired() {
 
 // MemoryServiceV2Impl implements MemoryServiceV2.
 type MemoryServiceV2Impl struct {
-	repo            interfaces.MemoryRepositoryV2
-	modelService    interfaces.ModelService // lazy init for embedder and chat
-	embedder        embedding.Embedder
-	chat            chat.Chat
-	config          types.MemoryV2Config
-	cache           *MemoryCache
-	cancel          context.CancelFunc
-	wg              sync.WaitGroup
-	workerOnce      sync.Once
-	embedWorkerOnce sync.Once
-	modelMu         sync.Mutex
-	workerMu        sync.Mutex
-	tenantIDs       []string
-	cachedModels    []*types.Model // cached model list from getEmbedder
+	repo         interfaces.MemoryRepositoryV2
+	modelService interfaces.ModelService
+	// resolver picks each (tenant, knowledge base) scope's own models.
+	resolver *modelResolver
+	// embedder and chat, when set, override the resolver for every scope.
+	// Production leaves them nil; tests inject fixed models here.
+	embedder   embedding.Embedder
+	chat       chat.Chat
+	config     types.MemoryV2Config
+	cache      *MemoryCache
+	cancel     context.CancelFunc
+	wg         sync.WaitGroup
+	workerOnce sync.Once
+	initOnce   sync.Once
+	workerMu   sync.Mutex
+	tenantIDs  []string
 
 	// readinessReason overrides the disabled reason derived from config
 	// (used to report Lite mode). Set once during wiring; guarded by
@@ -177,8 +179,9 @@ type MemoryServiceV2Impl struct {
 	cacheWarmer     *workers.CacheWarmer
 }
 
-// NewMemoryServiceV2 creates a new MemoryServiceV2Impl.
-// embedder and chat may be nil; they are lazily initialized via modelService on first use.
+// NewMemoryServiceV2 creates a new MemoryServiceV2Impl. Models are resolved
+// per (tenant, knowledge base) scope through modelService; call SetKBLookup to
+// let a knowledge base's own embedding/summary models take precedence.
 func NewMemoryServiceV2(
 	repo interfaces.MemoryRepositoryV2,
 	modelService interfaces.ModelService,
@@ -191,6 +194,7 @@ func NewMemoryServiceV2(
 	svc := &MemoryServiceV2Impl{
 		repo:         repo,
 		modelService: modelService,
+		resolver:     newModelResolver(modelService, nil),
 		config:       config,
 		cache:        cache,
 		tokenBudget:  NewTokenBudgetManager().WithChat(nil),
@@ -248,172 +252,81 @@ func (s *MemoryServiceV2Impl) notReadyReason() string {
 	return ""
 }
 
-// getEmbedder returns the embedder, initializing it lazily via modelService.
-// Resolves the first available Embedding model — does NOT pass empty ID
-// (the system has no "default model by empty ID" convention).
-func (s *MemoryServiceV2Impl) getEmbedder(ctx context.Context) (embedding.Embedder, error) {
-	s.modelMu.Lock()
-	defer s.modelMu.Unlock()
-
-	if s.embedder != nil {
-		return s.embedder, nil
-	}
-	if s.modelService == nil {
-		return nil, fmt.Errorf("memory V2: model service not available")
-	}
-
-	// Resolve default embedding model: list models, find first Embedding type.
-	// Wrap in a recover to handle the case where ListModels panics due to
-	// missing tenant context (e.g. during startup before any request).
-	models, err := func() (models []*types.Model, err error) {
-		defer func() {
-			if r := recover(); r != nil {
-				err = fmt.Errorf("memory V2: getEmbedder recovered from panic: %v", r)
-			}
-		}()
-		return s.modelService.ListModels(ctx)
-	}()
-	if err != nil {
-		return nil, fmt.Errorf("memory V2: failed to list models: %w", err)
-	}
-	s.cachedModels = models
-	var modelID string
-	for _, m := range models {
-		if m.Type == types.ModelTypeEmbedding {
-			modelID = m.ID
-			break
-		}
-	}
-	if modelID == "" {
-		return nil, fmt.Errorf("memory V2: no Embedding model configured")
-	}
-
-	embedder, err := s.modelService.GetEmbeddingModel(ctx, modelID)
-	if err != nil {
-		return nil, fmt.Errorf("memory V2: failed to get embedding model %s: %w", modelID, err)
-	}
-	s.embedder = embedder
-	return embedder, nil
+// SetKBLookup wires the knowledge-base lookup used to find a knowledge base's
+// own models. Call once during wiring, before serving requests.
+func (s *MemoryServiceV2Impl) SetKBLookup(kbs KBModelLookup) {
+	s.resolver = newModelResolver(s.modelService, kbs)
 }
 
-// getChat returns the chat model, initializing it lazily via modelService.
-// Resolves the first available KnowledgeQA model. Reuses cached model list
-// from getEmbedder if available.
-func (s *MemoryServiceV2Impl) getChat(ctx context.Context) (chat.Chat, error) {
-	s.modelMu.Lock()
-	defer s.modelMu.Unlock()
+// modelSource adapts the service's fixed-model override or its resolver to
+// the workers' ModelResolver contract.
+type modelSource struct{ s *MemoryServiceV2Impl }
 
+func (m modelSource) Embedder(ctx context.Context, tenantID, kbID string) (embedding.Embedder, string, error) {
+	return m.s.embedderFor(ctx, tenantID, kbID)
+}
+
+func (m modelSource) Chat(ctx context.Context, tenantID, kbID string) (chat.Chat, error) {
+	return m.s.chatFor(ctx, tenantID, kbID)
+}
+
+// embedderFor returns the embedder of a scope and its model id ("" for a
+// fixed override).
+func (s *MemoryServiceV2Impl) embedderFor(ctx context.Context, tenantID, kbID string) (embedding.Embedder, string, error) {
+	if s.embedder != nil {
+		return s.embedder, "", nil
+	}
+	return s.resolver.Embedder(ctx, tenantID, kbID)
+}
+
+// chatFor returns the chat model of a scope.
+func (s *MemoryServiceV2Impl) chatFor(ctx context.Context, tenantID, kbID string) (chat.Chat, error) {
 	if s.chat != nil {
 		return s.chat, nil
 	}
-	if s.modelService == nil {
-		return nil, fmt.Errorf("memory V2: model service not available")
-	}
-
-	// Use cached model list from getEmbedder if available
-	models := s.cachedModels
-	if models == nil {
-		var err error
-		models, err = func() (models []*types.Model, err error) {
-			defer func() {
-				if r := recover(); r != nil {
-					err = fmt.Errorf("memory V2: getChat recovered from panic: %v", r)
-				}
-			}()
-			return s.modelService.ListModels(ctx)
-		}()
-		if err != nil {
-			return nil, fmt.Errorf("memory V2: failed to list models: %w", err)
-		}
-	}
-	var modelID string
-	for _, m := range models {
-		if m.Type == types.ModelTypeKnowledgeQA {
-			modelID = m.ID
-			break
-		}
-	}
-	if modelID == "" {
-		return nil, fmt.Errorf("memory V2: no KnowledgeQA model configured")
-	}
-
-	ch, err := s.modelService.GetChatModel(ctx, modelID)
-	if err != nil {
-		return nil, fmt.Errorf("memory V2: failed to get chat model %s: %w", modelID, err)
-	}
-	s.chat = ch
-	if s.tokenBudget != nil {
-		s.tokenBudget.WithChat(ch)
-	}
-	return ch, nil
+	return s.resolver.Chat(ctx, tenantID, kbID)
 }
 
-// ensureWorkers initializes embedder/chat-dependent workers on first call
-// with a valid tenant context. Safe to call multiple times; workers are
-// started only once via embedWorkerOnce. When the module is not ready the
-// call is a no-op so a disabled module never reaches the model service.
-func (s *MemoryServiceV2Impl) ensureWorkers(ctx context.Context) {
-	if reason := s.notReadyReason(); reason != "" {
-		logger.Warnf(ctx, "[MemoryV2] ensureWorkers skipped: %s", reason)
-		return
-	}
-	s.workerMu.Lock()
-	defer s.workerMu.Unlock()
-
-	if s.entityExtractor != nil {
-		return
-	}
-	embedder, err := s.getEmbedder(ctx)
-	if err != nil {
-		logger.Warnf(ctx, "[MemoryV2] ensureWorkers: getEmbedder failed: %v", err)
-		return
-	}
-	ch, err := s.getChat(ctx)
-	if err != nil {
-		logger.Warnf(ctx, "[MemoryV2] ensureWorkers: getChat failed: %v", err)
-		return
-	}
-	s.entityExtractor = workers.NewEntityExtractor(s.repo, ch)
-	s.autoLinker = workers.NewAutoLinker(s.repo, embedder)
-	s.consolidator = workers.NewConsolidator(s.repo, embedder)
-	s.dreamer = workers.NewDreamerWorker(s.repo, ch, s.dreamerConfig(), s.tenantIDs)
-	s.cacheWarmer = workers.NewCacheWarmer(s.repo, embedder, s.config.CacheWarmer)
-
-	s.embedWorkerOnce.Do(func() {
-		if s.config.WorkerMutations {
-			logger.Infof(ctx, "[MemoryV2] Starting mutating background workers (extractor, consolidator, dreamer)...")
-			s.wg.Add(3)
-			go runWorker(ctx, &s.wg, s.entityExtractor.Run)
-			go runWorker(ctx, &s.wg, s.consolidator.Run)
-			go runWorker(ctx, &s.wg, s.dreamer.Run)
-		} else {
-			logger.Infof(ctx, "[MemoryV2] Mutating background workers disarmed (memory_v2.worker_mutations=false); manual dream passes run as dry runs")
-		}
-		if s.config.CacheWarmer.Enabled {
-			s.wg.Add(1)
-			go runWorker(ctx, &s.wg, s.cacheWarmer.Run)
-		}
+// initWorkers constructs every worker exactly once. Workers resolve models
+// per scope at run time, so construction needs no model, tenant or request.
+func (s *MemoryServiceV2Impl) initWorkers() {
+	s.initOnce.Do(func() {
+		s.workerMu.Lock()
+		defer s.workerMu.Unlock()
+		src := modelSource{s}
+		s.entityExtractor = workers.NewEntityExtractor(s.repo, nil).WithResolver(src)
+		s.autoLinker = workers.NewAutoLinker(s.repo, nil).WithResolver(src)
+		s.consolidator = workers.NewConsolidator(s.repo, nil).WithResolver(src)
+		s.dreamer = workers.NewDreamerWorker(s.repo, nil, s.dreamerConfig(), s.tenantIDs).WithResolver(src)
+		s.cacheWarmer = workers.NewCacheWarmer(s.repo, s.embedder, s.config.CacheWarmer)
 	})
 }
 
-// StartWorkers launches background workers that don't depend on embedder/chat
-// models (pruner, healthChecker). Embedder-dependent workers (entityExtractor,
-// consolidator, dreamer, cacheWarmer) are started lazily on the first API
-// request that provides a valid tenant context.
+// StartWorkers constructs the workers and launches the background loops with
+// the server-lifetime ctx (never a request ctx). Loops that modify stored
+// memories run only when memory_v2.worker_mutations is armed.
 func (s *MemoryServiceV2Impl) StartWorkers(ctx context.Context) {
 	if reason := s.notReadyReason(); reason != "" {
 		logger.Warnf(ctx, "[MemoryV2] StartWorkers skipped: %s", reason)
 		return
 	}
+	s.initWorkers()
 	s.workerOnce.Do(func() {
 		ctx, s.cancel = context.WithCancel(ctx)
 		s.wg.Add(1)
 		go runWorker(ctx, &s.wg, s.healthChecker.Run)
 		if s.config.WorkerMutations {
-			s.wg.Add(1)
+			s.wg.Add(4)
 			go runWorker(ctx, &s.wg, s.pruner.Run)
+			go runWorker(ctx, &s.wg, s.entityExtractor.Run)
+			go runWorker(ctx, &s.wg, s.consolidator.Run)
+			go runWorker(ctx, &s.wg, s.dreamer.Run)
 		}
-		logger.Infof(ctx, "[MemoryV2] Started tenant-independent workers (healthChecker; pruner armed=%v)", s.config.WorkerMutations)
+		if s.config.CacheWarmer.Enabled && s.embedder != nil {
+			s.wg.Add(1)
+			go runWorker(ctx, &s.wg, s.cacheWarmer.Run)
+		}
+		logger.Infof(ctx, "[MemoryV2] Workers started (health checker; mutating workers armed=%v)", s.config.WorkerMutations)
 	})
 }
 
@@ -463,8 +376,6 @@ func (s *MemoryServiceV2Impl) AddEpisode(ctx context.Context, tenantID, userID, 
 		return nil
 	}
 
-	s.ensureWorkers(ctx)
-
 	// Construct conversation content from messages
 	content := ""
 	for _, msg := range messages {
@@ -493,7 +404,6 @@ func (s *MemoryServiceV2Impl) AddEpisode(ctx context.Context, tenantID, userID, 
 // RetrieveMemory runs the full search pipeline and packs results as structured
 // XML into MemoryContext.RelatedEpisodes[0].Summary.
 func (s *MemoryServiceV2Impl) RetrieveMemory(ctx context.Context, userID, query string) (*types.MemoryContext, error) {
-	s.ensureWorkers(ctx)
 	if query == "" {
 		return &types.MemoryContext{}, nil
 	}
@@ -526,6 +436,12 @@ func (s *MemoryServiceV2Impl) RetrieveMemory(ctx context.Context, userID, query 
 // ConsolidateDream runs one dreamer pass for a tenant. Empty results signal
 // "nothing to do" for both an unready module and a missing tenant.
 func (s *MemoryServiceV2Impl) ConsolidateDream(ctx context.Context, tenantID string) (*types.DreamResult, error) {
+	return s.ConsolidateDreamScope(ctx, tenantID, "")
+}
+
+// ConsolidateDreamScope runs one dreamer pass restricted to one knowledge base
+// (the whole tenant when kbID is empty), using that knowledge base's model.
+func (s *MemoryServiceV2Impl) ConsolidateDreamScope(ctx context.Context, tenantID, kbID string) (*types.DreamResult, error) {
 	if reason := s.notReadyReason(); reason != "" {
 		logger.Warnf(ctx, "[MemoryV2] ConsolidateDream skipped: %s", reason)
 		return &types.DreamResult{}, nil
@@ -534,11 +450,11 @@ func (s *MemoryServiceV2Impl) ConsolidateDream(ctx context.Context, tenantID str
 		logger.Warnf(ctx, "[MemoryV2] ConsolidateDream skipped: empty tenantID")
 		return &types.DreamResult{}, nil
 	}
-	s.ensureWorkers(ctx)
+	s.initWorkers()
 	if s.dreamer == nil {
 		return &types.DreamResult{}, nil
 	}
-	return s.dreamer.RunPass(ctx, tenantID)
+	return s.dreamer.RunScopePass(ctx, tenantID, kbID)
 }
 
 // ---------------------------------------------------------------------------
@@ -554,9 +470,8 @@ func (s *MemoryServiceV2Impl) AssessHealth(ctx context.Context, tenantID, kbID s
 	if strings.TrimSpace(tenantID) == "" {
 		return nil, fmt.Errorf("memory V2: tenant ID is required for health assessment")
 	}
-	s.ensureWorkers(ctx)
 	var embedderDim int
-	if emb, err := s.getEmbedder(ctx); err == nil {
+	if emb, _, err := s.embedderFor(ctx, tenantID, kbID); err == nil && emb != nil {
 		embedderDim = emb.GetDimensions()
 	}
 	report, err := s.healthChecker.AssessHealth(ctx, tenantID, kbID, embedderDim)

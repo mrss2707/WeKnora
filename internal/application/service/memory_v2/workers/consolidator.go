@@ -2,6 +2,7 @@ package workers
 
 import (
 	"context"
+	"fmt"
 	"math"
 	"time"
 	"unicode/utf8"
@@ -13,11 +14,19 @@ import (
 )
 
 // Consolidator periodically recomputes hub scores, decays importance of old
-// memories, and merges near-duplicate memories.
+// memories, and merges near-duplicate memories, one (tenant, knowledge base)
+// scope at a time. With a resolver each scope uses its own embedding model.
 type Consolidator struct {
 	repo     interfaces.MemoryRepositoryV2
 	embedder embedding.Embedder
+	resolver ModelResolver
 	interval time.Duration
+}
+
+// WithResolver makes the consolidator resolve each scope's embedding model.
+func (c *Consolidator) WithResolver(r ModelResolver) *Consolidator {
+	c.resolver = r
+	return c
 }
 
 // NewConsolidator creates a new Consolidator.
@@ -47,35 +56,63 @@ func (c *Consolidator) Run(ctx context.Context) {
 	}
 }
 
-// consolidateAll runs all consolidation tasks.
+// consolidateAll runs the consolidation tasks for every scope that holds
+// memories. Nothing runs when scopes cannot be enumerated: an unscoped pass
+// would match no rows or act across tenants.
 func (c *Consolidator) consolidateAll(ctx context.Context) {
 	ctx = context.WithValue(ctx, types.ActorKey{}, "system")
-	logger.Infof(ctx, "consolidator: starting consolidation cycle")
-
-	// Step 1: Recompute hub scores
-	if err := c.repo.ComputeHubScores(ctx, ""); err != nil {
-		logger.Errorf(ctx, "consolidator: ComputeHubScores failed: %v", err)
+	scopes, err := listScopes(ctx, c.repo)
+	if err != nil {
+		logger.Errorf(ctx, "consolidator: list scopes failed: %v", err)
+		return
 	}
-
-	// Step 2: Decay importance of memories older than 1 year
-	if err := c.decayOldMemories(ctx); err != nil {
-		logger.Errorf(ctx, "consolidator: decayOldMemories failed: %v", err)
+	logger.Infof(ctx, "consolidator: starting consolidation cycle over %d scope(s)", len(scopes))
+	hubDone := map[string]bool{}
+	for _, sc := range scopes {
+		if ctx.Err() != nil {
+			return
+		}
+		if sc.TenantID == "" {
+			continue
+		}
+		// Step 1: Recompute hub scores (tenant-wide relation graph)
+		if !hubDone[sc.TenantID] {
+			hubDone[sc.TenantID] = true
+			if err := c.repo.ComputeHubScores(ctx, sc.TenantID); err != nil {
+				logger.Errorf(ctx, "consolidator: ComputeHubScores failed for tenant %s: %v", sc.TenantID, err)
+			}
+		}
+		// Step 2: Decay importance of memories older than 1 year
+		if err := c.decayOldMemories(ctx, sc); err != nil {
+			logger.Errorf(ctx, "consolidator: decayOldMemories failed for %s/%s: %v", sc.TenantID, sc.KbID, err)
+		}
+		// Step 3: Merge near-duplicates (cosine > 0.93)
+		if err := c.mergeNearDuplicates(ctx, sc); err != nil {
+			logger.Errorf(ctx, "consolidator: mergeNearDuplicates failed for %s/%s: %v", sc.TenantID, sc.KbID, err)
+		}
 	}
-
-	// Step 3: Merge near-duplicates (cosine > 0.93)
-	if err := c.mergeNearDuplicates(ctx); err != nil {
-		logger.Errorf(ctx, "consolidator: mergeNearDuplicates failed: %v", err)
-	}
-
 	logger.Infof(ctx, "consolidator: consolidation cycle complete")
 }
 
-// decayOldMemories reduces importance by 10% for memories older than 1 year.
-func (c *Consolidator) decayOldMemories(ctx context.Context) error {
-	// Search for all memories (this is simplified; in production would use a
-	// targeted DB query with age filter)
+// embedderFor returns the embedder for a scope.
+func (c *Consolidator) embedderFor(ctx context.Context, sc Scope) (embedding.Embedder, error) {
+	if c.resolver != nil {
+		emb, _, err := c.resolver.Embedder(ctx, sc.TenantID, sc.KbID)
+		return emb, err
+	}
+	if c.embedder == nil {
+		return nil, fmt.Errorf("consolidator: no embedder")
+	}
+	return c.embedder, nil
+}
+
+// decayOldMemories reduces importance by 10% for memories older than 1 year
+// within one scope.
+func (c *Consolidator) decayOldMemories(ctx context.Context, sc Scope) error {
 	filter := &types.MemoryFilter{
-		Limit: 1000,
+		TenantID: sc.TenantID,
+		KbID:     sc.KbID,
+		Limit:    1000,
 	}
 	results, _, err := c.repo.Search(ctx, filter)
 	if err != nil {
@@ -103,27 +140,35 @@ func (c *Consolidator) decayOldMemories(ctx context.Context) error {
 	return nil
 }
 
-// mergeNearDuplicates finds memory pairs with cosine similarity > 0.93 and merges them.
-func (c *Consolidator) mergeNearDuplicates(ctx context.Context) error {
-	// Search for all memories in batches
+// mergeNearDuplicates finds memory pairs with cosine similarity > 0.93 within
+// one scope and merges them.
+func (c *Consolidator) mergeNearDuplicates(ctx context.Context, sc Scope) error {
 	filter := &types.MemoryFilter{
-		Limit: 1000,
+		TenantID: sc.TenantID,
+		KbID:     sc.KbID,
+		Limit:    1000,
 	}
 	results, _, err := c.repo.Search(ctx, filter)
 	if err != nil {
 		return err
 	}
+	embedder, err := c.embedderFor(ctx, sc)
+	if err != nil {
+		return err
+	}
 
-	// Group by tenant and check cosine similarity
+	// Group by tenant and knowledge base: never merge across either boundary,
+	// even if the repository returned rows outside the requested scope.
 	tenantGroups := make(map[string][]*types.AgentMemory)
 	for _, r := range results {
 		if r.Memory == nil {
 			continue
 		}
-		tenantGroups[r.Memory.TenantID] = append(tenantGroups[r.Memory.TenantID], r.Memory)
+		key := r.Memory.TenantID + "\x00" + r.Memory.KbID
+		tenantGroups[key] = append(tenantGroups[key], r.Memory)
 	}
 
-	for tenantID, memories := range tenantGroups {
+	for _, memories := range tenantGroups {
 		if len(memories) < 2 {
 			continue
 		}
@@ -136,7 +181,7 @@ func (c *Consolidator) mergeNearDuplicates(ctx context.Context) error {
 
 		var mems []memWithVec
 		for _, mem := range memories {
-			vec, err := c.embedder.Embed(ctx, mem.Content)
+			vec, err := embedder.Embed(ctx, mem.Content)
 			if err != nil {
 				continue
 			}
@@ -170,7 +215,7 @@ func (c *Consolidator) mergeNearDuplicates(ctx context.Context) error {
 						continue
 					}
 					// Soft-delete the merged-away memory
-					if err := c.repo.Delete(ctx, tenantID, mems[j].mem.ID); err != nil {
+					if err := c.repo.Delete(ctx, mems[j].mem.TenantID, mems[j].mem.ID); err != nil {
 						logger.Errorf(ctx, "consolidator: merge delete failed: %v", err)
 					}
 					merged[mems[j].mem.ID] = true

@@ -14,9 +14,11 @@ import (
 )
 
 // EntityExtractor buffers memories and periodically extracts entities via LLM.
+// With a resolver each (tenant, knowledge base) group uses its own chat model.
 type EntityExtractor struct {
 	repo      interfaces.MemoryRepositoryV2
 	chat      chat.Chat
+	resolver  ModelResolver
 	mu        sync.Mutex
 	buffer    []*types.AgentMemory
 	ticker    *time.Ticker
@@ -31,6 +33,12 @@ func NewEntityExtractor(repo interfaces.MemoryRepositoryV2, chat chat.Chat) *Ent
 		buffer:    make([]*types.AgentMemory, 0, 10),
 		batchSize: 10,
 	}
+}
+
+// WithResolver makes the extractor resolve each scope's chat model.
+func (e *EntityExtractor) WithResolver(r ModelResolver) *EntityExtractor {
+	e.resolver = r
+	return e
 }
 
 // Enqueue adds a memory to the extraction queue.
@@ -77,12 +85,38 @@ func (e *EntityExtractor) flush(ctx context.Context) {
 		return
 	}
 
-	e.processBatch(ctx, batch)
+	if e.resolver == nil {
+		e.processBatch(ctx, batch)
+		return
+	}
+	// Never send memories of different tenants/knowledge bases in one prompt.
+	groups := map[Scope][]*types.AgentMemory{}
+	var order []Scope
+	for _, m := range batch {
+		sc := Scope{TenantID: m.TenantID, KbID: m.KbID}
+		if _, ok := groups[sc]; !ok {
+			order = append(order, sc)
+		}
+		groups[sc] = append(groups[sc], m)
+	}
+	for _, sc := range order {
+		ch, err := e.resolver.Chat(ctx, sc.TenantID, sc.KbID)
+		if err != nil {
+			logger.Errorf(ctx, "entity extractor: resolve chat model for %s/%s: %v", sc.TenantID, sc.KbID, err)
+			continue
+		}
+		e.processBatchWith(ctx, ch, groups[sc])
+	}
 }
 
 // processBatch sends a batch to the LLM and stores extracted entities.
 func (e *EntityExtractor) processBatch(ctx context.Context, batch []*types.AgentMemory) {
-	if e.chat == nil {
+	e.processBatchWith(ctx, e.chat, batch)
+}
+
+// processBatchWith runs extraction for one batch with the given chat model.
+func (e *EntityExtractor) processBatchWith(ctx context.Context, chatModel chat.Chat, batch []*types.AgentMemory) {
+	if chatModel == nil {
 		return
 	}
 	ctx = context.WithValue(ctx, types.ActorKey{}, "system")
@@ -107,7 +141,7 @@ Output ONLY valid JSON array:
 Memories:
 ` + contentBlock
 
-	resp, err := e.chat.Chat(ctx, []chat.Message{
+	resp, err := chatModel.Chat(ctx, []chat.Message{
 		{Role: "user", Content: prompt},
 	}, nil)
 	if err != nil {

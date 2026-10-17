@@ -155,6 +155,10 @@ func hcSearchResult(mem *types.AgentMemory) *types.MemorySearchResult {
 	return &types.MemorySearchResult{Memory: mem, Score: 1.0}
 }
 
+func (m *mockHealthCheckerRepo) ListMemoryScopes(context.Context) ([]Scope, error) {
+	return []Scope{testScope}, nil
+}
+
 func newTestHealthChecker(repo *mockHealthCheckerRepo) *HealthChecker {
 	return &HealthChecker{repo: repo}
 }
