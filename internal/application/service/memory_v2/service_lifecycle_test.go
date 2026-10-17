@@ -37,6 +37,7 @@ type serviceLifecycleRepoFake struct {
 	cosineErr        error
 	hardDeleteRows   int64
 	hardDeleteErr    error
+	hubScoreCalls    int
 }
 
 var _ interfaces.MemoryRepositoryV2 = (*serviceLifecycleRepoFake)(nil)
@@ -122,7 +123,16 @@ func (r *serviceLifecycleRepoFake) UnlockDreamer(ctx context.Context, tenantID s
 }
 
 func (r *serviceLifecycleRepoFake) ComputeHubScores(ctx context.Context, tenantID string) error {
+	r.mu.Lock()
+	r.hubScoreCalls++
+	r.mu.Unlock()
 	return nil
+}
+
+func (r *serviceLifecycleRepoFake) hubScoreCallCount() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.hubScoreCalls
 }
 
 func (r *serviceLifecycleRepoFake) HardDeleteExpired(ctx context.Context, tenantID string, olderThan time.Time) (int64, error) {

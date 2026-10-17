@@ -85,6 +85,7 @@ func (e *EntityExtractor) processBatch(ctx context.Context, batch []*types.Agent
 	if e.chat == nil {
 		return
 	}
+	ctx = context.WithValue(ctx, types.ActorKey{}, "system")
 
 	// Build prompt
 	var contentBlock string
@@ -149,7 +150,7 @@ Memories:
 }
 
 type entityBatchResult struct {
-	MemoryIndex int              `json:"memory_index"`
+	MemoryIndex int               `json:"memory_index"`
 	Entities    []extractedEntity `json:"entities"`
 }
 

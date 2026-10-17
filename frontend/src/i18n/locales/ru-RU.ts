@@ -7930,6 +7930,8 @@ export default {
       noHistory: 'Нет недавней активности'
     },
     browse: {
+      bulkPartialFailure: 'Не удалось обновить {failed} из {total} воспоминаний',
+      bulkProtectedSkipped: 'Пропущено воспоминаний с защищённым вердиктом (decision/fixed): {count}',
       title: 'Воспоминания',
       searchPlaceholder: 'Поиск воспоминаний...',
       empty: 'Воспоминания не найдены',

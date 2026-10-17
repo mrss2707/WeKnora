@@ -61,7 +61,7 @@
         <label class="drawer-section-label">{{ $t('memory.drawer.importance') }}</label>
         <div class="drawer-importance">
           <t-icon
-            v-for="i in 10"
+            v-for="i in MEMORY_IMPORTANCE_MAX"
             :key="i"
             :name="i <= localMemory.importance ? 'star-filled' : 'star'"
             :class="['star-icon', { filled: i <= localMemory.importance }]"
@@ -69,7 +69,7 @@
             class="importance-star"
             @click="handleImportanceClick(i)"
           />
-          <span class="importance-value">{{ localMemory.importance }}/10</span>
+          <span class="importance-value">{{ localMemory.importance }}/{{ MEMORY_IMPORTANCE_MAX }}</span>
         </div>
       </div>
 
@@ -221,7 +221,7 @@
 import { computed, ref, watch, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { AgentMemory, MemoryRelation, MemoryLintIssue, MemoryVerdict, TimelineEvent, UpdateMemoryRequest } from '@/api/memory/index'
-import { MEMORY_VERDICTS, isVerdictProtected } from '@/api/memory/index'
+import { MEMORY_VERDICTS, isVerdictProtected, MEMORY_IMPORTANCE_MAX, clampImportance } from '@/api/memory/index'
 import { getMemory, updateMemory } from '@/api/memory/index'
 import { MessagePlugin } from 'tdesign-vue-next'
 
@@ -414,8 +414,8 @@ async function handleTierChange(tier: number) {
 // -----------------------------------------------------------------------
 async function handleImportanceClick(importance: number) {
   if (!localMemory.value) return
-  // Clicking the same value toggles it off (set to 0), otherwise set to clicked value
-  const newImportance = (localMemory.value.importance === importance && importance === 1) ? 0 : importance
+  // Clicking the current value toggles it off (set to 0), otherwise set to clicked value
+  const newImportance = clampImportance(localMemory.value.importance === importance ? 0 : importance)
   localMemory.value.importance = newImportance
   await persistMemoryPatch({ importance: newImportance })
 }

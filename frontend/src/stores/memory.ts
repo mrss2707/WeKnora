@@ -8,6 +8,7 @@ import {
   updateMemory,
   deleteMemory,
   createMemory,
+  clampImportance,
 } from '@/api/memory/index'
 import type {
   AgentMemory,
@@ -214,18 +215,10 @@ export const useMemoryStore = defineStore('memory', {
       }
     },
 
-    async createMemory(
-      kbId: string,
-      content: string,
-      opts: { userId?: string; memoryType?: string; importance?: number; tags?: string[]; sessionId?: string } = {},
-    ) {
+    async createMemory(kbId: string, content: string, opts: { sessionId?: string } = {}) {
       const result = await createMemory({
         kb_id: kbId,
-        user_id: opts.userId,
         content,
-        memory_type: opts.memoryType,
-        importance: opts.importance,
-        tags: opts.tags,
         session_id: opts.sessionId,
       })
       // Reload the memory list to reflect the new memory.
@@ -379,45 +372,42 @@ export const useMemoryStore = defineStore('memory', {
     // -----------------------------------------------------------------------
 
     async bulkChangeVerdict(verdict: MemoryVerdict) {
-      await Promise.all(
-        this.selectedIds.map((id) => updateMemory(id, { verdict }))
-      )
-      // Update local state optimistically.
+      const ids = [...this.selectedIds]
+      const results = await Promise.allSettled(ids.map((id) => updateMemory(id, { verdict })))
+      const ok = new Set(ids.filter((_, i) => results[i].status === 'fulfilled'))
       this.memories.forEach((m) => {
-        if (this.selectedIds.includes(m.id)) {
-          m.verdict = verdict
-        }
+        if (ok.has(m.id)) m.verdict = verdict
       })
-      this.selectedIds = []
+      this.selectedIds = ids.filter((id) => !ok.has(id))
+      return { succeeded: ok.size, failed: ids.length - ok.size }
     },
 
     async bulkChangeImportance(delta: number) {
-      await Promise.all(
-        this.selectedIds.map((id) => {
-          const mem = this.memories.find((m) => m.id === id)
-          if (!mem) return Promise.resolve()
-          const newImportance = Math.max(0, Math.min(10, mem.importance + delta))
-          return updateMemory(id, { importance: newImportance })
-        })
+      const ids = [...this.selectedIds]
+      const targets = new Map<string, number>()
+      for (const id of ids) {
+        const mem = this.memories.find((m) => m.id === id)
+        if (mem) targets.set(id, clampImportance(mem.importance + delta))
+      }
+      const entries = [...targets.entries()]
+      const results = await Promise.allSettled(
+        entries.map(([id, importance]) => updateMemory(id, { importance }))
       )
-      // Reload to get fresh data.
-      this.memories = [...this.memories]
-      // Update local state optimistically.
+      const ok = new Set(entries.filter((_, i) => results[i].status === 'fulfilled').map(([id]) => id))
       this.memories.forEach((m) => {
-        if (this.selectedIds.includes(m.id)) {
-          const newVal = Math.max(0, Math.min(10, m.importance + delta))
-          m.importance = newVal
-        }
+        if (ok.has(m.id)) m.importance = targets.get(m.id)!
       })
-      this.selectedIds = []
+      this.selectedIds = ids.filter((id) => !ok.has(id))
+      return { succeeded: ok.size, failed: ids.length - ok.size }
     },
 
     async bulkDelete() {
-      await Promise.all(this.selectedIds.map((id) => deleteMemory(id)))
-      this.memories = this.memories.filter(
-        (m) => !this.selectedIds.includes(m.id)
-      )
-      this.selectedIds = []
+      const ids = [...this.selectedIds]
+      const results = await Promise.allSettled(ids.map((id) => deleteMemory(id)))
+      const ok = new Set(ids.filter((_, i) => results[i].status === 'fulfilled'))
+      this.memories = this.memories.filter((m) => !ok.has(m.id))
+      this.selectedIds = ids.filter((id) => !ok.has(id))
+      return { succeeded: ok.size, failed: ids.length - ok.size }
     },
 
     // -----------------------------------------------------------------------

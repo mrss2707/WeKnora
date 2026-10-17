@@ -5581,6 +5581,8 @@ export default {
       noHistory: 'Không có hoạt động gần đây'
     },
     browse: {
+      bulkPartialFailure: 'Không thể cập nhật {failed}/{total} ký ức',
+      bulkProtectedSkipped: '{count} ký ức có kết luận được bảo vệ (decision/fixed) nên đã bị bỏ qua',
       title: 'Ký ức',
       searchPlaceholder: 'Tìm kiếm ký ức...',
       empty: 'Không tìm thấy ký ức',

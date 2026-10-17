@@ -6,9 +6,9 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/Tencent/WeKnora/internal/models/asr"
 	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/Tencent/WeKnora/internal/models/embedding"
-	"github.com/Tencent/WeKnora/internal/models/asr"
 	"github.com/Tencent/WeKnora/internal/models/rerank"
 	"github.com/Tencent/WeKnora/internal/models/vlm"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -24,9 +24,9 @@ import (
 // mockModelService implements all 13 methods of interfaces.ModelService.
 // The 3 function fields control the core logic; the other 10 return zero values.
 type mockModelService struct {
-	listModelsFunc          func(ctx context.Context) ([]*types.Model, error)
-	getEmbeddingModelFunc   func(ctx context.Context, modelID string) (embedding.Embedder, error)
-	getChatModelFunc        func(ctx context.Context, modelID string) (chat.Chat, error)
+	listModelsFunc        func(ctx context.Context) ([]*types.Model, error)
+	getEmbeddingModelFunc func(ctx context.Context, modelID string) (embedding.Embedder, error)
+	getChatModelFunc      func(ctx context.Context, modelID string) (chat.Chat, error)
 
 	listModelsCalls int
 }

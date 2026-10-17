@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/models/chat"
@@ -15,12 +16,12 @@ import (
 
 // DreamerWorker periodically runs LLM-driven consolidation (the "dreamer").
 type DreamerWorker struct {
-	repo       interfaces.MemoryRepositoryV2
-	chat       chat.Chat
-	config     types.DreamerConfig
-	interval   time.Duration
-	workerID   string
-	tenantIDs  []string
+	repo      interfaces.MemoryRepositoryV2
+	chat      chat.Chat
+	config    types.DreamerConfig
+	interval  time.Duration
+	workerID  string
+	tenantIDs []string
 }
 
 // NewDreamerWorker creates a new DreamerWorker.
@@ -175,8 +176,8 @@ func (d *DreamerWorker) executePass(ctx context.Context, tenantID string) (*type
 		}
 
 		if d.config.DryRun {
+			// Proposed only: nothing was written, so it is not counted as applied.
 			result.Actions = append(result.Actions, action)
-			result.ActionsApplied++
 			continue
 		}
 
@@ -269,7 +270,7 @@ func (d *DreamerWorker) validateAction(action types.DreamAction) bool {
 
 // applyAction applies a validated dreamer action.
 func (d *DreamerWorker) applyAction(ctx context.Context, tenantID string, action types.DreamAction) error {
-	ctx = context.WithValue(ctx, "actor", "dreamer")
+	ctx = context.WithValue(ctx, types.ActorKey{}, "dreamer")
 
 	switch action.Type {
 	case "update_verdict":
@@ -346,8 +347,8 @@ func (d *DreamerWorker) applyMerge(ctx context.Context, tenantID string, action 
 		mergedContent += "\n---\n" + other.Content
 	}
 
-	if len(mergedContent) > 2000 {
-		mergedContent = mergedContent[:2000]
+	if utf8.RuneCountInString(mergedContent) > maxMergedContentChars {
+		return fmt.Errorf("merged content exceeds %d characters; merge skipped", maxMergedContentChars)
 	}
 	primary.Content = mergedContent
 	primary.UpdatedAt = time.Now()
@@ -377,6 +378,10 @@ func (d *DreamerWorker) applyRemove(ctx context.Context, tenantID string, action
 
 	return d.repo.Delete(ctx, tenantID, action.TargetID)
 }
+
+// maxMergedContentChars caps merged memory content at the ingestion maximum;
+// merges that would exceed it are skipped instead of truncated.
+const maxMergedContentChars = 10000
 
 // truncateContent truncates content to at most maxChars characters.
 func truncateContent(content string, maxChars int) string {

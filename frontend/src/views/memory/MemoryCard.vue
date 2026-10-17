@@ -43,7 +43,7 @@
       <!-- Importance stars -->
       <div class="card-importance" :title="$t('memory.card.importance', { count: memory.importance })">
         <t-icon
-          v-for="i in 10"
+          v-for="i in MEMORY_IMPORTANCE_MAX"
           :key="i"
           :name="i <= memory.importance ? 'star-filled' : 'star'"
           :class="['star-icon', { filled: i <= memory.importance }]"
@@ -82,6 +82,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import type { AgentMemory } from '@/api/memory/index'
+import { MEMORY_IMPORTANCE_MAX } from '@/api/memory/index'
 
 const props = defineProps<{
   memory: AgentMemory

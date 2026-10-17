@@ -16,6 +16,8 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
+
+	apperrors "github.com/Tencent/WeKnora/internal/errors"
 )
 
 type memoryV2HandlerServiceFake struct {
@@ -44,9 +46,25 @@ type memoryV2HandlerServiceFake struct {
 	// readiness, when non-nil, is returned by Readiness; nil means the
 	// default enabled state.
 	readiness *types.MemoryV2Readiness
+
+	patchResult *types.AgentMemory
+	patchErr    error
+	patchTenant string
+	patchID     string
+	patch       *interfaces.MemoryV2Patch
+	patchCalls  int
 }
 
-var _ interfaces.MemoryServiceV2 = (*memoryV2HandlerServiceFake)(nil)
+var (
+	_ interfaces.MemoryServiceV2 = (*memoryV2HandlerServiceFake)(nil)
+	_ interfaces.MemoryV2Patcher = (*memoryV2HandlerServiceFake)(nil)
+)
+
+func (f *memoryV2HandlerServiceFake) PatchMemory(_ context.Context, tenantID, id string, patch interfaces.MemoryV2Patch) (*types.AgentMemory, error) {
+	f.patchCalls++
+	f.patchTenant, f.patchID, f.patch = tenantID, id, &patch
+	return f.patchResult, f.patchErr
+}
 
 func (f *memoryV2HandlerServiceFake) AddEpisode(context.Context, string, string, string, []types.Message) error {
 	return nil
@@ -229,11 +247,16 @@ func newMemoryV2HandlerRawContext(method, path, body string) (*gin.Context, *htt
 	return c, recorder
 }
 
+// setMemoryV2Auth mirrors the auth middleware: identity lands both on the gin
+// context and on the request context.
 func setMemoryV2Auth(c *gin.Context, tenantID uint64, userID string) {
 	c.Set(types.TenantIDContextKey.String(), tenantID)
+	ctx := context.WithValue(c.Request.Context(), types.TenantIDContextKey, tenantID)
 	if userID != "" {
 		c.Set(types.UserIDContextKey.String(), userID)
+		ctx = context.WithValue(ctx, types.UserIDContextKey, userID)
 	}
+	c.Request = c.Request.WithContext(ctx)
 }
 
 func decodeJSONBody(t *testing.T, recorder *httptest.ResponseRecorder) map[string]any {
@@ -479,76 +502,77 @@ func TestMemoryV2Handler_CreateMemory(t *testing.T) {
 }
 
 func TestMemoryV2Handler_UpdateMemory(t *testing.T) {
-	t.Run("happy path", func(t *testing.T) {
-		svc := &memoryV2HandlerServiceFake{saveResult: &types.SaveMemoryResult{Created: false}}
+	t.Run("metadata patch returns the updated memory", func(t *testing.T) {
+		updated := &types.AgentMemory{ID: "mem-1", TenantID: "42", Verdict: types.VerdictGotcha, Importance: 0}
+		svc := &memoryV2HandlerServiceFake{patchResult: updated}
 		h := NewMemoryV2Handler(svc, &memoryV2HandlerRepoFake{}, nil, nil)
-		c, recorder := newMemoryV2HandlerTestContext(http.MethodPut, "/memories/mem-1", map[string]any{"content": "updated"})
+		c, recorder := newMemoryV2HandlerTestContext(http.MethodPut, "/memories/mem-1", map[string]any{"verdict": "gotcha", "importance": 0})
 		c.Params = gin.Params{{Key: "id", Value: "mem-1"}}
 		setMemoryV2Auth(c, 42, "user-1")
 
 		h.UpdateMemory(c)
 
 		require.Equal(t, http.StatusOK, recorder.Code)
-		assert.Equal(t, "mem-1", svc.saved.ID)
-		assert.Equal(t, "42", svc.saved.TenantID)
-		assert.Equal(t, "user-1", svc.saved.UserID)
+		require.Equal(t, 1, svc.patchCalls)
+		assert.Zero(t, svc.saveCalls, "a metadata patch never re-runs ingestion")
+		assert.Equal(t, "42", svc.patchTenant)
+		assert.Equal(t, "mem-1", svc.patchID)
+		require.NotNil(t, svc.patch.Verdict)
+		assert.Equal(t, types.VerdictGotcha, *svc.patch.Verdict)
+		require.NotNil(t, svc.patch.Importance, "explicit importance 0 must not be dropped")
+		assert.Equal(t, 0, *svc.patch.Importance)
+		assert.Nil(t, svc.patch.Tier)
+		data := jsonMap(t, decodeJSONBody(t, recorder)["data"])
+		assert.Equal(t, "mem-1", data["id"], "PUT responds with the memory itself")
+		assert.NotContains(t, data, "embedding")
 	})
 
 	t.Run("error branches", func(t *testing.T) {
 		tests := []struct {
-			name    string
-			ctx     func(*memoryV2HandlerServiceFake) (*gin.Context, *httptest.ResponseRecorder)
-			wantErr string
+			name     string
+			body     any
+			raw      string
+			id       string
+			noAuth   bool
+			svcErr   error
+			wantErr  string
+			wantHTTP int
 		}{
-			{
-				name: "missing tenant",
-				ctx: func(*memoryV2HandlerServiceFake) (*gin.Context, *httptest.ResponseRecorder) {
-					c, r := newMemoryV2HandlerTestContext(http.MethodPut, "/memories/mem-1", map[string]any{"content": "updated"})
-					c.Params = gin.Params{{Key: "id", Value: "mem-1"}}
-					return c, r
-				},
-				wantErr: "Tenant ID",
-			},
-			{
-				name: "missing id",
-				ctx: func(*memoryV2HandlerServiceFake) (*gin.Context, *httptest.ResponseRecorder) {
-					c, r := newMemoryV2HandlerTestContext(http.MethodPut, "/memories/", map[string]any{"content": "updated"})
-					setMemoryV2Auth(c, 42, "")
-					return c, r
-				},
-				wantErr: "Memory ID",
-			},
-			{
-				name: "invalid json",
-				ctx: func(*memoryV2HandlerServiceFake) (*gin.Context, *httptest.ResponseRecorder) {
-					c, r := newMemoryV2HandlerRawContext(http.MethodPut, "/memories/mem-1", "{")
-					c.Params = gin.Params{{Key: "id", Value: "mem-1"}}
-					setMemoryV2Auth(c, 42, "")
-					return c, r
-				},
-				wantErr: "Invalid request",
-			},
-			{
-				name: "service error",
-				ctx: func(svc *memoryV2HandlerServiceFake) (*gin.Context, *httptest.ResponseRecorder) {
-					svc.saveErr = errors.New("save failed")
-					c, r := newMemoryV2HandlerTestContext(http.MethodPut, "/memories/mem-1", map[string]any{"content": "updated"})
-					c.Params = gin.Params{{Key: "id", Value: "mem-1"}}
-					setMemoryV2Auth(c, 42, "")
-					return c, r
-				},
-				wantErr: "Failed to update memory",
-			},
+			{name: "missing tenant", body: map[string]any{"verdict": "wip"}, id: "mem-1", noAuth: true, wantErr: "Tenant ID"},
+			{name: "missing id", body: map[string]any{"verdict": "wip"}, wantErr: "Memory ID"},
+			{name: "invalid json", raw: "{", id: "mem-1", wantErr: "Invalid request"},
+			{name: "content edit rejected", body: map[string]any{"content": "new text here"}, id: "mem-1", wantErr: "content is not supported", wantHTTP: http.StatusBadRequest},
+			{name: "empty patch", body: map[string]any{}, id: "mem-1", wantErr: "No updatable fields", wantHTTP: http.StatusBadRequest},
+			{name: "validation", body: map[string]any{"importance": 99}, id: "mem-1", svcErr: &types.ErrMemoryValidation{Message: "importance must be between -5 and 6"}, wantErr: "importance must be", wantHTTP: http.StatusBadRequest},
+			{name: "protected verdict", body: map[string]any{"verdict": "none"}, id: "mem-1", svcErr: &types.ErrProtectedVerdict{}, wantErr: "protected verdict", wantHTTP: http.StatusConflict},
+			{name: "service error", body: map[string]any{"verdict": "wip"}, id: "mem-1", svcErr: errors.New("db down"), wantErr: "Failed to update memory", wantHTTP: http.StatusInternalServerError},
 		}
-
 		for _, tt := range tests {
 			t.Run(tt.name, func(t *testing.T) {
-				svc := &memoryV2HandlerServiceFake{}
+				svc := &memoryV2HandlerServiceFake{patchErr: tt.svcErr}
 				h := NewMemoryV2Handler(svc, &memoryV2HandlerRepoFake{}, nil, nil)
-				c, _ := tt.ctx(svc)
+				path := "/memories/" + tt.id
+				var c *gin.Context
+				if tt.raw != "" {
+					c, _ = newMemoryV2HandlerRawContext(http.MethodPut, path, tt.raw)
+				} else {
+					c, _ = newMemoryV2HandlerTestContext(http.MethodPut, path, tt.body)
+				}
+				if tt.id != "" {
+					c.Params = gin.Params{{Key: "id", Value: tt.id}}
+				}
+				if !tt.noAuth {
+					setMemoryV2Auth(c, 42, "")
+				}
 				h.UpdateMemory(c)
 				require.Len(t, c.Errors, 1)
 				assert.Contains(t, c.Errors.Last().Error(), tt.wantErr)
+				if tt.wantHTTP != 0 {
+					var appErr *apperrors.AppError
+					require.ErrorAs(t, c.Errors.Last().Err, &appErr)
+					assert.Equal(t, tt.wantHTTP, appErr.HTTPCode)
+				}
+				assert.Zero(t, svc.saveCalls)
 			})
 		}
 	})

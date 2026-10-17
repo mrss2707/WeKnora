@@ -41,11 +41,7 @@ func (tb *TokenBudgetManager) estimateTokens(results []*types.MemorySearchResult
 
 // truncate shortens a string to at most maxChars runes.
 func (tb *TokenBudgetManager) truncate(content string, maxChars int) string {
-	runes := []rune(content)
-	if len(runes) <= maxChars {
-		return content
-	}
-	return string(runes[:maxChars])
+	return truncateRunes(content, maxChars)
 }
 
 // summarize uses a language model to compress search results into a brief summary.
@@ -64,9 +60,7 @@ func (tb *TokenBudgetManager) summarize(ctx context.Context, results []*types.Me
 	}
 
 	// Truncate input to avoid exceeding context
-	if len(compact) > 8000 {
-		compact = compact[:8000]
-	}
+	compact = truncateRunes(compact, 8000)
 
 	prompt := "Summarize the following memories into a single concise paragraph (max 200 words). " +
 		"Include the key facts, decisions, and preferences. " +
@@ -84,11 +78,11 @@ func (tb *TokenBudgetManager) summarize(ctx context.Context, results []*types.Me
 	// Create a single summary result
 	summaryResult := &types.MemorySearchResult{
 		Memory: &types.AgentMemory{
-			Content:     summary,
-			MemoryType:  "semantic",
-			Importance:  0,
-			Tier:        2,
-			Verdict:     types.VerdictNone,
+			Content:    summary,
+			MemoryType: "semantic",
+			Importance: 0,
+			Tier:       2,
+			Verdict:    types.VerdictNone,
 		},
 	}
 

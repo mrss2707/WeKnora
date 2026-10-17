@@ -40,19 +40,24 @@ export interface AgentMemory {
   updated_at: string
 }
 
-export interface CreateMemoryRequest {
-  kb_id: string
-  user_id?: string
-  content: string
-  memory_type?: string
-  importance?: number
-  tier?: number
-  session_id?: string
-  tags?: string[]
+/** Importance range enforced by the backend (PUT returns 400 outside it). */
+export const MEMORY_IMPORTANCE_MIN = -5
+export const MEMORY_IMPORTANCE_MAX = 6
+
+/** Clamp an importance value to the backend range. */
+export function clampImportance(value: number): number {
+  return Math.max(MEMORY_IMPORTANCE_MIN, Math.min(MEMORY_IMPORTANCE_MAX, Math.round(value)))
 }
 
+/** Server-owned fields (author, type, importance, tier, tags) are derived by ingestion. */
+export interface CreateMemoryRequest {
+  kb_id: string
+  content: string
+  session_id?: string
+}
+
+/** Partial metadata update. Content is not editable through PUT. */
 export interface UpdateMemoryRequest {
-  content?: string
   memory_type?: string
   importance?: number
   tier?: number

@@ -2,9 +2,11 @@ package workers
 
 import (
 	"context"
+	"strings"
 	"sync"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/Tencent/WeKnora/internal/models/embedding"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -434,9 +436,9 @@ func TestConsolidator_MergeNearDuplicates_DoesNotMergeLowSimilarity(t *testing.T
 	assert.Empty(t, repo.deleteCalls, "no delete should occur for low similarity")
 }
 
-func TestConsolidator_MergeNearDuplicates_ContentTruncatedAt2000(t *testing.T) {
-	longContentA := string(make([]byte, 1500))
-	longContentB := string(make([]byte, 1500))
+func TestConsolidator_MergeNearDuplicates_KeepsFullContentUnderCap(t *testing.T) {
+	longContentA := strings.Repeat("kết nối ", 190) // 1520 runes, multi-byte
+	longContentB := strings.Repeat("pool đầy ", 190)
 
 	memA := makeConsolidatorMemory("mem-a", "tenant-1", longContentA, 3, time.Now().Add(-24*time.Hour))
 	memB := makeConsolidatorMemory("mem-b", "tenant-1", longContentB, 3, time.Now().Add(-12*time.Hour))
@@ -461,8 +463,27 @@ func TestConsolidator_MergeNearDuplicates_ContentTruncatedAt2000(t *testing.T) {
 	require.NoError(t, err)
 
 	require.Len(t, repo.updateCalls, 1)
-	assert.LessOrEqual(t, len(repo.updateCalls[0].Content), 2000,
-		"merged content should be truncated to 2000 characters")
+	merged := repo.updateCalls[0].Content
+	assert.True(t, utf8.ValidString(merged), "merged content must stay valid UTF-8")
+	assert.Equal(t, longContentA+"\n---\n"+longContentB, merged, "nothing may be truncated")
+}
+
+func TestConsolidator_MergeNearDuplicates_SkipsWhenOverCap(t *testing.T) {
+	memA := makeConsolidatorMemory("mem-a", "tenant-1", strings.Repeat("a", 6000), 3, time.Now().Add(-24*time.Hour))
+	memB := makeConsolidatorMemory("mem-b", "tenant-1", strings.Repeat("b", 6000), 3, time.Now().Add(-12*time.Hour))
+	repo := &mockConsolidatorRepo{
+		searchFunc: func(ctx context.Context, filter *types.MemoryFilter) ([]*types.MemorySearchResult, int64, error) {
+			return []*types.MemorySearchResult{{Memory: memA}, {Memory: memB}}, 2, nil
+		},
+	}
+	embedder := &mockConsolidatorEmbedder{
+		embedFunc: func(ctx context.Context, text string) ([]float32, error) { return []float32{1, 0, 0}, nil },
+	}
+	c := newTestConsolidator(repo, embedder)
+
+	require.NoError(t, c.mergeNearDuplicates(context.Background()))
+	assert.Empty(t, repo.updateCalls, "a merge over the cap must be skipped, not truncated")
+	assert.Empty(t, repo.deleteCalls)
 }
 
 func TestConsolidator_MergeNearDuplicates_SkipsAlreadyMerged(t *testing.T) {

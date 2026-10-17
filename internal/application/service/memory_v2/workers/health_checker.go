@@ -218,11 +218,12 @@ func (h *HealthChecker) checkDuplications(memories []*types.AgentMemory) []*type
 	seen := make(map[string]string) // content hash -> memory ID
 
 	for _, mem := range memories {
-		if len(mem.Content) < 20 {
+		runes := []rune(mem.Content)
+		if len(runes) < 20 {
 			continue
 		}
 		// Simple content prefix hash
-		prefix := mem.Content[:20]
+		prefix := string(runes[:20])
 		if existingID, ok := seen[prefix]; ok {
 			issues = append(issues, &types.MemoryHealthIssue{
 				Type:        "duplication",

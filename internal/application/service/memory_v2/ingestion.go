@@ -4,34 +4,20 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"math"
 	"strings"
 	"time"
 	"unicode"
+	"unicode/utf8"
 
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/pgvector/pgvector-go"
 )
 
 // ErrMemoryValidation is returned when memory content fails validation.
-type ErrMemoryValidation struct {
-	Message string
-}
-
-func (e *ErrMemoryValidation) Error() string {
-	return "memory validation error: " + e.Message
-}
-
-// ErrMemoryDuplicate is returned when memory is a near-exact semantic duplicate.
-type ErrMemoryDuplicate struct {
-	ExistingID string
-	Similarity float64
-}
-
-func (e *ErrMemoryDuplicate) Error() string {
-	return fmt.Sprintf("memory duplicate: %.2f similarity with %s", e.Similarity, e.ExistingID)
-}
+type ErrMemoryValidation = types.ErrMemoryValidation
 
 // SaveMemory runs the full ingestion pipeline and returns the result.
 func (s *MemoryServiceV2Impl) SaveMemory(ctx context.Context, memory *types.AgentMemory) (*types.SaveMemoryResult, error) {
@@ -236,11 +222,16 @@ func (s *MemoryServiceV2Impl) checkSemanticDedup(ctx context.Context, memory *ty
 
 		switch {
 		case score > s.config.SemanticDedup.ExactThreshold:
-			// Near-exact duplicate: reject
-			return nil, &ErrMemoryDuplicate{
-				ExistingID: sr.Memory.ID,
-				Similarity: score,
+			// Near-exact duplicate: keep the existing memory and report it as
+			// not created, exactly like a fingerprint match.
+			existing, err := s.repo.GetByID(ctx, memory.TenantID, sr.Memory.ID)
+			if err != nil {
+				return nil, fmt.Errorf("load duplicate memory failed: %w", err)
 			}
+			if existing == nil || existing.KbID != memory.KbID {
+				continue
+			}
+			return &types.SaveMemoryResult{Memory: existing, Created: false}, nil
 
 		case score > s.config.SemanticDedup.NearThreshold:
 			// CosineSearch returns a compact projection. Reload the complete row
@@ -252,7 +243,11 @@ func (s *MemoryServiceV2Impl) checkSemanticDedup(ctx context.Context, memory *ty
 			if existing == nil || existing.KbID != memory.KbID {
 				continue
 			}
-			return s.mergeMemory(ctx, memory, existing, score)
+			merged, err := s.mergeMemory(ctx, memory, existing, score)
+			if errors.Is(err, errMergeTooLong) {
+				continue
+			}
+			return merged, err
 		}
 	}
 
@@ -260,16 +255,18 @@ func (s *MemoryServiceV2Impl) checkSemanticDedup(ctx context.Context, memory *ty
 }
 
 // mergeMemory merges new content into an existing near-duplicate memory.
+// When the combined text would exceed the merge cap the merge is skipped and
+// errMergeTooLong is returned so the caller stores the new memory on its own
+// rather than silently dropping its content.
 func (s *MemoryServiceV2Impl) mergeMemory(ctx context.Context, newMem, existingMem *types.AgentMemory, similarity float64) (*types.SaveMemoryResult, error) {
 	maxChars := s.config.SemanticDedup.MergeMaxChars
-	if maxChars <= 0 {
-		maxChars = 2000
+	if maxChars <= 0 || maxChars > maxContentChars {
+		maxChars = maxContentChars
 	}
 
-	// Merge content: combine with separator, respecting maxChars
 	mergedContent := existingMem.Content + "\n---\n" + newMem.Content
-	if len(mergedContent) > maxChars {
-		mergedContent = mergedContent[:maxChars]
+	if utf8.RuneCountInString(mergedContent) > maxChars {
+		return nil, errMergeTooLong
 	}
 
 	existingMem.Content = mergedContent
@@ -289,6 +286,10 @@ func (s *MemoryServiceV2Impl) mergeMemory(ctx context.Context, newMem, existingM
 		Created: false,
 	}, nil
 }
+
+// errMergeTooLong signals that a near-duplicate merge was skipped because the
+// merged content would exceed the cap.
+var errMergeTooLong = errors.New("merged content exceeds cap")
 
 // detectMemoryType uses keyword heuristics to detect the memory type.
 func detectMemoryType(content string) string {

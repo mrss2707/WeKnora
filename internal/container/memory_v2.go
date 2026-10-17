@@ -9,7 +9,6 @@ import (
 	"go.uber.org/dig"
 
 	memoryRepoV2 "github.com/Tencent/WeKnora/internal/application/repository/memory_v2"
-	chatpipeline "github.com/Tencent/WeKnora/internal/application/service/chat_pipeline"
 	memoryServiceV2 "github.com/Tencent/WeKnora/internal/application/service/memory_v2"
 	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/handler"
@@ -26,8 +25,9 @@ type memoryV2MCPRegistrationParams struct {
 	Memory interfaces.ScopedMemoryV2Service
 }
 
-// registerMemoryV2 wires the Memory V2 module (repository, lazy service, chat
-// pipeline plugin, HTTP handler) into the DI container. Memory V2 is the
+// registerMemoryV2 wires the Memory V2 module (repository, lazy service, MCP
+// tools, HTTP handler) into the DI container. Agents use memory through the
+// built-in MCP tools; there is no chat-pipeline hook. Memory V2 is the
 // default runtime, so it is registered unconditionally. container.go keeps a
 // single stable call to this function so upstream merges only ever touch one
 // line instead of four scattered registration blocks.
@@ -65,15 +65,6 @@ func registerMemoryV2(container *dig.Container) error {
 	}
 
 	if err := container.Provide(memoryServiceV2.NewScopedMemoryV2Service); err != nil {
-		return err
-	}
-
-	if err := container.Invoke(func(
-		eventManager *chatpipeline.EventManager,
-		memV2 interfaces.MemoryServiceV2,
-	) {
-		chatpipeline.NewMemoryPluginV2(eventManager, memV2)
-	}); err != nil {
 		return err
 	}
 

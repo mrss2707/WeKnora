@@ -7932,6 +7932,8 @@ export default {
       noHistory: '暂无近期活动'
     },
     browse: {
+      bulkPartialFailure: '{total} 条记忆中有 {failed} 条未能更新',
+      bulkProtectedSkipped: '{count} 条记忆的结论受保护（decision/fixed），已跳过',
       title: '记忆',
       searchPlaceholder: '搜索记忆...',
       empty: '未找到记忆',

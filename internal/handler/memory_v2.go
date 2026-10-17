@@ -171,110 +171,6 @@ func (h *MemoryV2Handler) GetMemory(c *gin.Context) {
 }
 
 // ---------------------------------------------------------------------------
-// CreateMemory
-// POST /api/v1/memories
-// ---------------------------------------------------------------------------
-
-// CreateMemory creates a new memory via the ingestion pipeline.
-func (h *MemoryV2Handler) CreateMemory(c *gin.Context) {
-	var memory types.AgentMemory
-	if err := c.ShouldBindJSON(&memory); err != nil {
-		logger.Error(c.Request.Context(), "Failed to parse create memory request", err)
-		c.Error(errors.NewBadRequestError("Invalid request: " + err.Error()))
-		return
-	}
-	ctx, tenantID, ok := h.scopeForKB(c, memory.KbID, types.OrgRoleEditor)
-	if !ok {
-		return
-	}
-
-	memory.TenantID = tenantID
-	if uid, ok := h.getUserID(c); ok {
-		memory.UserID = uid
-	}
-
-	result, err := h.memorySvc.SaveMemory(ctx, &memory)
-	if err != nil {
-		logger.ErrorWithFields(ctx, err, map[string]interface{}{
-			"tenant_id": tenantID,
-		})
-		c.Error(errors.NewInternalServerError("Failed to save memory: " + err.Error()))
-		return
-	}
-
-	statusCode := http.StatusOK
-	if result.Created {
-		statusCode = http.StatusCreated
-	}
-
-	c.JSON(statusCode, gin.H{
-		"success": true,
-		"data":    result,
-	})
-}
-
-// ---------------------------------------------------------------------------
-// UpdateMemory
-// PUT /api/v1/memories/:id
-// ---------------------------------------------------------------------------
-
-// UpdateMemory updates an existing memory.
-func (h *MemoryV2Handler) UpdateMemory(c *gin.Context) {
-	if !h.requireTenant(c) {
-		return
-	}
-	id := c.Param("id")
-	if id == "" {
-		c.Error(errors.NewBadRequestError("Memory ID is required"))
-		return
-	}
-
-	var memory types.AgentMemory
-	if err := c.ShouldBindJSON(&memory); err != nil {
-		logger.Error(c.Request.Context(), "Failed to parse update memory request", err)
-		c.Error(errors.NewBadRequestError("Invalid request: " + err.Error()))
-		return
-	}
-	ctx, tenantID, ok := h.scopeForMemory(c, id, types.OrgRoleEditor)
-	if !ok {
-		return
-	}
-	// The body may name a KB; it must be writable and live in the same tenant,
-	// otherwise an update could plant data in a KB the caller never authorized.
-	if memory.KbID != "" {
-		_, bodyTenant, authorized := h.scopeForKB(c, memory.KbID, types.OrgRoleEditor)
-		if !authorized {
-			return
-		}
-		if bodyTenant != tenantID {
-			c.Error(errors.NewBadRequestError("kb_id does not match the memory's knowledge base"))
-			return
-		}
-	}
-
-	memory.ID = id
-	memory.TenantID = tenantID
-	if uid, ok := h.getUserID(c); ok {
-		memory.UserID = uid
-	}
-
-	result, err := h.memorySvc.SaveMemory(ctx, &memory)
-	if err != nil {
-		logger.ErrorWithFields(ctx, err, map[string]interface{}{
-			"tenant_id": tenantID,
-			"memory_id": id,
-		})
-		c.Error(errors.NewInternalServerError("Failed to update memory: " + err.Error()))
-		return
-	}
-
-	c.JSON(http.StatusOK, gin.H{
-		"success": true,
-		"data":    result,
-	})
-}
-
-// ---------------------------------------------------------------------------
 // DeleteMemory
 // DELETE /api/v1/memories/:id
 // ---------------------------------------------------------------------------
@@ -399,16 +295,18 @@ func (h *MemoryV2Handler) GetMemoryGraph(c *gin.Context) {
 		return
 	}
 
-	// Search for related memories using a content snippet as query
-	queryLen := len(memory.Content)
-	if queryLen > 200 {
-		queryLen = 200
+	// Search for related memories using a content snippet as query. Cut by
+	// rune: a byte cut can split a multi-byte character and PostgreSQL then
+	// rejects the query as invalid UTF-8.
+	snippet := []rune(memory.Content)
+	if len(snippet) > 200 {
+		snippet = snippet[:200]
 	}
 	relatedFilter := &types.MemoryFilter{
 		TenantID: tenantID,
 		KbID:     firstNonBlank(memory.KbID, strings.TrimSpace(c.Query("kb_id"))),
 		Limit:    20,
-		Query:    memory.Content[:queryLen],
+		Query:    string(snippet),
 	}
 	related, _, err := h.memoryRepo.Search(ctx, relatedFilter)
 	if err != nil {

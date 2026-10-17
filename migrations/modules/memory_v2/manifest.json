@@ -14,6 +14,6 @@
     "pgvector (vector type, ivfflat/hnsw indexes)",
     "ParadeDB pg_search (bm25 full-text index)"
   ],
-  "rollback_policy": "Down migrations are bundled but only revert additive, idempotent changes. For manual rollback of a live DB use: ./scripts/migrate.sh force 76 (see README).",
+  "rollback_policy": "All module migrations are additive and idempotent; roll back behavior with memory_v2.enabled / memory_v2.worker_mutations flags (see README). Down files exist for development databases only.",
   "upgrade_guide": "See README.md 'Upgrading existing databases'."
 }

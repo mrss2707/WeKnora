@@ -7931,6 +7931,8 @@ export default {
       yesterday: 'Yesterday'
     },
     browse: {
+      bulkPartialFailure: '{failed} of {total} memories could not be updated',
+      bulkProtectedSkipped: '{count} memory(ies) have a protected verdict (decision/fixed) and were skipped',
       title: 'Memories',
       searchPlaceholder: 'Search memories...',
       empty: 'No memories found',

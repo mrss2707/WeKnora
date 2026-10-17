@@ -226,8 +226,10 @@ func TestCheckSemanticDedupEmptyVectorSkipsSearch(t *testing.T) {
 	assert.Zero(t, repo.cosineCalls)
 }
 
-func TestCheckSemanticDedupExactDuplicateReturnsTypedError(t *testing.T) {
+func TestCheckSemanticDedupExactDuplicateReturnsExistingNotCreated(t *testing.T) {
 	repo := newIngestionRepo()
+	existing := &types.AgentMemory{ID: "existing-1", TenantID: "tenant-1", KbID: "kb-1", Content: "existing content"}
+	repo.memories[existing.ID] = existing
 	repo.cosineResults = []*types.MemorySearchResult{
 		{Memory: nil, Score: 1.0},
 		{Memory: &types.AgentMemory{ID: "existing-1"}, Score: 0.98},
@@ -239,16 +241,26 @@ func TestCheckSemanticDedupExactDuplicateReturnsTypedError(t *testing.T) {
 
 	result, err := svc.checkSemanticDedup(context.Background(), &types.AgentMemory{TenantID: "tenant-1", KbID: "kb-1"}, []float32{0.1, 0.2})
 
-	assert.Nil(t, result)
-	require.Error(t, err)
-	var duplicateErr *ErrMemoryDuplicate
-	require.ErrorAs(t, err, &duplicateErr)
-	assert.Equal(t, "existing-1", duplicateErr.ExistingID)
-	assert.Equal(t, 0.98, duplicateErr.Similarity)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	assert.False(t, result.Created)
+	assert.Same(t, existing, result.Memory)
 	assert.Equal(t, "tenant-1", repo.lastCosineFilter.TenantID)
 	assert.Equal(t, "kb-1", repo.lastCosineFilter.KbID)
 	assert.Equal(t, 4, repo.lastCosineLimit)
 	assert.Equal(t, []float32{0.1, 0.2}, repo.lastCosineVector)
+}
+
+func TestCheckSemanticDedupExactDuplicateInOtherKBIsIgnored(t *testing.T) {
+	repo := newIngestionRepo()
+	repo.memories["other"] = &types.AgentMemory{ID: "other", TenantID: "tenant-1", KbID: "kb-2"}
+	repo.cosineResults = []*types.MemorySearchResult{{Memory: &types.AgentMemory{ID: "other"}, Score: 0.99}}
+	svc := newIngestionService(repo)
+
+	result, err := svc.checkSemanticDedup(context.Background(), &types.AgentMemory{TenantID: "tenant-1", KbID: "kb-1"}, []float32{0.1})
+
+	require.NoError(t, err)
+	assert.Nil(t, result)
 }
 
 func TestCheckSemanticDedupSearchErrorIsWrapped(t *testing.T) {
@@ -263,7 +275,7 @@ func TestCheckSemanticDedupSearchErrorIsWrapped(t *testing.T) {
 	assert.Contains(t, err.Error(), "semantic dedup search failed")
 }
 
-func TestCheckSemanticDedupNearDuplicateMergesAndTruncates(t *testing.T) {
+func TestCheckSemanticDedupNearDuplicateMergesKeepingBothContents(t *testing.T) {
 	existing := &types.AgentMemory{
 		ID: "existing-1", TenantID: "tenant-1", KbID: "kb-1",
 		Content: "Existing memory content", Importance: 1, Tags: types.TagsArray{"preserved"},
@@ -276,20 +288,36 @@ func TestCheckSemanticDedupNearDuplicateMergesAndTruncates(t *testing.T) {
 	svc := newIngestionService(repo)
 	svc.config.SemanticDedup.ExactThreshold = 0.99
 	svc.config.SemanticDedup.NearThreshold = 0.93
-	svc.config.SemanticDedup.MergeMaxChars = 45
 
-	result, err := svc.checkSemanticDedup(context.Background(), &types.AgentMemory{TenantID: "tenant-1", KbID: "kb-1", Content: "New memory content with extra details", Importance: 4}, []float32{0.1})
+	result, err := svc.checkSemanticDedup(context.Background(), &types.AgentMemory{TenantID: "tenant-1", KbID: "kb-1", Content: "Nội dung mới có thêm chi tiết", Importance: 4}, []float32{0.1})
 
 	require.NoError(t, err)
 	require.NotNil(t, result)
 	assert.False(t, result.Created)
 	assert.Same(t, existing, result.Memory)
 	assert.Equal(t, 1, repo.updateCalls)
-	assert.LessOrEqual(t, len(existing.Content), 45)
-	assert.Contains(t, existing.Content, "Existing memory content")
+	assert.Equal(t, "Existing memory content\n---\nNội dung mới có thêm chi tiết", existing.Content)
 	assert.Equal(t, 4, existing.Importance)
 	assert.Equal(t, "kb-1", existing.KbID)
 	assert.Equal(t, types.TagsArray{"preserved"}, existing.Tags)
+}
+
+func TestCheckSemanticDedupNearDuplicateOverCapIsStoredSeparately(t *testing.T) {
+	existing := &types.AgentMemory{ID: "existing-1", TenantID: "tenant-1", KbID: "kb-1", Content: strings.Repeat("x", 40)}
+	repo := newIngestionRepo()
+	repo.memories[existing.ID] = existing
+	repo.cosineResults = []*types.MemorySearchResult{{Memory: &types.AgentMemory{ID: existing.ID}, Score: 0.95}}
+	svc := newIngestionService(repo)
+	svc.config.SemanticDedup.ExactThreshold = 0.99
+	svc.config.SemanticDedup.NearThreshold = 0.93
+	svc.config.SemanticDedup.MergeMaxChars = 45
+
+	result, err := svc.checkSemanticDedup(context.Background(), &types.AgentMemory{TenantID: "tenant-1", KbID: "kb-1", Content: "a new memory that does not fit"}, []float32{0.1})
+
+	require.NoError(t, err)
+	assert.Nil(t, result, "over-cap merge is skipped so the new memory is saved on its own")
+	assert.Zero(t, repo.updateCalls)
+	assert.Equal(t, strings.Repeat("x", 40), existing.Content)
 }
 
 func TestMergeMemoryUpdateErrorIsWrapped(t *testing.T) {

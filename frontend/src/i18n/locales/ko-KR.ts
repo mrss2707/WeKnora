@@ -7930,6 +7930,8 @@ export default {
       noHistory: '최근 활동 없음'
     },
     browse: {
+      bulkPartialFailure: '{total}개 중 {failed}개의 메모리를 업데이트하지 못했습니다',
+      bulkProtectedSkipped: '보호된 판정(decision/fixed)이 있는 메모리 {count}개는 건너뛰었습니다',
       title: '메모리',
       searchPlaceholder: '메모리 검색...',
       empty: '메모리를 찾을 수 없습니다',

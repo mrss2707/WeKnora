@@ -113,19 +113,36 @@ func (r *MemoryRepository) checkProtectedVerdict(ctx context.Context, memory *ty
 		return nil
 	}
 
-	// Check the actor stored in context
-	actor, _ := ctx.Value(types.ActorKey{}).(string)
-	if actor == "dreamer" || actor == "system" {
+	if isAutomatedActor(ctx) {
 		return &types.ErrProtectedVerdict{}
 	}
 	return nil
 }
 
-// Delete soft-deletes a memory.
+// Delete soft-deletes a memory. Automated actors (dreamer, system) can never
+// delete a memory with a protected verdict (decision, fixed).
 func (r *MemoryRepository) Delete(ctx context.Context, tenantID, id string) error {
+	if isAutomatedActor(ctx) {
+		existing, err := r.GetByID(ctx, tenantID, id)
+		if err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return nil
+			}
+			return err
+		}
+		if existing.Verdict.IsProtected() {
+			return &types.ErrProtectedVerdict{}
+		}
+	}
 	return r.db.WithContext(ctx).
 		Where("tenant_id = ? AND id = ?", tenantID, id).
 		Delete(&types.AgentMemory{}).Error
+}
+
+// isAutomatedActor reports whether ctx carries an automated actor identity.
+func isAutomatedActor(ctx context.Context) bool {
+	actor, _ := ctx.Value(types.ActorKey{}).(string)
+	return actor == "dreamer" || actor == "system"
 }
 
 // ---------------------------------------------------------------------------

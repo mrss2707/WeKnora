@@ -18,10 +18,10 @@ import (
 // every route exactly once, with its role floor. Concrete request paths are
 // used for the HTTP probes (":id" is the registered template).
 var memoryV2RouteCases = []struct {
-	method     string
-	path       string // registered template
-	probePath  string // concrete path for HTTP probes
-	roleFloor  types.TenantRole
+	method    string
+	path      string // registered template
+	probePath string // concrete path for HTTP probes
+	roleFloor types.TenantRole
 }{
 	{http.MethodGet, "/api/v1/memories", "/api/v1/memories", types.TenantRoleViewer},
 	{http.MethodGet, "/api/v1/memories/search", "/api/v1/memories/search", types.TenantRoleViewer},

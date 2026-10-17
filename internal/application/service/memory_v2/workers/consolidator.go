@@ -4,6 +4,7 @@ import (
 	"context"
 	"math"
 	"time"
+	"unicode/utf8"
 
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/models/embedding"
@@ -14,9 +15,9 @@ import (
 // Consolidator periodically recomputes hub scores, decays importance of old
 // memories, and merges near-duplicate memories.
 type Consolidator struct {
-	repo      interfaces.MemoryRepositoryV2
-	embedder  embedding.Embedder
-	interval  time.Duration
+	repo     interfaces.MemoryRepositoryV2
+	embedder embedding.Embedder
+	interval time.Duration
 }
 
 // NewConsolidator creates a new Consolidator.
@@ -48,6 +49,7 @@ func (c *Consolidator) Run(ctx context.Context) {
 
 // consolidateAll runs all consolidation tasks.
 func (c *Consolidator) consolidateAll(ctx context.Context) {
+	ctx = context.WithValue(ctx, types.ActorKey{}, "system")
 	logger.Infof(ctx, "consolidator: starting consolidation cycle")
 
 	// Step 1: Recompute hub scores
@@ -128,8 +130,8 @@ func (c *Consolidator) mergeNearDuplicates(ctx context.Context) error {
 
 		// Embed each memory
 		type memWithVec struct {
-			mem  *types.AgentMemory
-			vec  []float32
+			mem *types.AgentMemory
+			vec []float32
 		}
 
 		var mems []memWithVec
@@ -154,8 +156,8 @@ func (c *Consolidator) mergeNearDuplicates(ctx context.Context) error {
 				if sim > 0.93 {
 					// Merge j into i
 					mergedContent := mems[i].mem.Content + "\n---\n" + mems[j].mem.Content
-					if len(mergedContent) > 2000 {
-						mergedContent = mergedContent[:2000]
+					if utf8.RuneCountInString(mergedContent) > maxMergedContentChars {
+						continue // never truncate: skip rather than lose content
 					}
 					mems[i].mem.Content = mergedContent
 					if mems[j].mem.Importance > mems[i].mem.Importance {

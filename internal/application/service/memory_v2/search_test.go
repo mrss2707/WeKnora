@@ -332,7 +332,7 @@ func TestRecencyBoost_LongTermDecay(t *testing.T) {
 	// score *= (1 + factor) / 2 = (1 + 0.860708) / 2 = 0.930354
 	days := 90.0
 	factor := math.Exp(-days / 30.0 * 0.05)
-	expected := 1.0 * (1+factor)/2
+	expected := 1.0 * (1 + factor) / 2
 	require.InDelta(t, expected, boosted[0].Score, 0.0001, "long-term recency boost")
 }
 
@@ -357,8 +357,8 @@ func TestRecencyBoost_DefaultFallback(t *testing.T) {
 	svc := newTestService()
 	svc.config.RecencyBoost = types.RecencyBoostConfig{
 		Enabled:             true,
-		ShortTermMultiplier: 0, // zero -> should fall through to default
-		ShortTermWindow:     "",  // empty -> should be set to "1h" then parsed to 0, defaulted to 1h
+		ShortTermMultiplier: 0,  // zero -> should fall through to default
+		ShortTermWindow:     "", // empty -> should be set to "1h" then parsed to 0, defaulted to 1h
 		LongTermFactor:      0,  // zero -> fine, still used
 		LongTermHalfLife:    0,  // zero -> defaulted to 30
 	}
@@ -999,7 +999,7 @@ func TestExtractKeywordsFromQuery(t *testing.T) {
 
 // mockRepo implements the minimum of interfaces.MemoryRepositoryV2 for testing SearchMemories
 type mockSearchRepo struct {
-	searchFunc      func(ctx context.Context, filter *types.MemoryFilter) ([]*types.MemorySearchResult, int64, error)
+	searchFunc       func(ctx context.Context, filter *types.MemoryFilter) ([]*types.MemorySearchResult, int64, error)
 	cosineSearchFunc func(ctx context.Context, filter *types.MemoryFilter, embedding []float32, limit int) ([]*types.MemorySearchResult, error)
 }
 
@@ -1024,9 +1024,9 @@ func (m *mockSearchRepo) CosineSearch(ctx context.Context, filter *types.MemoryF
 func (m *mockSearchRepo) TryDreamerLock(ctx context.Context, tenantID string, workerID string) (bool, error) {
 	return true, nil
 }
-func (m *mockSearchRepo) UnlockDreamer(ctx context.Context, tenantID string) error { return nil }
+func (m *mockSearchRepo) UnlockDreamer(ctx context.Context, tenantID string) error    { return nil }
 func (m *mockSearchRepo) ComputeHubScores(ctx context.Context, tenantID string) error { return nil }
-func (m *mockSearchRepo) InvalidateResultCache(ctx context.Context, tenantID string) {}
+func (m *mockSearchRepo) InvalidateResultCache(ctx context.Context, tenantID string)  {}
 func (m *mockSearchRepo) GetByFingerprint(ctx context.Context, tenantID, fingerprint string) (*types.AgentMemory, error) {
 	return nil, nil
 }
@@ -1064,9 +1064,9 @@ func (m *mockEmbedder) BatchEmbed(ctx context.Context, texts []string) ([][]floa
 func (m *mockEmbedder) BatchEmbedWithPool(ctx context.Context, model embedding.Embedder, texts []string) ([][]float32, error) {
 	return nil, nil
 }
-func (m *mockEmbedder) GetModelName() string   { return "mock" }
-func (m *mockEmbedder) GetDimensions() int      { return 3 }
-func (m *mockEmbedder) GetModelID() string      { return "mock-model" }
+func (m *mockEmbedder) GetModelName() string { return "mock" }
+func (m *mockEmbedder) GetDimensions() int   { return 3 }
+func (m *mockEmbedder) GetModelID() string   { return "mock-model" }
 
 func TestSearchMemories_FullPipeline(t *testing.T) {
 	now := time.Now()
@@ -1407,8 +1407,8 @@ func TestSearchMemories_StalenessComputed(t *testing.T) {
 		}
 	}
 
-
 }
+
 // TestIsDimensionMismatch verifies the pgvector dimension mismatch detection.
 func TestIsDimensionMismatch(t *testing.T) {
 	tests := []struct {
@@ -1430,7 +1430,6 @@ func TestIsDimensionMismatch(t *testing.T) {
 		})
 	}
 }
-
 
 // ---------------------------------------------------------------------------
 // SaveMemory nil guard

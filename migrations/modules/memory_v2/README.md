@@ -10,6 +10,7 @@ Native Go + PostgreSQL/pgvector memory module (per-KB, multi-tenant). Schema:
 | 900074 | `memory_v2` | Creates `agent_memories` (hybrid vector + BM25 search, tiers), `memory_relations`, `extraction_queue` |
 | 900075 | `memory_v2_verdict` | Verdict system on `agent_memories` + `dreamer_state` |
 | 900076 | `memory_v2_hnsw` | Replaces ivfflat with HNSW vector index |
+| 900078 | `memory_v2_kb_scope_repair` | Audit log for moving shared-KB memories to the KB owner's tenant |
 
 Module migrations live in the reserved range **900000–909999** so they can never
 collide with core migrations in `migrations/versioned/` (which upstream `main`
@@ -70,8 +71,9 @@ safe. Fresh databases need no action.
 
 - The provided `down` files only revert additive/idempotent changes and exist
   for development databases.
-- Manual rollback of a live DB: `./scripts/migrate.sh force 76` moves the
-  version marker back; no destructive down-migration is required.
+- Behavior is rolled back with feature flags (`memory_v2.enabled`,
+  `memory_v2.worker_mutations`), not down-migrations: every module migration
+  is additive. `./scripts/migrate.sh force` operates on the core stream only.
 ## Knowledge-base tenant scope (shared KBs)
 
 Memories belong to the **knowledge base owner's tenant**, not to the tenant of
@@ -81,3 +83,11 @@ build under the caller's tenant are detected at startup (`agent_memories.tenant_
 differs from `knowledge_bases.tenant_id`) and moved to the owner tenant; each
 move is logged in `agent_memories_scope_repair_log` (migration 900078).
 Disable with `MEMORY_V2_KB_SCOPE_REPAIR=off`; use `=audit` to only log findings.
+
+## Background workers
+
+Workers that modify or delete stored memories (scheduled dreamer, consolidator,
+pruner, entity extractor) are disarmed by default via
+`memory_v2.worker_mutations: false` (env `MEMORY_V2_WORKER_MUTATIONS`). While
+disarmed they do not start, and `POST /memories/dream` returns proposals only
+(dry run). Arm them only once they are scoped per knowledge base and audited.

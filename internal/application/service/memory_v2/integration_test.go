@@ -24,7 +24,7 @@ import (
 // mockIntegrationRepo implements MemoryRepositoryV2 for integration tests.
 // It stores memories in-memory to simulate the real repository.
 type mockIntegrationRepo struct {
-	memories map[string]*types.AgentMemory
+	memories  map[string]*types.AgentMemory
 	sequences int
 }
 
@@ -157,7 +157,6 @@ func (r *mockIntegrationRepo) ComputeHubScores(ctx context.Context, tenantID str
 }
 
 func (r *mockIntegrationRepo) InvalidateResultCache(ctx context.Context, tenantID string) {}
-
 
 func (r *mockIntegrationRepo) GetByFingerprint(ctx context.Context, tenantID, fingerprint string) (*types.AgentMemory, error) {
 	for _, mem := range r.memories {
@@ -364,12 +363,12 @@ func TestMemoryV2Integration_DreamerDryRun(t *testing.T) {
 	// Save a memory for the dreamer to act upon.
 	// Set ID explicitly so the mock response can reference it.
 	memory := &types.AgentMemory{
-		ID:          "dreamer-target-1",
-		TenantID:    "tenant-dreamer-1",
-		Content:     "The team decided to adopt Kubernetes for container orchestration across all environments.",
-		MemoryType:  "decision",
-		Verdict:     types.VerdictNone,
-		Importance:  4,
+		ID:         "dreamer-target-1",
+		TenantID:   "tenant-dreamer-1",
+		Content:    "The team decided to adopt Kubernetes for container orchestration across all environments.",
+		MemoryType: "decision",
+		Verdict:    types.VerdictNone,
+		Importance: 4,
 	}
 	err := repo.Create(ctx, memory)
 	require.NoError(t, err)

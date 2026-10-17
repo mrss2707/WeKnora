@@ -106,8 +106,8 @@ func (m *mockEntityExtractorRepo) GetEmbeddingDimension(ctx context.Context, ten
 
 // mockEntityExtractorChat implements chat.Chat for testing the entity extractor.
 type mockEntityExtractorChat struct {
-	mu       sync.Mutex
-	chatFunc func(ctx context.Context, messages []chat.Message, opts *chat.ChatOptions) (*types.ChatResponse, error)
+	mu        sync.Mutex
+	chatFunc  func(ctx context.Context, messages []chat.Message, opts *chat.ChatOptions) (*types.ChatResponse, error)
 	chatCalls int
 }
 

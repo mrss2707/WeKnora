@@ -376,15 +376,19 @@ func (s *MemoryServiceV2Impl) ensureWorkers(ctx context.Context) {
 	s.entityExtractor = workers.NewEntityExtractor(s.repo, ch)
 	s.autoLinker = workers.NewAutoLinker(s.repo, embedder)
 	s.consolidator = workers.NewConsolidator(s.repo, embedder)
-	s.dreamer = workers.NewDreamerWorker(s.repo, ch, s.config.Dreamer, s.tenantIDs)
+	s.dreamer = workers.NewDreamerWorker(s.repo, ch, s.dreamerConfig(), s.tenantIDs)
 	s.cacheWarmer = workers.NewCacheWarmer(s.repo, embedder, s.config.CacheWarmer)
 
 	s.embedWorkerOnce.Do(func() {
-		logger.Infof(ctx, "[MemoryV2] Starting embedder-dependent background workers...")
-		s.wg.Add(3)
-		go runWorker(ctx, &s.wg, s.entityExtractor.Run)
-		go runWorker(ctx, &s.wg, s.consolidator.Run)
-		go runWorker(ctx, &s.wg, s.dreamer.Run)
+		if s.config.WorkerMutations {
+			logger.Infof(ctx, "[MemoryV2] Starting mutating background workers (extractor, consolidator, dreamer)...")
+			s.wg.Add(3)
+			go runWorker(ctx, &s.wg, s.entityExtractor.Run)
+			go runWorker(ctx, &s.wg, s.consolidator.Run)
+			go runWorker(ctx, &s.wg, s.dreamer.Run)
+		} else {
+			logger.Infof(ctx, "[MemoryV2] Mutating background workers disarmed (memory_v2.worker_mutations=false); manual dream passes run as dry runs")
+		}
 		if s.config.CacheWarmer.Enabled {
 			s.wg.Add(1)
 			go runWorker(ctx, &s.wg, s.cacheWarmer.Run)
@@ -403,10 +407,13 @@ func (s *MemoryServiceV2Impl) StartWorkers(ctx context.Context) {
 	}
 	s.workerOnce.Do(func() {
 		ctx, s.cancel = context.WithCancel(ctx)
-		s.wg.Add(2)
-		go runWorker(ctx, &s.wg, s.pruner.Run)
+		s.wg.Add(1)
 		go runWorker(ctx, &s.wg, s.healthChecker.Run)
-		logger.Infof(ctx, "[MemoryV2] Started tenant-independent workers (pruner, healthChecker)")
+		if s.config.WorkerMutations {
+			s.wg.Add(1)
+			go runWorker(ctx, &s.wg, s.pruner.Run)
+		}
+		logger.Infof(ctx, "[MemoryV2] Started tenant-independent workers (healthChecker; pruner armed=%v)", s.config.WorkerMutations)
 	})
 }
 
@@ -416,6 +423,16 @@ func (s *MemoryServiceV2Impl) Cleanup() {
 		s.cancel()
 	}
 	s.wg.Wait()
+}
+
+// dreamerConfig returns the dreamer settings, forcing dry-run while worker
+// mutations are disarmed so a manual pass only proposes actions.
+func (s *MemoryServiceV2Impl) dreamerConfig() types.DreamerConfig {
+	cfg := s.config.Dreamer
+	if !s.config.WorkerMutations {
+		cfg.DryRun = true
+	}
+	return cfg
 }
 
 // runWorker wraps a worker function with panic recovery and wg tracking.

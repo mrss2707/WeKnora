@@ -109,7 +109,7 @@
       <t-button
         variant="outline"
         size="small"
-        @click="memoryStore.bulkChangeImportance(1)"
+        @click="handleBulkImportance(1)"
       >
         <t-icon name="arrow-up" />
         {{ $t('memory.browse.bulkImportanceUp') }}
@@ -118,7 +118,7 @@
       <t-button
         variant="outline"
         size="small"
-        @click="memoryStore.bulkChangeImportance(-1)"
+        @click="handleBulkImportance(-1)"
       >
         <t-icon name="arrow-down" />
         {{ $t('memory.browse.bulkImportanceDown') }}
@@ -219,11 +219,11 @@
         <template #importance="{ row }">
           <div class="table-importance">
             <t-icon
-              v-for="i in 5"
+              v-for="i in MEMORY_IMPORTANCE_MAX"
               :key="i"
-              :name="i <= Math.round(row.importance / 2) ? 'star-filled' : 'star'"
+              :name="i <= row.importance ? 'star-filled' : 'star'"
               size="12px"
-              :class="{ starFilled: i <= Math.round(row.importance / 2) }"
+              :class="{ starFilled: i <= row.importance }"
             />
           </div>
         </template>
@@ -298,7 +298,7 @@ import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useMemoryStore } from '@/stores/memory'
 import type { AgentMemory, MemoryVerdict } from '@/api/memory/index'
-import { isVerdictProtected } from '@/api/memory/index'
+import { isVerdictProtected, MEMORY_IMPORTANCE_MAX } from '@/api/memory/index'
 import { MessagePlugin } from 'tdesign-vue-next'
 import MemoryCard from './MemoryCard.vue'
 
@@ -445,20 +445,35 @@ function handlePageSizeChange(pageSize: number) {
 // -----------------------------------------------------------------------
 async function handleBulkVerdict(verdict: string) {
   const v = verdict as MemoryVerdict
-  // Check if any selected memory has a protected verdict
-  const protectedMemories = memoryStore.selectedMemories.filter(
-    (m) => isVerdictProtected(m.verdict)
-  )
-  if (protectedMemories.length > 0) {
-    MessagePlugin.warning(
-      `${protectedMemories.length} memory(ies) have a protected verdict (decision/fixed) and cannot be changed via bulk operation.`
-    )
+  // Protected verdicts (decision/fixed) are left untouched by bulk changes.
+  const protectedIds = memoryStore.selectedMemories
+    .filter((m) => isVerdictProtected(m.verdict))
+    .map((m) => m.id)
+  if (protectedIds.length > 0) {
+    MessagePlugin.warning(t('memory.browse.bulkProtectedSkipped', { count: protectedIds.length }))
+    memoryStore.selectedIds = memoryStore.selectedIds.filter((id) => !protectedIds.includes(id))
   }
-  await memoryStore.bulkChangeVerdict(v)
+  if (memoryStore.selectedIds.length === 0) return
+  reportBulkResult(await memoryStore.bulkChangeVerdict(v))
+}
+
+async function handleBulkImportance(delta: number) {
+  reportBulkResult(await memoryStore.bulkChangeImportance(delta))
 }
 
 async function handleBulkDelete() {
-  await memoryStore.bulkDelete()
+  reportBulkResult(await memoryStore.bulkDelete())
+}
+
+function reportBulkResult(result: { succeeded: number; failed: number }) {
+  if (result.failed > 0) {
+    MessagePlugin.error(
+      t('memory.browse.bulkPartialFailure', {
+        failed: result.failed,
+        total: result.succeeded + result.failed,
+      })
+    )
+  }
 }
 </script>
 

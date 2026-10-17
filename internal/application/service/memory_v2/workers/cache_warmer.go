@@ -12,10 +12,10 @@ import (
 
 // CacheWarmer periodically warms the embedding cache with frequent queries.
 type CacheWarmer struct {
-	repo       interfaces.MemoryRepositoryV2
-	embedder   embedding.Embedder
-	config     types.CacheWarmerConfig
-	interval   time.Duration
+	repo     interfaces.MemoryRepositoryV2
+	embedder embedding.Embedder
+	config   types.CacheWarmerConfig
+	interval time.Duration
 }
 
 // NewCacheWarmer creates a new CacheWarmer.

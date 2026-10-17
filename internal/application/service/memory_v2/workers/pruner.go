@@ -48,6 +48,7 @@ func (p *Pruner) Run(ctx context.Context) {
 
 // pruneAll runs all pruning operations.
 func (p *Pruner) pruneAll(ctx context.Context) {
+	ctx = context.WithValue(ctx, types.ActorKey{}, "system")
 	logger.Infof(ctx, "pruner: starting pruning cycle")
 
 	// Step 1: Soft-delete expired memories

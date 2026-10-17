@@ -7930,6 +7930,8 @@ export default {
       noHistory: 'No recent activity'
     },
     browse: {
+      bulkPartialFailure: '{total} 件中 {failed} 件のメモリーを更新できませんでした',
+      bulkProtectedSkipped: '保護された判定（decision/fixed）のメモリー {count} 件はスキップされました',
       title: 'Memories',
       searchPlaceholder: 'Search memories...',
       empty: 'No memories found',

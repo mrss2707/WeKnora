@@ -545,6 +545,7 @@ func LoadConfig() (*Config, error) {
 
 	// 解析配置到结构体
 	var cfg Config
+	cfg.MemoryV2 = newMemoryV2ConfigBase() // decode YAML on top of Memory V2 defaults
 	if err := viper.Unmarshal(&cfg, func(dc *mapstructure.DecoderConfig) {
 		dc.TagName = "yaml"
 	}); err != nil {
@@ -960,19 +961,6 @@ func applyAuditDefaults(cfg *Config) {
 		if n, err := strconv.Atoi(value); err == nil && n >= 0 {
 			cfg.Audit.RetentionDays = n
 		}
-	}
-}
-
-// applyMemoryV2Defaults initializes the Memory V2 config.
-// Enabled by default; set MEMORY_V2_ENABLED=false to opt out.
-func applyMemoryV2Defaults(cfg *Config) {
-	if cfg.MemoryV2 == nil {
-		defaults := types.DefaultMemoryV2Config()
-		cfg.MemoryV2 = &defaults
-	}
-	// Env override: explicit "false" disables; anything else keeps the default (true).
-	if v := strings.ToLower(strings.TrimSpace(os.Getenv("MEMORY_V2_ENABLED"))); v == "false" || v == "0" {
-		cfg.MemoryV2.Enabled = false
 	}
 }
 

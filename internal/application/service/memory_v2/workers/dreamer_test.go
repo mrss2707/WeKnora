@@ -4,9 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"sync"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -719,7 +721,7 @@ func TestDreamer_DryRunActionsProposedNotApplied(t *testing.T) {
 	result, err := d.RunPass(context.Background(), "tenant-1")
 	require.NoError(t, err)
 	assert.Equal(t, 1, result.ActionsProposed)
-	assert.Equal(t, 1, result.ActionsApplied, "in dry-run, actions are recorded as applied")
+	assert.Equal(t, 0, result.ActionsApplied, "dry-run only proposes; nothing is applied")
 	assert.Len(t, result.Actions, 1)
 	// No actual repo methods should be called for modification
 	assert.Empty(t, repo.updateCalls, "no updates should occur in dry-run mode")
@@ -747,7 +749,8 @@ func TestDreamer_DryRunWithRemoveAction(t *testing.T) {
 	result, err := d.RunPass(context.Background(), "tenant-1")
 	require.NoError(t, err)
 	assert.Equal(t, 1, result.ActionsProposed)
-	assert.Equal(t, 1, result.ActionsApplied)
+	assert.Equal(t, 0, result.ActionsApplied)
+	assert.Len(t, result.Actions, 1)
 	assert.Empty(t, repo.deleteCalls, "no delete should occur in dry-run mode")
 }
 
@@ -1356,12 +1359,12 @@ func TestDreamer_ApplyActionUnknownType(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// Test: Merge content truncation at 2000 chars
+// Test: Merge keeps full content (never truncates)
 // ---------------------------------------------------------------------------
 
-func TestDreamer_MergeContentTruncated(t *testing.T) {
-	longContentA := string(make([]byte, 1200))
-	longContentB := string(make([]byte, 1200))
+func TestDreamer_MergeKeepsFullContent(t *testing.T) {
+	longContentA := strings.Repeat("quyết định ", 120)
+	longContentB := strings.Repeat("pgbouncer ", 120)
 
 	repo := &mockDreamerRepo{
 		searchFunc: func(ctx context.Context, filter *types.MemoryFilter) ([]*types.MemorySearchResult, int64, error) {
@@ -1391,7 +1394,8 @@ func TestDreamer_MergeContentTruncated(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, 1, result.ActionsApplied)
 	require.Len(t, repo.updateCalls, 1)
-	assert.LessOrEqual(t, len(repo.updateCalls[0].Content), 2000, "merged content should not exceed 2000 chars")
+	assert.Equal(t, longContentA+"\n---\n"+longContentB, repo.updateCalls[0].Content)
+	assert.True(t, utf8.ValidString(repo.updateCalls[0].Content))
 }
 
 // ---------------------------------------------------------------------------
