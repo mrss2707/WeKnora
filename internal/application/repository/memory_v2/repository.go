@@ -269,48 +269,46 @@ func (r *MemoryRepository) UnlockDreamer(ctx context.Context, tenantID string) e
 // Hub scores
 // ---------------------------------------------------------------------------
 
-// degreeStat is a scan target for ComputeHubScores.
-type degreeStat struct {
-	MemoryID  string  `gorm:"column:memory_id"`
-	Degree    int64   `gorm:"column:degree"`
-	AvgWeight float64 `gorm:"column:avg_weight"`
+// hubScoreSQL recomputes hub_score = LN(1 + degree) * avg(weight) over live
+// edges whose both endpoints are live, for the memories selected by the
+// trailing condition; memories left without edges are reset to 0.
+const hubScoreSQL = `
+UPDATE agent_memories m
+SET hub_score = COALESCE(s.score, 0)
+FROM (
+    SELECT am.id, (
+        SELECT LN(1 + COUNT(*)) * AVG(r.weight)
+        FROM memory_relations r
+        JOIN agent_memories o ON o.id = CASE WHEN r.from_uuid = am.id THEN r.to_uuid ELSE r.from_uuid END
+        WHERE r.deleted_at IS NULL AND o.deleted_at IS NULL AND r.tenant_id = am.tenant_id
+          AND (r.from_uuid = am.id OR r.to_uuid = am.id)
+        HAVING COUNT(*) > 0
+    ) AS score
+    FROM agent_memories am
+    WHERE am.deleted_at IS NULL AND am.tenant_id = ? %s
+) s
+WHERE m.id = s.id AND m.hub_score IS DISTINCT FROM COALESCE(s.score, 0)`
+
+// ComputeHubScores recomputes hub scores for every live memory of a tenant in
+// one statement. Edges to deleted memories do not count.
+func (r *MemoryRepository) ComputeHubScores(ctx context.Context, tenantID string) error {
+	if tenantID == "" {
+		return nil
+	}
+	err := r.db.WithContext(ctx).Exec(fmt.Sprintf(hubScoreSQL, ""), tenantID).Error
+	if err == nil {
+		r.InvalidateResultCache(ctx, tenantID)
+	}
+	return err
 }
 
-// ComputeHubScores recomputes hub_scores for all memories in a tenant by
-// counting in-degree and out-degree edges from memory_relations and applying
-// the formula: hub_score = LN(1 + degree) * avg_weight.
-func (r *MemoryRepository) ComputeHubScores(ctx context.Context, tenantID string) error {
-	var stats []degreeStat
-	err := r.db.WithContext(ctx).Raw(`
-		SELECT memory_id, COUNT(*) AS degree, COALESCE(AVG(weight), 0) AS avg_weight
-		FROM (
-			SELECT from_uuid AS memory_id, weight
-			FROM memory_relations
-			WHERE deleted_at IS NULL AND tenant_id = ?
-			UNION ALL
-			SELECT to_uuid AS memory_id, weight
-			FROM memory_relations
-			WHERE deleted_at IS NULL AND tenant_id = ?
-		) all_edges
-		GROUP BY memory_id
-	`, tenantID, tenantID).Scan(&stats).Error
-	if err != nil {
-		return err
+// RefreshHubScores recomputes hub scores of specific memories (the endpoints
+// of new or removed edges).
+func (r *MemoryRepository) RefreshHubScores(ctx context.Context, tenantID string, ids []string) error {
+	if tenantID == "" || len(ids) == 0 {
+		return nil
 	}
-
-	for _, stat := range stats {
-		hubScore := types.HubScoreFromDegree(float64(stat.Degree), stat.AvgWeight)
-		if err := r.db.WithContext(ctx).
-			Model(&types.AgentMemory{}).
-			Where("id = ? AND tenant_id = ?", stat.MemoryID, tenantID).
-			Updates(map[string]interface{}{
-				"hub_score":  hubScore,
-				"updated_at": time.Now(),
-			}).Error; err != nil {
-			return err
-		}
-	}
-	return nil
+	return r.db.WithContext(ctx).Exec(fmt.Sprintf(hubScoreSQL, "AND am.id IN ?"), tenantID, ids).Error
 }
 
 // ---------------------------------------------------------------------------

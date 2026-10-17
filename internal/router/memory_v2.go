@@ -11,7 +11,7 @@ import (
 // is a no-op so callers don't need their own nil guard.
 //
 // Role floors: read/search/stats/health/graph/history/status = Viewer;
-// create/update/delete = Contributor; dream trigger and undo-merge = Admin. API keys remain default-deny on
+// create/update/delete = Contributor; dream, relink and undo-merge = Admin. API keys remain default-deny on
 // these routes (no capability grants are declared), matching the rbacGuards
 // contract where only explicitly registered policies are eligible.
 func RegisterMemoryV2Routes(v1 *gin.RouterGroup, handler *handler.MemoryV2Handler, g *rbacGuards) {
@@ -24,6 +24,7 @@ func RegisterMemoryV2Routes(v1 *gin.RouterGroup, handler *handler.MemoryV2Handle
 		memories.GET("/search", g.Viewer(), handler.SearchMemories)
 		memories.GET("/stats", g.Viewer(), handler.GetMemoryStats)
 		memories.GET("/health", g.Viewer(), handler.GetHealthReport)
+		memories.GET("/graph", g.Viewer(), handler.GetMemoryGraphOverview)
 		memories.GET("/graph/:id", g.Viewer(), handler.GetMemoryGraph)
 		memories.GET("/history", g.Viewer(), handler.GetMemoryHistory)
 		memories.GET("/:id", g.Viewer(), handler.GetMemory)
@@ -31,6 +32,7 @@ func RegisterMemoryV2Routes(v1 *gin.RouterGroup, handler *handler.MemoryV2Handle
 		memories.PUT("/:id", g.Contributor(), handler.UpdateMemory)
 		memories.DELETE("/:id", g.Contributor(), handler.DeleteMemory)
 		memories.POST("/dream", g.Admin(), handler.TriggerDream)
+		memories.POST("/relink", g.Admin(), handler.RelinkMemories)
 		memories.POST("/:id/undo-merge", g.Admin(), handler.UndoMemoryMerge)
 	}
 	v1.GET("/tenants/memory-status", g.Viewer(), handler.MemoryStatus)

@@ -569,3 +569,9 @@ type MemoryStats struct {
 	AvgImportance float64          `json:"avg_importance"`
 	AvgHubScore   float64          `json:"avg_hub_score"`
 }
+
+// MemoryRelinkResult reports a knowledge-base relink pass.
+type MemoryRelinkResult struct {
+	Memories  int `json:"memories"`
+	Relations int `json:"relations"`
+}

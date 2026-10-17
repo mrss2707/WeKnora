@@ -8,7 +8,7 @@
           :value="depth"
           variant="default"
           size="small"
-          @change="(val: number) => { depth = val; applyDepthFilter() }"
+          @change="(val: number) => { depth = val; reloadForDepth() }"
         >
           <t-radio-button :value="1">1</t-radio-button>
           <t-radio-button :value="2">2</t-radio-button>
@@ -101,10 +101,10 @@
                 :y1="npx(edge.sy)"
                 :x2="npx(edge.tx)"
                 :y2="npx(edge.ty)"
-                :class="['graph-edge', `edge-${edge.relation}`]"
-                :stroke="edgeColor(edge.relation)"
+                :class="['graph-edge', `edge-${edge.relation_type}`]"
+                :stroke="edgeColor(edge.relation_type)"
                 :stroke-width="npx(edgeWeight(edge))"
-                :stroke-dasharray="edgeDash(edge.relation)"
+                :stroke-dasharray="edgeDash(edge.relation_type)"
                 :opacity="edgeOpacity"
               />
             </g>
@@ -266,7 +266,7 @@ const svgContainerRef = ref<HTMLElement | null>(null)
 const svgRef = ref<SVGSVGElement | null>(null)
 const rootGRef = ref<SVGGElement | null>(null)
 
-const depth = ref(2)
+const depth = ref(1)
 const legendCollapsed = ref(false)
 const svgWidth = ref(800)
 const svgHeight = ref(600)
@@ -403,15 +403,26 @@ function npx(v: number): number {
 // ---------------------------------------------------------------------------
 const graphData = computed(() => memoryStore.graphData)
 
+// The tab opens on the knowledge base overview (its most connected
+// memories); clicking a memory loads its own neighbourhood from the server.
 watch(
   () => props.kbId,
   (id) => {
     if (id) {
+      centerNodeId.value = null
       memoryStore.loadGraph(id)
     }
   },
   { immediate: true }
 )
+
+function reloadForDepth() {
+  if (centerNodeId.value) {
+    memoryStore.loadGraph(props.kbId, centerNodeId.value, depth.value)
+  } else {
+    applyDepthFilter()
+  }
+}
 
 watch(graphData, (data) => {
   if (data?.nodes?.length) {
@@ -480,9 +491,10 @@ function buildSimulation(data: GraphData) {
     }
   })
 
-  // Set initial center node
-  if (!centerNodeId.value && allSimNodes.length > 0) {
-    centerNodeId.value = allSimNodes[0].id
+  // A server graph centred on a memory marks it focal; the overview has none.
+  const focal = data.nodes.find((n) => n.focal)
+  if (focal) {
+    centerNodeId.value = focal.id
   }
 
   // Immediately filter by depth
@@ -803,7 +815,7 @@ function onNodeBlur() {
 
 function setCenterNode(id: string) {
   centerNodeId.value = id
-  applyDepthFilter()
+  memoryStore.loadGraph(props.kbId, id, depth.value)
 }
 
 function onNodeClick(node: SimNode) {

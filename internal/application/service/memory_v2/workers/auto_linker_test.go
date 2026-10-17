@@ -2,7 +2,6 @@ package workers
 
 import (
 	"context"
-	"math"
 	"sync"
 	"testing"
 	"time"
@@ -10,8 +9,8 @@ import (
 	"github.com/Tencent/WeKnora/internal/models/embedding"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
+	"github.com/pgvector/pgvector-go"
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 )
 
 // ---------------------------------------------------------------------------
@@ -33,7 +32,11 @@ type mockAutoLinkerRepo struct {
 	invalidateCache    func(ctx context.Context, tenantID string)
 
 	// Tracking
-	searchCalls int
+	searchCalls  int
+	relations    []*types.MemoryRelation
+	relationErr  error
+	cosineFilter *types.MemoryFilter
+	cosineVector []float32
 }
 
 func (m *mockAutoLinkerRepo) Create(ctx context.Context, memory *types.AgentMemory) error {
@@ -75,6 +78,9 @@ func (m *mockAutoLinkerRepo) Search(ctx context.Context, filter *types.MemoryFil
 }
 
 func (m *mockAutoLinkerRepo) CosineSearch(ctx context.Context, filter *types.MemoryFilter, embedding []float32, limit int) ([]*types.MemorySearchResult, error) {
+	m.mu.Lock()
+	m.cosineFilter, m.cosineVector = filter, embedding
+	m.mu.Unlock()
 	if m.cosineSearchFunc != nil {
 		return m.cosineSearchFunc(ctx, filter, embedding, limit)
 	}
@@ -111,6 +117,12 @@ func (m *mockAutoLinkerRepo) GetByFingerprint(ctx context.Context, tenantID, fin
 	return nil, nil
 }
 func (m *mockAutoLinkerRepo) CreateRelation(ctx context.Context, rel *types.MemoryRelation) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.relationErr != nil {
+		return m.relationErr
+	}
+	m.relations = append(m.relations, rel)
 	return nil
 }
 func (m *mockAutoLinkerRepo) GetRelations(ctx context.Context, memoryID, tenantID string) ([]*types.MemoryRelation, error) {
@@ -164,683 +176,128 @@ func (m *mockAutoLinkerEmbedder) GetModelID() string { return "mock-linker-model
 // Helpers
 // ---------------------------------------------------------------------------
 
-func makeLinkerMemory(id, tenantID, content string, tags []string, verdict types.MemoryVerdict) *types.AgentMemory {
+func linkerMemory(id, kb string, verdict types.MemoryVerdict, vec ...float32) *types.AgentMemory {
 	return &types.AgentMemory{
-		ID:         id,
-		TenantID:   tenantID,
-		Content:    content,
-		Tags:       tags,
-		Importance: 3,
-		Verdict:    verdict,
-		MemoryType: "semantic",
-		Tier:       2,
-		CreatedAt:  time.Now(),
-		UpdatedAt:  time.Now(),
+		ID: id, TenantID: "tenant-1", KbID: kb, Content: "content " + id,
+		Verdict: verdict, Embedding: pgvector.NewVector(vec),
+		Metadata: []byte(`{"embedding_model_id":"emb-1"}`),
 	}
 }
 
-func newTestAutoLinker(repo *mockAutoLinkerRepo, embedder *mockAutoLinkerEmbedder) *AutoLinker {
-	return &AutoLinker{
-		repo:     repo,
-		embedder: embedder,
+func neighbours(rs ...*types.MemorySearchResult) func(context.Context, *types.MemoryFilter, []float32, int) ([]*types.MemorySearchResult, error) {
+	return func(context.Context, *types.MemoryFilter, []float32, int) ([]*types.MemorySearchResult, error) {
+		return rs, nil
 	}
 }
 
-func linkerSearchResult(mem *types.AgentMemory) *types.MemorySearchResult {
-	return &types.MemorySearchResult{Memory: mem, Score: 1.0}
+func hit(m *types.AgentMemory, score float64) *types.MemorySearchResult {
+	return &types.MemorySearchResult{Memory: m, Score: score}
+}
+
+type edge struct {
+	from, to, kind string
+}
+
+func edges(repo *mockAutoLinkerRepo) []edge {
+	out := []edge{}
+	for _, r := range repo.relations {
+		out = append(out, edge{r.FromUUID, r.ToUUID, r.RelationType})
+	}
+	return out
 }
 
 // ---------------------------------------------------------------------------
-// Test: Co-tagged memories (>=2 shared tags) linked as related_to
+// Tests
 // ---------------------------------------------------------------------------
 
-func TestAutoLinker_CoTaggedMemoriesLinked(t *testing.T) {
-	candidate := makeLinkerMemory("cand-1", "tenant-1", "Candidate memory",
-		[]string{"tag1", "tag2", "tag4"}, types.VerdictNone)
+func TestAutoLinker_LinksNeighboursAboveThresholdUsingStoredVector(t *testing.T) {
+	m := linkerMemory("new", "kb", types.VerdictNone, 1, 0, 0)
+	repo := &mockAutoLinkerRepo{cosineSearchFunc: neighbours(
+		hit(linkerMemory("new", "kb", types.VerdictNone), 1.0), // self
+		hit(linkerMemory("close", "kb", types.VerdictNone), 0.84),
+		hit(linkerMemory("edge", "kb", types.VerdictNone), DefaultLinkThreshold),
+		hit(linkerMemory("far", "kb", types.VerdictNone), 0.55),
+	)}
+	emb := &mockAutoLinkerEmbedder{}
+	n := NewAutoLinker(repo, emb).LinkMemory(context.Background(), m)
 
-	repo := &mockAutoLinkerRepo{
-		searchFunc: func(ctx context.Context, filter *types.MemoryFilter) ([]*types.MemorySearchResult, int64, error) {
-			assert.Equal(t, "tenant-1", filter.TenantID)
-			return []*types.MemorySearchResult{linkerSearchResult(candidate)}, 1, nil
-		},
-	}
-
-	// Return identical vectors for high cosine similarity
-	embedder := &mockAutoLinkerEmbedder{
-		embedFunc: func(ctx context.Context, text string) ([]float32, error) {
-			return []float32{1.0, 0.0, 0.0}, nil
-		},
-	}
-
-	a := newTestAutoLinker(repo, embedder)
-
-	memory := makeLinkerMemory("mem-1", "tenant-1", "New memory",
-		[]string{"tag1", "tag2", "tag3"}, types.VerdictNone)
-
-	// Should not panic when creating relations
-	a.LinkMemory(context.Background(), memory)
-
-	// Search was called exactly once
-	assert.Equal(t, 1, repo.searchCalls, "Search should be called exactly once")
-	// Embed was called twice (once for new memory, once for candidate)
-	assert.Equal(t, 2, embedder.embedCalls, "Embed should be called for both memories")
+	assert.Equal(t, 2, n)
+	assert.Equal(t, []edge{{"close", "new", "related_to"}, {"edge", "new", "related_to"}}, edges(repo), "related_to stored in canonical (sorted) order")
+	assert.InDelta(t, 0.84, repo.relations[0].Weight, 1e-9, "weight is the similarity")
+	assert.Zero(t, emb.embedCalls, "the stored vector is reused; no model call")
+	assert.Equal(t, []float32{1, 0, 0}, repo.cosineVector)
+	assert.Equal(t, &types.MemoryFilter{TenantID: "tenant-1", KbID: "kb", EmbeddingModelID: "emb-1"}, repo.cosineFilter,
+		"neighbours come from the same tenant, knowledge base and embedding model")
 }
 
-// ---------------------------------------------------------------------------
-// Test: Cosine similarity > 0.65 creates related_to relation
-// ---------------------------------------------------------------------------
+func TestAutoLinker_DecisionJustifiesInBothDirections(t *testing.T) {
+	decision := linkerMemory("decision", "kb", types.VerdictDecision)
+	repo := &mockAutoLinkerRepo{cosineSearchFunc: neighbours(hit(decision, 0.8))}
+	NewAutoLinker(repo, nil).LinkMemory(context.Background(), linkerMemory("note", "kb", types.VerdictNone, 1))
+	assert.Equal(t, []edge{{"decision", "note", "related_to"}, {"decision", "note", "justifies"}}, edges(repo))
 
-func TestAutoLinker_HighCosineSimilarityCreatesRelation(t *testing.T) {
-	candidate := makeLinkerMemory("cand-1", "tenant-1", "Candidate memory",
-		[]string{"tag1", "tag2", "tag4"}, types.VerdictNone)
-
-	repo := &mockAutoLinkerRepo{
-		searchFunc: func(ctx context.Context, filter *types.MemoryFilter) ([]*types.MemorySearchResult, int64, error) {
-			return []*types.MemorySearchResult{linkerSearchResult(candidate)}, 1, nil
-		},
-	}
-
-	embedder := &mockAutoLinkerEmbedder{
-		embedFunc: func(ctx context.Context, text string) ([]float32, error) {
-			return []float32{1.0, 0.0, 0.0}, nil
-		},
-	}
-
-	a := newTestAutoLinker(repo, embedder)
-
-	memory := makeLinkerMemory("mem-1", "tenant-1", "New memory",
-		[]string{"tag1", "tag2", "tag3"}, types.VerdictNone)
-
-	a.LinkMemory(context.Background(), memory)
-
-	// Embed called for both (cosine > 0.65 means relation code path taken)
-	assert.Equal(t, 2, embedder.embedCalls)
+	repo = &mockAutoLinkerRepo{cosineSearchFunc: neighbours(hit(linkerMemory("note", "kb", types.VerdictNone), 0.8))}
+	NewAutoLinker(repo, nil).LinkMemory(context.Background(), linkerMemory("decision", "kb", types.VerdictDecision, 1))
+	assert.Equal(t, []edge{{"decision", "note", "related_to"}, {"decision", "note", "justifies"}}, edges(repo))
 }
 
-func TestAutoLinker_LowCosineSimilarityNoRelation(t *testing.T) {
-	candidate := makeLinkerMemory("cand-1", "tenant-1", "Candidate memory",
-		[]string{"tag1", "tag2", "tag4"}, types.VerdictNone)
-
-	repo := &mockAutoLinkerRepo{
-		searchFunc: func(ctx context.Context, filter *types.MemoryFilter) ([]*types.MemorySearchResult, int64, error) {
-			return []*types.MemorySearchResult{linkerSearchResult(candidate)}, 1, nil
-		},
-	}
-
-	// Return orthogonal vectors — cosine similarity = 0
-	embedder := &mockAutoLinkerEmbedder{
-		embedFunc: func(ctx context.Context, text string) ([]float32, error) {
-			if text == "New memory" {
-				return []float32{1.0, 0.0, 0.0}, nil
-			}
-			return []float32{0.0, 1.0, 0.0}, nil
-		},
-	}
-
-	a := newTestAutoLinker(repo, embedder)
-
-	memory := makeLinkerMemory("mem-1", "tenant-1", "New memory",
-		[]string{"tag1", "tag2", "tag3"}, types.VerdictNone)
-
-	a.LinkMemory(context.Background(), memory)
-
-	assert.Equal(t, 2, embedder.embedCalls, "Embed should still be called for both")
-	// Relations are not stored explicitly (assigned to _), so we verify no panic
+func TestAutoLinker_RelatedToIsSymmetric(t *testing.T) {
+	ab := &mockAutoLinkerRepo{cosineSearchFunc: neighbours(hit(linkerMemory("b", "kb", types.VerdictNone), 0.9))}
+	NewAutoLinker(ab, nil).LinkMemory(context.Background(), linkerMemory("a", "kb", types.VerdictNone, 1))
+	ba := &mockAutoLinkerRepo{cosineSearchFunc: neighbours(hit(linkerMemory("a", "kb", types.VerdictNone), 0.9))}
+	NewAutoLinker(ba, nil).LinkMemory(context.Background(), linkerMemory("b", "kb", types.VerdictNone, 1))
+	assert.Equal(t, edges(ab), edges(ba), "linking from either side yields the same edge")
 }
 
-func TestAutoLinker_ZeroVectorCosineSimilarity(t *testing.T) {
-	candidate := makeLinkerMemory("cand-1", "tenant-1", "Candidate memory",
-		[]string{"tag1", "tag2", "tag4"}, types.VerdictNone)
+func TestAutoLinker_NeverCrossesTenantOrKnowledgeBase(t *testing.T) {
+	other := linkerMemory("other-kb", "kb-2", types.VerdictNone)
+	foreign := linkerMemory("other-tenant", "kb", types.VerdictNone)
+	foreign.TenantID = "tenant-2"
+	repo := &mockAutoLinkerRepo{cosineSearchFunc: neighbours(hit(other, 0.99), hit(foreign, 0.99))}
 
-	repo := &mockAutoLinkerRepo{
-		searchFunc: func(ctx context.Context, filter *types.MemoryFilter) ([]*types.MemorySearchResult, int64, error) {
-			return []*types.MemorySearchResult{linkerSearchResult(candidate)}, 1, nil
-		},
-	}
-
-	// Return zero vectors — cosine similarity = 0
-	embedder := &mockAutoLinkerEmbedder{
-		embedFunc: func(ctx context.Context, text string) ([]float32, error) {
-			return []float32{0.0, 0.0, 0.0}, nil
-		},
-	}
-
-	a := newTestAutoLinker(repo, embedder)
-
-	memory := makeLinkerMemory("mem-1", "tenant-1", "New memory",
-		[]string{"tag1", "tag2", "tag3"}, types.VerdictNone)
-
-	a.LinkMemory(context.Background(), memory)
-
-	assert.Equal(t, 2, embedder.embedCalls)
+	assert.Zero(t, NewAutoLinker(repo, nil).LinkMemory(context.Background(), linkerMemory("m", "kb", types.VerdictNone, 1)))
+	assert.Empty(t, repo.relations)
 }
 
-// ---------------------------------------------------------------------------
-// Test: Decision type memory creates justifies relation
-// ---------------------------------------------------------------------------
+func TestAutoLinker_EmbedsOnlyWhenNoStoredVector(t *testing.T) {
+	repo := &mockAutoLinkerRepo{cosineSearchFunc: neighbours(hit(linkerMemory("n", "kb", types.VerdictNone), 0.9))}
+	emb := &mockAutoLinkerEmbedder{}
+	m := linkerMemory("m", "kb", types.VerdictNone) // zero-length vector
 
-func TestAutoLinker_DecisionMemoryCreatesJustifiesRelation(t *testing.T) {
-	// Candidate has VerdictDecision — should create both related_to and justifies
-	candidate := makeLinkerMemory("cand-1", "tenant-1", "Decision candidate",
-		[]string{"tag1", "tag2", "tag4"}, types.VerdictDecision)
+	NewAutoLinker(repo, emb).LinkMemory(context.Background(), m)
 
-	repo := &mockAutoLinkerRepo{
-		searchFunc: func(ctx context.Context, filter *types.MemoryFilter) ([]*types.MemorySearchResult, int64, error) {
-			return []*types.MemorySearchResult{linkerSearchResult(candidate)}, 1, nil
-		},
-	}
-
-	embedder := &mockAutoLinkerEmbedder{
-		embedFunc: func(ctx context.Context, text string) ([]float32, error) {
-			return []float32{1.0, 0.0, 0.0}, nil
-		},
-	}
-
-	a := newTestAutoLinker(repo, embedder)
-
-	memory := makeLinkerMemory("mem-1", "tenant-1", "New memory",
-		[]string{"tag1", "tag2", "tag3"}, types.VerdictNone)
-
-	a.LinkMemory(context.Background(), memory)
-
-	// Both memories should be embedded
-	assert.Equal(t, 2, embedder.embedCalls)
+	assert.Equal(t, 1, emb.embedCalls)
+	assert.Equal(t, []float32{0.1, 0.2, 0.3}, repo.cosineVector)
+	assert.Len(t, repo.relations, 1)
 }
 
-func TestAutoLinker_DecisionCandidateContentBased(t *testing.T) {
-	candidate := makeLinkerMemory("cand-1", "tenant-1", "Important decision about project",
-		[]string{"project", "decision", "tech"}, types.VerdictDecision)
+func TestAutoLinker_FailuresNeverPanic(t *testing.T) {
+	ctx := context.Background()
+	assert.Zero(t, NewAutoLinker(&mockAutoLinkerRepo{}, nil).LinkMemory(ctx, nil))
+	assert.Zero(t, NewAutoLinker(&mockAutoLinkerRepo{}, nil).LinkMemory(ctx, &types.AgentMemory{TenantID: "t"}))
+	assert.Zero(t, NewAutoLinker(&mockAutoLinkerRepo{}, nil).LinkMemory(ctx, linkerMemory("m", "kb", types.VerdictNone)),
+		"no stored vector and no embedder")
 
-	repo := &mockAutoLinkerRepo{
-		searchFunc: func(ctx context.Context, filter *types.MemoryFilter) ([]*types.MemorySearchResult, int64, error) {
-			return []*types.MemorySearchResult{linkerSearchResult(candidate)}, 1, nil
-		},
-	}
+	searchErr := &mockAutoLinkerRepo{cosineSearchFunc: func(context.Context, *types.MemoryFilter, []float32, int) ([]*types.MemorySearchResult, error) {
+		return nil, assert.AnError
+	}}
+	assert.Zero(t, NewAutoLinker(searchErr, nil).LinkMemory(ctx, linkerMemory("m", "kb", types.VerdictNone, 1)))
 
-	embedder := &mockAutoLinkerEmbedder{
-		embedFunc: func(ctx context.Context, text string) ([]float32, error) {
-			return []float32{1.0, 0.0, 0.0}, nil
-		},
-	}
+	embErr := &mockAutoLinkerEmbedder{embedFunc: func(context.Context, string) ([]float32, error) { return nil, assert.AnError }}
+	assert.Zero(t, NewAutoLinker(&mockAutoLinkerRepo{}, embErr).LinkMemory(ctx, linkerMemory("m", "kb", types.VerdictNone)))
 
-	a := newTestAutoLinker(repo, embedder)
-
-	memory := makeLinkerMemory("mem-1", "tenant-1", "Related work on project",
-		[]string{"project", "tech", "work"}, types.VerdictNone)
-
-	a.LinkMemory(context.Background(), memory)
-
-	assert.Equal(t, 2, embedder.embedCalls)
+	relErr := &mockAutoLinkerRepo{relationErr: assert.AnError, cosineSearchFunc: neighbours(hit(linkerMemory("n", "kb", types.VerdictNone), 0.9))}
+	assert.Zero(t, NewAutoLinker(relErr, nil).LinkMemory(ctx, linkerMemory("m", "kb", types.VerdictNone, 1)))
 }
 
-// ---------------------------------------------------------------------------
-// Test: No tags -> no auto-linking
-// ---------------------------------------------------------------------------
-
-func TestAutoLinker_NoTagsNoLinking(t *testing.T) {
-	repo := &mockAutoLinkerRepo{}
-	embedder := &mockAutoLinkerEmbedder{}
-
-	a := newTestAutoLinker(repo, embedder)
-
-	memory := makeLinkerMemory("mem-1", "tenant-1", "No tags memory",
-		nil, types.VerdictNone)
-
-	a.LinkMemory(context.Background(), memory)
-
-	// No search needed when there are no tags
-	assert.Equal(t, 0, repo.searchCalls, "Search should not be called with no tags")
-	// Embedder is still called (for the memory itself) but loop over empty candidates
-	assert.Equal(t, 1, embedder.embedCalls, "Embed should be called once for the memory embedding")
+func TestAutoLinker_CustomThreshold(t *testing.T) {
+	repo := &mockAutoLinkerRepo{cosineSearchFunc: neighbours(hit(linkerMemory("n", "kb", types.VerdictNone), 0.7))}
+	assert.Zero(t, NewAutoLinker(repo, nil).WithThreshold(0.8).LinkMemory(context.Background(), linkerMemory("m", "kb", types.VerdictNone, 1)))
 }
-
-func TestAutoLinker_EmptyTagsSliceNoLinking(t *testing.T) {
-	repo := &mockAutoLinkerRepo{}
-	embedder := &mockAutoLinkerEmbedder{}
-
-	a := newTestAutoLinker(repo, embedder)
-
-	memory := makeLinkerMemory("mem-1", "tenant-1", "Empty tags memory",
-		[]string{}, types.VerdictNone)
-
-	a.LinkMemory(context.Background(), memory)
-
-	assert.Equal(t, 0, repo.searchCalls)
-	assert.Equal(t, 1, embedder.embedCalls)
-}
-
-// ---------------------------------------------------------------------------
-// Test: Single tag -> no co-tagged linking
-// ---------------------------------------------------------------------------
-
-func TestAutoLinker_SingleTagNoLinking(t *testing.T) {
-	repo := &mockAutoLinkerRepo{}
-	embedder := &mockAutoLinkerEmbedder{}
-
-	a := newTestAutoLinker(repo, embedder)
-
-	memory := makeLinkerMemory("mem-1", "tenant-1", "Single tag memory",
-		[]string{"tag1"}, types.VerdictNone)
-
-	a.LinkMemory(context.Background(), memory)
-
-	// findTagOverlapMemories checks len(Tags) < 2 -> returns nil, nil
-	assert.Equal(t, 0, repo.searchCalls, "Search should not be called with only 1 tag")
-	// Embedder is still called
-	assert.Equal(t, 1, embedder.embedCalls)
-}
-
-// ---------------------------------------------------------------------------
-// Test: Context cancellation
-// ---------------------------------------------------------------------------
-
-func TestAutoLinker_ContextCancellation(t *testing.T) {
-	repo := &mockAutoLinkerRepo{
-		searchFunc: func(ctx context.Context, filter *types.MemoryFilter) ([]*types.MemorySearchResult, int64, error) {
-			// Wait for context cancellation
-			<-ctx.Done()
-			return nil, 0, ctx.Err()
-		},
-	}
-	embedder := &mockAutoLinkerEmbedder{}
-
-	a := newTestAutoLinker(repo, embedder)
-
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel() // Pre-cancel
-
-	memory := makeLinkerMemory("mem-1", "tenant-1", "Cancelled memory",
-		[]string{"tag1", "tag2"}, types.VerdictNone)
-
-	// Should not panic with cancelled context
-	a.LinkMemory(ctx, memory)
-}
-
-func TestAutoLinker_ContextCancellationDuringEmbed(t *testing.T) {
-	candidate := makeLinkerMemory("cand-1", "tenant-1", "Candidate",
-		[]string{"tag1", "tag2", "tag4"}, types.VerdictNone)
-
-	repo := &mockAutoLinkerRepo{
-		searchFunc: func(ctx context.Context, filter *types.MemoryFilter) ([]*types.MemorySearchResult, int64, error) {
-			return []*types.MemorySearchResult{linkerSearchResult(candidate)}, 1, nil
-		},
-	}
-
-	embedder := &mockAutoLinkerEmbedder{
-		embedFunc: func(ctx context.Context, text string) ([]float32, error) {
-			return nil, context.Canceled
-		},
-	}
-
-	a := newTestAutoLinker(repo, embedder)
-
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	memory := makeLinkerMemory("mem-1", "tenant-1", "New memory",
-		[]string{"tag1", "tag2", "tag3"}, types.VerdictNone)
-
-	// Embed error for the new memory's embedding — should not panic
-	a.LinkMemory(ctx, memory)
-
-	// Embed was attempted
-	assert.Equal(t, 1, embedder.embedCalls)
-}
-
-// ---------------------------------------------------------------------------
-// Test: Error resilience
-// ---------------------------------------------------------------------------
-
-func TestAutoLinker_SearchErrorHandledGracefully(t *testing.T) {
-	repo := &mockAutoLinkerRepo{
-		searchFunc: func(ctx context.Context, filter *types.MemoryFilter) ([]*types.MemorySearchResult, int64, error) {
-			return nil, 0, assert.AnError
-		},
-	}
-	embedder := &mockAutoLinkerEmbedder{}
-
-	a := newTestAutoLinker(repo, embedder)
-
-	memory := makeLinkerMemory("mem-1", "tenant-1", "Memory with tags",
-		[]string{"tag1", "tag2", "tag3"}, types.VerdictNone)
-
-	// LinkMemory logs the error and returns — no embed call because
-	// findTagOverlapMemories fails, so code returns early
-	a.LinkMemory(context.Background(), memory)
-
-	assert.Equal(t, 1, repo.searchCalls, "Search should have been attempted")
-	// When findTagOverlapMemories errors, LinkMemory returns early, so embedder is NOT called
-	assert.Equal(t, 0, embedder.embedCalls, "Embed should not be called when search fails")
-}
-
-func TestAutoLinker_EmbedErrorHandledGracefully(t *testing.T) {
-	candidate := makeLinkerMemory("cand-1", "tenant-1", "Candidate",
-		[]string{"tag1", "tag2", "tag4"}, types.VerdictNone)
-
-	repo := &mockAutoLinkerRepo{
-		searchFunc: func(ctx context.Context, filter *types.MemoryFilter) ([]*types.MemorySearchResult, int64, error) {
-			return []*types.MemorySearchResult{linkerSearchResult(candidate)}, 1, nil
-		},
-	}
-
-	embedder := &mockAutoLinkerEmbedder{
-		embedFunc: func(ctx context.Context, text string) ([]float32, error) {
-			return nil, assert.AnError
-		},
-	}
-
-	a := newTestAutoLinker(repo, embedder)
-
-	memory := makeLinkerMemory("mem-1", "tenant-1", "New memory",
-		[]string{"tag1", "tag2", "tag3"}, types.VerdictNone)
-
-	// Embed error should be logged and LinkMemory returns gracefully
-	a.LinkMemory(context.Background(), memory)
-
-	assert.Equal(t, 1, repo.searchCalls)
-	assert.Equal(t, 1, embedder.embedCalls, "Embed should be attempted for the new memory")
-}
-
-func TestAutoLinker_CandidateEmbedErrorContinues(t *testing.T) {
-	candidate := makeLinkerMemory("cand-1", "tenant-1", "Candidate",
-		[]string{"tag1", "tag2", "tag4"}, types.VerdictNone)
-
-	candidate2 := makeLinkerMemory("cand-2", "tenant-1", "Candidate 2",
-		[]string{"tag1", "tag2", "tag5"}, types.VerdictNone)
-
-	callCount := 0
-	repo := &mockAutoLinkerRepo{
-		searchFunc: func(ctx context.Context, filter *types.MemoryFilter) ([]*types.MemorySearchResult, int64, error) {
-			return []*types.MemorySearchResult{
-				linkerSearchResult(candidate),
-				linkerSearchResult(candidate2),
-			}, 2, nil
-		},
-	}
-
-	embedder := &mockAutoLinkerEmbedder{
-		embedFunc: func(ctx context.Context, text string) ([]float32, error) {
-			callCount++
-			if callCount == 2 {
-				// First candidate embed fails
-				return nil, assert.AnError
-			}
-			return []float32{1.0, 0.0, 0.0}, nil
-		},
-	}
-
-	a := newTestAutoLinker(repo, embedder)
-
-	memory := makeLinkerMemory("mem-1", "tenant-1", "New memory",
-		[]string{"tag1", "tag2", "tag3"}, types.VerdictNone)
-
-	// Should handle candidate embed error by continuing to next candidate
-	a.LinkMemory(context.Background(), memory)
-
-	// Embed called: 1 for new memory + 1 for cand-1 + 1 for cand-2 = 3 calls
-	assert.Equal(t, 3, callCount, "All embed calls should be attempted")
-}
-
-// ---------------------------------------------------------------------------
-// Test: Nil memory and empty ID
-// ---------------------------------------------------------------------------
-
-func TestAutoLinker_NilMemoryNoOp(t *testing.T) {
-	repo := &mockAutoLinkerRepo{}
-	embedder := &mockAutoLinkerEmbedder{}
-
-	a := newTestAutoLinker(repo, embedder)
-
-	// Should not panic with nil memory
-	a.LinkMemory(context.Background(), nil)
-
-	assert.Equal(t, 0, repo.searchCalls)
-	assert.Equal(t, 0, embedder.embedCalls)
-}
-
-func TestAutoLinker_EmptyIDNoOp(t *testing.T) {
-	repo := &mockAutoLinkerRepo{}
-	embedder := &mockAutoLinkerEmbedder{}
-
-	a := newTestAutoLinker(repo, embedder)
-
-	memory := makeLinkerMemory("", "tenant-1", "No ID memory",
-		[]string{"tag1", "tag2"}, types.VerdictNone)
-
-	// Should not panic with empty ID
-	a.LinkMemory(context.Background(), memory)
-
-	assert.Equal(t, 0, repo.searchCalls)
-	assert.Equal(t, 0, embedder.embedCalls)
-}
-
-// ---------------------------------------------------------------------------
-// Test: Self-match is skipped (same ID)
-// ---------------------------------------------------------------------------
-
-func TestAutoLinker_SelfMatchSkipped(t *testing.T) {
-	memory := makeLinkerMemory("mem-1", "tenant-1", "Self memory",
-		[]string{"tag1", "tag2", "tag3"}, types.VerdictNone)
-
-	repo := &mockAutoLinkerRepo{
-		searchFunc: func(ctx context.Context, filter *types.MemoryFilter) ([]*types.MemorySearchResult, int64, error) {
-			// Results include the same memory (self-match scenario)
-			return []*types.MemorySearchResult{linkerSearchResult(memory)}, 1, nil
-		},
-	}
-
-	embedder := &mockAutoLinkerEmbedder{
-		embedFunc: func(ctx context.Context, text string) ([]float32, error) {
-			return []float32{1.0, 0.0, 0.0}, nil
-		},
-	}
-
-	a := newTestAutoLinker(repo, embedder)
-
-	// The candidate with the same ID should be skipped (candidate.ID == memory.ID)
-	a.LinkMemory(context.Background(), memory)
-
-	assert.Equal(t, 1, repo.searchCalls)
-	assert.Equal(t, 1, embedder.embedCalls, "Only the new memory should be embedded (candidate skipped)")
-}
-
-// ---------------------------------------------------------------------------
-// Test: countSharedTags helper
-// ---------------------------------------------------------------------------
-
-func TestCountSharedTags(t *testing.T) {
-	tests := []struct {
-		name string
-		a    []string
-		b    []string
-		want int
-	}{
-		{"three shared", []string{"tag1", "tag2", "tag3"}, []string{"tag1", "tag2", "tag4"}, 2},
-		{"all shared", []string{"a", "b", "c"}, []string{"a", "b", "c"}, 3},
-		{"none shared", []string{"a", "b"}, []string{"c", "d"}, 0},
-		{"first empty", []string{}, []string{"a", "b"}, 0},
-		{"second empty", []string{"a", "b"}, []string{}, 0},
-		{"both empty", []string{}, []string{}, 0},
-		{"duplicates in first", []string{"a", "a", "b"}, []string{"a", "c"}, 1},
-		{"duplicates in second", []string{"a", "b"}, []string{"a", "a", "c"}, 2},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := countSharedTags(tt.a, tt.b)
-			assert.Equal(t, tt.want, got)
-		})
-	}
-}
-
-// ---------------------------------------------------------------------------
-// Test: cosineSimilarity helper
-// ---------------------------------------------------------------------------
 
 func TestCosineSimilarity(t *testing.T) {
-	tests := []struct {
-		name string
-		a    []float32
-		b    []float32
-		want float64
-	}{
-		{"identical", []float32{1.0, 0.0, 0.0}, []float32{1.0, 0.0, 0.0}, 1.0},
-		{"orthogonal", []float32{1.0, 0.0, 0.0}, []float32{0.0, 1.0, 0.0}, 0.0},
-		{"opposite", []float32{1.0, 0.0}, []float32{-1.0, 0.0}, -1.0},
-		{"partial match", []float32{1.0, 1.0, 0.0}, []float32{1.0, 0.0, 0.0}, 1.0 / math.Sqrt2},
-		{"different lengths", []float32{1.0, 0.0}, []float32{1.0, 0.0, 0.0}, 0.0},
-		{"empty vectors", []float32{}, []float32{}, 0.0},
-		{"zero vector a", []float32{0.0, 0.0}, []float32{1.0, 0.0}, 0.0},
-		{"zero vector b", []float32{1.0, 0.0}, []float32{0.0, 0.0}, 0.0},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := cosineSimilarity(tt.a, tt.b)
-			assert.InDelta(t, tt.want, got, 1e-6)
-		})
-	}
-}
-
-func TestCosineSimilarity_ThresholdBoundary(t *testing.T) {
-	// Exactly at the 0.65 threshold — since > 0.65, NOT >= 0.65
-	// We need a value just below 0.65 to test the boundary
-
-	// angle = arccos(0.65) ≈ 49.46 degrees
-	// We want a similarity just below and just above 0.65.
-	// For similarity s: a=[1,0], b=[s, sin(arccos(s))]
-	// But to test the boundary precisely, use:
-	//   a = [1, 0, 0]
-	//   b_below = [0.649, sqrt(1 - 0.649^2), 0]  → similarity = 0.649
-	//   b_above = [0.651, sqrt(1 - 0.651^2), 0]  → similarity = 0.651
-
-	base := []float32{1.0, 0.0, 0.0}
-
-	// For similarity = 0.649: a and b must be unit vectors with dot product 0.649
-	sBelow := 0.649
-	bBelow := []float32{float32(sBelow), float32(math.Sqrt(1 - sBelow*sBelow)), 0}
-	simBelow := cosineSimilarity(base, bBelow)
-
-	sAbove := 0.651
-	bAbove := []float32{float32(sAbove), float32(math.Sqrt(1 - sAbove*sAbove)), 0}
-	simAbove := cosineSimilarity(base, bAbove)
-
-	assert.InDelta(t, sBelow, simBelow, 1e-4, "similarity should be ~0.649")
-	assert.InDelta(t, sAbove, simAbove, 1e-4, "similarity should be ~0.651")
-
-	// The boundary is > 0.65, not >=
-	assert.False(t, simBelow > 0.65, "0.649 should NOT trigger relation")
-	assert.True(t, simAbove > 0.65, "0.651 should trigger relation")
-}
-
-// ---------------------------------------------------------------------------
-// Test: sqrt helper
-// ---------------------------------------------------------------------------
-
-func TestSqrt(t *testing.T) {
-	tests := []struct {
-		name string
-		x    float64
-		want float64
-	}{
-		{"zero", 0, 0},
-		{"one", 1, 1},
-		{"four", 4, 2},
-		{"nine", 9, 3},
-		{"two", 2, math.Sqrt2},
-		{"negative", -1, 0},
-		{"large", 10000, 100},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := sqrt(tt.x)
-			assert.InDelta(t, tt.want, got, 1e-4)
-		})
-	}
-}
-
-// ---------------------------------------------------------------------------
-// Test: findTagOverlapMemories with < 2 tags returns nil
-// ---------------------------------------------------------------------------
-
-func TestFindTagOverlapMemories_LessThanTwoTags(t *testing.T) {
-	repo := &mockAutoLinkerRepo{}
-	embedder := &mockAutoLinkerEmbedder{}
-	a := newTestAutoLinker(repo, embedder)
-
-	// 0 tags
-	mem0 := makeLinkerMemory("mem-1", "tenant-1", "No tags", nil, types.VerdictNone)
-	candidates, err := a.findTagOverlapMemories(context.Background(), mem0)
-	require.NoError(t, err)
-	assert.Nil(t, candidates)
-	assert.Equal(t, 0, repo.searchCalls)
-
-	// 1 tag
-	mem1 := makeLinkerMemory("mem-2", "tenant-1", "One tag", []string{"tag1"}, types.VerdictNone)
-	candidates, err = a.findTagOverlapMemories(context.Background(), mem1)
-	require.NoError(t, err)
-	assert.Nil(t, candidates)
-	assert.Equal(t, 0, repo.searchCalls)
-}
-
-// ---------------------------------------------------------------------------
-// Test: Different tenants not cross-linked
-// ---------------------------------------------------------------------------
-
-func TestFindTagOverlapMemoriesScopesSearchToKnowledgeBase(t *testing.T) {
-	var got *types.MemoryFilter
-	repo := &mockAutoLinkerRepo{searchFunc: func(_ context.Context, filter *types.MemoryFilter) ([]*types.MemorySearchResult, int64, error) {
-		copy := *filter
-		got = &copy
-		return nil, 0, nil
-	}}
-	a := newTestAutoLinker(repo, &mockAutoLinkerEmbedder{})
-	memory := makeLinkerMemory("mem-1", "tenant-1", "Memory", []string{"tag1", "tag2"}, types.VerdictNone)
-	memory.KbID = "kb-1"
-
-	_, err := a.findTagOverlapMemories(context.Background(), memory)
-
-	require.NoError(t, err)
-	require.NotNil(t, got)
-	assert.Equal(t, "tenant-1", got.TenantID)
-	assert.Equal(t, "kb-1", got.KbID)
-}
-
-func TestAutoLinker_DifferentTenantsNotLinked(t *testing.T) {
-	candidate := makeLinkerMemory("cand-1", "tenant-2", "Candidate in other tenant",
-		[]string{"tag1", "tag2", "tag4"}, types.VerdictNone)
-
-	repo := &mockAutoLinkerRepo{
-		searchFunc: func(ctx context.Context, filter *types.MemoryFilter) ([]*types.MemorySearchResult, int64, error) {
-			// Simulate cross-tenant data by returning different tenant
-			return []*types.MemorySearchResult{linkerSearchResult(candidate)}, 1, nil
-		},
-	}
-
-	embedder := &mockAutoLinkerEmbedder{
-		embedFunc: func(ctx context.Context, text string) ([]float32, error) {
-			return []float32{1.0, 0.0, 0.0}, nil
-		},
-	}
-
-	a := newTestAutoLinker(repo, embedder)
-
-	memory := makeLinkerMemory("mem-1", "tenant-1", "New memory",
-		[]string{"tag1", "tag2", "tag3"}, types.VerdictNone)
-
-	// findTagOverlapMemories filters by TenantID, so this should still
-	// find the candidate if search returns it (since the filtering is
-	// done by countSharedTags, not explicitly by tenant in the current code).
-	// The current code doesn't explicitly filter by tenant in the Go code;
-	// it relies on the repo search to return tenant-filtered results.
-	// But searchFunc is mocked to return cross-tenant data regardless.
-	// countSharedTags checks tag overlap, not tenant. But the tags
-	// overlap so the candidate will be found and considered.
-	// The relation creation doesn't enforce tenant check in the current code.
-	// That's fine — this test just verifies no panic.
-	a.LinkMemory(context.Background(), memory)
-
-	assert.Equal(t, 1, repo.searchCalls)
-	assert.Equal(t, 2, embedder.embedCalls)
+	assert.InDelta(t, 1.0, cosineSimilarity([]float32{1, 2}, []float32{2, 4}), 1e-9)
+	assert.InDelta(t, 0.0, cosineSimilarity([]float32{1, 0}, []float32{0, 1}), 1e-9)
+	assert.Zero(t, cosineSimilarity([]float32{0, 0}, []float32{1, 1}))
+	assert.Zero(t, cosineSimilarity([]float32{1}, []float32{1, 2}))
 }

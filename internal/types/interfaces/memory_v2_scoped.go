@@ -33,3 +33,11 @@ type ScopedMemoryV2Service interface {
 	Graph(ctx context.Context, scope MemoryV2Scope, memoryID string, limit int) (*MemoryV2Graph, error)
 	Status(ctx context.Context, tenantID string) types.MemoryStatusResponse
 }
+
+// MemoryV2GraphExplorer is an optional capability of ScopedMemoryV2Service
+// that walks the relation graph several hops deep, or returns a knowledge
+// base overview (its most connected memories and the edges between them).
+type MemoryV2GraphExplorer interface {
+	GraphDepth(ctx context.Context, scope MemoryV2Scope, memoryID string, depth, limit int) (*MemoryV2Graph, error)
+	Overview(ctx context.Context, scope MemoryV2Scope, limit int) (*MemoryV2Graph, error)
+}

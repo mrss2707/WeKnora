@@ -163,6 +163,7 @@ func memoryGraphTool() mcp.Tool {
 		mcp.WithDescription("Return the persisted relation graph centered on one memory, bounded to one authorized knowledge base."),
 		mcp.WithString("knowledge_base_id", mcp.Required(), mcp.Description("Knowledge base id or exact name")),
 		mcp.WithString("memory_id", mcp.Required(), mcp.Description("Focal memory id")),
+		mcp.WithNumber("depth", mcp.Description("Hops to follow from the focal memory, default 1, range 1..3"), mcp.Min(1), mcp.Max(3)),
 		mcp.WithOutputSchema[memoryGraphOutput](),
 		mcp.WithTitleAnnotation("Memory Graph"),
 		mcp.WithReadOnlyHintAnnotation(true),
@@ -268,7 +269,17 @@ func (r *memoryV2ToolRegistrar) handleGraph(ctx context.Context, req mcp.CallToo
 	if memoryID == "" {
 		return mcp.NewToolResultError("memory_id is required"), nil
 	}
-	graph, err := r.memory.Graph(scoped, memoryScope(kb), memoryID, 100)
+	depth := req.GetInt("depth", 1)
+	if depth < 1 || depth > 3 {
+		return mcp.NewToolResultError("depth must be in 1..3"), nil
+	}
+	var graph *interfaces.MemoryV2Graph
+	var err error
+	if explorer, ok := r.memory.(interfaces.MemoryV2GraphExplorer); ok {
+		graph, err = explorer.GraphDepth(scoped, memoryScope(kb), memoryID, depth, 100)
+	} else {
+		graph, err = r.memory.Graph(scoped, memoryScope(kb), memoryID, 100)
+	}
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}

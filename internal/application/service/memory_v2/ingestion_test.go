@@ -32,6 +32,8 @@ type ingestionRepo struct {
 	lastCosineFilter *types.MemoryFilter
 	lastCosineLimit  int
 	lastCosineVector []float32
+	cosineFilters    []types.MemoryFilter
+	cosineLimits     []int
 }
 
 var _ interfaces.MemoryRepositoryV2 = (*ingestionRepo)(nil)
@@ -104,6 +106,8 @@ func (r *ingestionRepo) CosineSearch(ctx context.Context, filter *types.MemoryFi
 	r.cosineCalls++
 	r.lastCosineFilter = filter
 	r.lastCosineLimit = limit
+	r.cosineFilters = append(r.cosineFilters, *filter)
+	r.cosineLimits = append(r.cosineLimits, limit)
 	r.lastCosineVector = append([]float32(nil), embedding...)
 	if r.cosineErr != nil {
 		return nil, r.cosineErr
@@ -476,7 +480,7 @@ func TestSaveMemoryUniqueMemoryPopulatesDerivedFieldsAndStores(t *testing.T) {
 	assert.True(t, result.Created)
 	assert.Same(t, memory, result.Memory)
 	assert.Equal(t, 1, repo.createCalls)
-	assert.Equal(t, 1, repo.cosineCalls)
+	assert.Equal(t, 2, repo.cosineCalls, "one dedup search, one auto-link neighbour search")
 	assert.Equal(t, "decision", memory.MemoryType)
 	assert.Contains(t, memory.Tags, "decision")
 	assert.Contains(t, memory.Tags, "critical")
@@ -487,9 +491,11 @@ func TestSaveMemoryUniqueMemoryPopulatesDerivedFieldsAndStores(t *testing.T) {
 	assert.Equal(t, computeScopedFingerprint(memory.TenantID, memory.KbID, memory.Content), *memory.Fingerprint)
 	assert.False(t, memory.CreatedAt.IsZero())
 	assert.False(t, memory.UpdatedAt.IsZero())
-	assert.Equal(t, "tenant-1", repo.lastCosineFilter.TenantID)
-	assert.Equal(t, "kb-1", repo.lastCosineFilter.KbID)
-	assert.Equal(t, 3, repo.lastCosineLimit)
+	for _, f := range repo.cosineFilters {
+		assert.Equal(t, "tenant-1", f.TenantID)
+		assert.Equal(t, "kb-1", f.KbID)
+	}
+	assert.Equal(t, 3, repo.cosineLimits[0], "dedup checks MaxMerges candidates")
 	assert.Contains(t, repo.memories, memory.ID)
 }
 

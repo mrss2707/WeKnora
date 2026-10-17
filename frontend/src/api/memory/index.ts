@@ -139,19 +139,26 @@ export interface GraphNode {
   verdict: MemoryVerdict
   hub_score: number
   is_stale?: boolean
+  /** True for the memory the graph is centred on. */
+  focal?: boolean
 }
 
+/** Relation kinds the backend creates. */
+export type MemoryRelationType = 'related_to' | 'justifies' | 'contradicts'
+
 export interface GraphEdge {
+  id?: string
   source: string
   target: string
-  relation?: string
-  relation_type: string
+  relation_type: MemoryRelationType | string
   weight: number
 }
 
 export interface GraphData {
   nodes: GraphNode[]
   edges: GraphEdge[]
+  /** True when node/edge limits cut the graph short. */
+  truncated?: boolean
 }
 
 // -------------------------------------------------------------------------
@@ -387,13 +394,24 @@ export function searchMemories(params: {
   return get<{ data: MemorySearchResult[] }>(`/api/v1/memories/search?${query.toString()}`)
 }
 
-/** Get the memory graph centred on a specific memory. */
-export function getMemoryGraph(id: string, params?: { kb_id?: string; deep?: boolean }) {
+/** Get the memory graph centred on a specific memory, `depth` hops deep (1..3). */
+export function getMemoryGraph(id: string, params?: { depth?: number; limit?: number }) {
   const query = new URLSearchParams()
-  if (params?.kb_id) query.set('kb_id', params.kb_id)
-  if (params?.deep != null) query.set('deep', String(params.deep))
+  if (params?.depth) query.set('depth', String(params.depth))
+  if (params?.limit) query.set('limit', String(params.limit))
   const qs = query.toString()
-  return get<{ data: GraphData }>(`/api/v1/memories/graph/${id}${qs ? '?' + qs : ''}`)
+  return get<{ data: GraphData }>(`/api/v1/memories/graph/${encodeURIComponent(id)}${qs ? '?' + qs : ''}`)
+}
+
+/** Get a knowledge base's graph overview: its most connected memories and their relations. */
+export function getMemoryGraphOverview(kbId: string, limit = 100) {
+  const query = new URLSearchParams({ kb_id: kbId, limit: String(limit) })
+  return get<{ data: GraphData }>(`/api/v1/memories/graph?${query.toString()}`)
+}
+
+/** Rebuild a knowledge base's automatic relations (Admin). */
+export function relinkMemories(kbId: string) {
+  return post<{ data: { memories: number; relations: number } }>('/api/v1/memories/relink', { kb_id: kbId })
 }
 
 /** Get memory statistics for a knowledge base. */

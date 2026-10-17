@@ -2,6 +2,7 @@ import { defineStore } from 'pinia'
 import {
   listMemories,
   getMemoryGraph,
+  getMemoryGraphOverview,
   getMemoryStats,
   getHealthReport,
   triggerDream,
@@ -173,12 +174,17 @@ export const useMemoryStore = defineStore('memory', {
       }
     },
 
-    async loadGraph(kbId: string, memoryId?: string) {
+    /**
+     * Load the graph: the knowledge base overview, or — with a memory id — the
+     * neighbourhood of that memory `depth` hops deep. Independent of the Browse list.
+     */
+    async loadGraph(kbId: string, memoryId?: string, depth = 1) {
+      if (!kbId && !memoryId) return
       this.graphLoading = true
       try {
-        const id = memoryId || (this.memories.length > 0 ? this.memories[0].id : '')
-        if (!id) return
-        const resp = await getMemoryGraph(id, { kb_id: kbId, deep: false })
+        const resp = memoryId
+          ? await getMemoryGraph(memoryId, { depth })
+          : await getMemoryGraphOverview(kbId)
         this.graphData = resp.data ?? null
       } finally {
         this.graphLoading = false

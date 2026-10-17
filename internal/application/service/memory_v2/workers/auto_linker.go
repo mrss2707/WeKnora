@@ -2,6 +2,8 @@ package workers
 
 import (
 	"context"
+	"encoding/json"
+	"math"
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/logger"
@@ -10,12 +12,33 @@ import (
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 )
 
-// AutoLinker creates relations between memories based on tag overlap and semantic similarity.
-// With a resolver it embeds with the memory's own knowledge base model.
+// Auto-link calibration (bge-m3, see the memory recall eval): unrelated
+// memory pairs reach at most ~0.64 cosine (p99 0.56), while restatements and
+// translations of the same fact score 0.84+ and close topical neighbours
+// 0.70+. 0.65 linked 0 of 768 unrelated pairs.
+const (
+	// DefaultLinkThreshold is the minimum cosine similarity for related_to.
+	DefaultLinkThreshold = 0.65
+	// linkCandidates bounds the neighbours considered per memory.
+	linkCandidates = 10
+)
+
+// AutoLinker links a memory to its nearest neighbours in the same knowledge
+// base with "related_to" edges (weight = cosine similarity), and adds a
+// "justifies" edge from a decision to a memory it covers. Neighbours come from
+// the vector index using the memory's stored embedding, so linking costs one
+// indexed query and never calls the embedding model.
 type AutoLinker struct {
-	repo     interfaces.MemoryRepositoryV2
-	embedder embedding.Embedder
-	resolver ModelResolver
+	repo      interfaces.MemoryRepositoryV2
+	embedder  embedding.Embedder
+	resolver  ModelResolver
+	threshold float64
+}
+
+// NewAutoLinker creates a new AutoLinker. embedder is only used for memories
+// that arrive without a stored vector.
+func NewAutoLinker(repo interfaces.MemoryRepositoryV2, embedder embedding.Embedder) *AutoLinker {
+	return &AutoLinker{repo: repo, embedder: embedder, threshold: DefaultLinkThreshold}
 }
 
 // WithResolver makes the linker resolve each memory's embedding model.
@@ -24,141 +47,139 @@ func (a *AutoLinker) WithResolver(r ModelResolver) *AutoLinker {
 	return a
 }
 
-// NewAutoLinker creates a new AutoLinker.
-func NewAutoLinker(repo interfaces.MemoryRepositoryV2, embedder embedding.Embedder) *AutoLinker {
-	return &AutoLinker{
-		repo:     repo,
-		embedder: embedder,
+// WithThreshold overrides the related_to similarity threshold.
+func (a *AutoLinker) WithThreshold(t float64) *AutoLinker {
+	if t > 0 {
+		a.threshold = t
 	}
+	return a
 }
 
-// LinkMemory checks a newly saved memory against existing memories and creates
-// relations where appropriate. Called per-memory after save.
-func (a *AutoLinker) LinkMemory(ctx context.Context, memory *types.AgentMemory) {
-	if memory == nil || memory.ID == "" {
-		return
+// LinkMemory links a saved memory to its neighbours. It returns the number of
+// relations created. Errors are logged; linking never fails a save.
+func (a *AutoLinker) LinkMemory(ctx context.Context, memory *types.AgentMemory) int {
+	if memory == nil || memory.ID == "" || memory.TenantID == "" {
+		return 0
+	}
+	vector := memory.Embedding.Slice()
+	if isZeroVector(vector) {
+		vector = a.embed(ctx, memory)
+		if vector == nil {
+			return 0
+		}
 	}
 
-	// Find memories with overlapping tags (2+ shared tags)
-	tagCandidates, err := a.findTagOverlapMemories(ctx, memory)
+	filter := &types.MemoryFilter{
+		TenantID:         memory.TenantID,
+		KbID:             memory.KbID,
+		EmbeddingModelID: metadataEmbeddingModel(memory.Metadata),
+	}
+	neighbours, err := a.repo.CosineSearch(ctx, filter, vector, linkCandidates+1)
 	if err != nil {
-		logger.Errorf(ctx, "auto-linker: tag overlap search failed: %v", err)
-		return
+		logger.Errorf(ctx, "auto-linker: neighbour search failed for %s: %v", memory.ID, err)
+		return 0
 	}
 
-	embedder := a.embedder
-	if a.resolver != nil {
-		emb, _, err := a.resolver.Embedder(ctx, memory.TenantID, memory.KbID)
-		if err != nil {
-			logger.Errorf(ctx, "auto-linker: resolve embedder: %v", err)
+	created := 0
+	touched := []string{memory.ID}
+	defer func() {
+		if created == 0 {
 			return
 		}
-		embedder = emb
+		if hr, ok := a.repo.(interfaces.MemoryV2HubRefresher); ok {
+			if err := hr.RefreshHubScores(ctx, memory.TenantID, touched); err != nil {
+				logger.Warnf(ctx, "auto-linker: hub score refresh failed: %v", err)
+			}
+		}
+	}()
+	for _, n := range neighbours {
+		c := n.Memory
+		if c == nil || c.ID == memory.ID || n.Score < a.threshold {
+			continue
+		}
+		// Defence in depth: the search is scoped, but never link across
+		// tenants or knowledge bases.
+		if c.TenantID != memory.TenantID || c.KbID != memory.KbID {
+			continue
+		}
+		if a.relate(ctx, memory.TenantID, memory.ID, c.ID, "related_to", n.Score) {
+			created++
+			touched = append(touched, c.ID)
+		}
+		switch {
+		case c.Verdict == types.VerdictDecision && memory.Verdict != types.VerdictDecision:
+			if a.relate(ctx, memory.TenantID, c.ID, memory.ID, "justifies", n.Score) {
+				created++
+			}
+		case memory.Verdict == types.VerdictDecision && c.Verdict != types.VerdictDecision:
+			if a.relate(ctx, memory.TenantID, memory.ID, c.ID, "justifies", n.Score) {
+				created++
+			}
+		}
 	}
-	if embedder == nil {
-		return
-	}
+	return created
+}
 
-	// Embed the new memory for cosine comparison
-	vector, err := embedder.Embed(ctx, memory.Content)
+func (a *AutoLinker) relate(ctx context.Context, tenantID, from, to, kind string, weight float64) bool {
+	// related_to is symmetric: store it once, in canonical order, so A~B and
+	// B~A never become two edges (which would also double hub scores).
+	if kind == "related_to" && to < from {
+		from, to = to, from
+	}
+	err := a.repo.CreateRelation(ctx, &types.MemoryRelation{
+		TenantID: tenantID, FromUUID: from, ToUUID: to,
+		RelationType: kind, Weight: weight, CreatedAt: time.Now(),
+	})
+	if err != nil {
+		logger.Errorf(ctx, "auto-linker: create %s relation %s->%s: %v", kind, from, to, err)
+		return false
+	}
+	return true
+}
+
+// embed computes a vector for a memory that has none stored.
+func (a *AutoLinker) embed(ctx context.Context, memory *types.AgentMemory) []float32 {
+	emb := a.embedder
+	if a.resolver != nil {
+		e, _, err := a.resolver.Embedder(ctx, memory.TenantID, memory.KbID)
+		if err != nil {
+			logger.Errorf(ctx, "auto-linker: resolve embedder: %v", err)
+			return nil
+		}
+		emb = e
+	}
+	if emb == nil {
+		return nil
+	}
+	v, err := emb.Embed(ctx, memory.Content)
 	if err != nil {
 		logger.Errorf(ctx, "auto-linker: embedding failed: %v", err)
-		return
+		return nil
 	}
-
-	for _, candidate := range tagCandidates {
-		if candidate.ID == memory.ID {
-			continue
-		}
-
-		// Get embedding for candidate (embed on demand)
-		candidateVec, err := embedder.Embed(ctx, candidate.Content)
-		if err != nil {
-			continue
-		}
-
-		similarity := cosineSimilarity(vector, candidateVec)
-
-		if similarity > 0.65 {
-			// Create related_to relation
-			relation := &types.MemoryRelation{
-				TenantID:     memory.TenantID,
-				FromUUID:     memory.ID,
-				ToUUID:       candidate.ID,
-				RelationType: "related_to",
-				Weight:       similarity,
-				CreatedAt:    time.Now(),
-			}
-			// Store using repo
-			if err := a.repo.CreateRelation(ctx, relation); err != nil {
-				logger.Errorf(ctx, "auto-linker: failed to create relation: %v", err)
-			}
-
-			// If the candidate has a decision verdict, it justifies this memory
-			if candidate.Verdict == types.VerdictDecision {
-				justifiesRel := &types.MemoryRelation{
-					TenantID:     memory.TenantID,
-					FromUUID:     candidate.ID,
-					ToUUID:       memory.ID,
-					RelationType: "justifies",
-					Weight:       similarity,
-					CreatedAt:    time.Now(),
-				}
-				if err := a.repo.CreateRelation(ctx, justifiesRel); err != nil {
-					logger.Errorf(ctx, "auto-linker: failed to create justifies relation: %v", err)
-				}
-			}
-		}
-	}
+	return v
 }
 
-// findTagOverlapMemories finds memories from the same tenant that share at
-// least 2 tags with the given memory.
-func (a *AutoLinker) findTagOverlapMemories(ctx context.Context, memory *types.AgentMemory) ([]*types.AgentMemory, error) {
-	if len(memory.Tags) < 2 {
-		return nil, nil
-	}
-
-	// Search for memories with similar tag sets
-	filter := &types.MemoryFilter{
-		TenantID: memory.TenantID,
-		KbID:     memory.KbID,
-		Limit:    50,
-	}
-
-	// Use repo search as a starting point
-	results, _, err := a.repo.Search(ctx, filter)
-	if err != nil {
-		return nil, err
-	}
-
-	var candidates []*types.AgentMemory
-	for _, r := range results {
-		if r.Memory == nil || r.Memory.ID == memory.ID {
-			continue
-		}
-		shared := countSharedTags(memory.Tags, r.Memory.Tags)
-		if shared >= 2 {
-			candidates = append(candidates, r.Memory)
+func isZeroVector(v []float32) bool {
+	for _, x := range v {
+		if x != 0 {
+			return false
 		}
 	}
-
-	return candidates, nil
+	return true
 }
 
-// countSharedTags counts the number of shared tags between two slices.
-func countSharedTags(a, b []string) int {
-	set := make(map[string]bool, len(a))
-	for _, t := range a {
-		set[t] = true
+// metadataEmbeddingModel reads metadata.embedding_model_id.
+func metadataEmbeddingModel(raw []byte) string {
+	if len(raw) == 0 {
+		return ""
 	}
-	count := 0
-	for _, t := range b {
-		if set[t] {
-			count++
-		}
+	var m struct {
+		ID string `json:"embedding_model_id"`
 	}
-	return count
+	if err := json.Unmarshal(raw, &m); err != nil {
+		return ""
+	}
+	return m.ID
 }
 
 // cosineSimilarity computes cosine similarity between two float32 vectors.
@@ -175,17 +196,5 @@ func cosineSimilarity(a, b []float32) float64 {
 	if normA == 0 || normB == 0 {
 		return 0
 	}
-	return dot / (sqrt(normA) * sqrt(normB))
-}
-
-func sqrt(x float64) float64 {
-	if x <= 0 {
-		return 0
-	}
-	// Simple Newton's method for sqrt
-	z := x / 2
-	for i := 0; i < 10; i++ {
-		z = z - (z*z-x)/(2*z)
-	}
-	return z
+	return dot / (math.Sqrt(normA) * math.Sqrt(normB))
 }

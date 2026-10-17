@@ -7,8 +7,10 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
@@ -709,65 +711,160 @@ func TestMemoryV2Handler_SearchMemories(t *testing.T) {
 	})
 }
 
-func TestMemoryV2Handler_GetMemoryGraph(t *testing.T) {
-	t.Run("happy path deduplicates nodes", func(t *testing.T) {
-		focal := &types.AgentMemory{ID: "mem-1", TenantID: "42", Content: "focal memory", MemoryType: "semantic", Verdict: types.VerdictDecision, HubScore: 1.5}
-		related := &types.AgentMemory{ID: "mem-2", TenantID: "42", Content: "related memory", MemoryType: "episodic", Verdict: types.VerdictFixed, HubScore: 0.5}
-		repo := &memoryV2HandlerRepoFake{
-			getMemory: focal,
-			searchResults: []*types.MemorySearchResult{
-				{Memory: nil, Score: 0.99},
-				{Memory: focal, Score: 0.98},
-				{Memory: related, Score: 0.97},
-				{Memory: related, Score: 0.96},
-			},
+// graphRepoFake serves a small relation graph through the batched graph store:
+// m1 -> m2 -> m3 (same KB) and m1 -> x (another KB, must never surface).
+type graphRepoFake struct {
+	*memoryV2HandlerRepoFake
+	mems map[string]*types.AgentMemory
+	rels []*types.MemoryRelation
+}
+
+func newGraphRepoFake() *graphRepoFake {
+	mk := func(id, kb, content string, imp int, v types.MemoryVerdict) *types.AgentMemory {
+		return &types.AgentMemory{ID: id, TenantID: "42", KbID: kb, Content: content, MemoryType: "fact", Importance: imp, Verdict: v, HubScore: 0.7, CreatedAt: time.Now()}
+	}
+	g := &graphRepoFake{mems: map[string]*types.AgentMemory{
+		"m1": mk("m1", "kb1", "Postgres pool exhausted", 2, types.VerdictNone),
+		"m2": mk("m2", "kb1", "Decided to use pgbouncer", 4, types.VerdictDecision),
+		"m3": mk("m3", "kb1", strings.Repeat("Kết nối ", 30), 1, types.VerdictNone),
+		"x":  mk("x", "kb-other", "other knowledge base", 1, types.VerdictNone),
+	}}
+	g.rels = []*types.MemoryRelation{
+		{ID: "r1", TenantID: "42", FromUUID: "m1", ToUUID: "m2", RelationType: "related_to", Weight: 0.9},
+		{ID: "r2", TenantID: "42", FromUUID: "m2", ToUUID: "m3", RelationType: "justifies", Weight: 0.8},
+		{ID: "r3", TenantID: "42", FromUUID: "m1", ToUUID: "x", RelationType: "related_to", Weight: 0.99},
+	}
+	g.memoryV2HandlerRepoFake = &memoryV2HandlerRepoFake{getMemory: g.mems["m1"]}
+	return g
+}
+
+func (g *graphRepoFake) GetByIDs(_ context.Context, _ string, ids []string) ([]*types.AgentMemory, error) {
+	var out []*types.AgentMemory
+	for _, id := range ids {
+		if m, ok := g.mems[id]; ok {
+			out = append(out, m)
 		}
-		h := NewMemoryV2Handler(&memoryV2HandlerServiceFake{}, repo, nil, nil)
-		c, recorder := newMemoryV2HandlerTestContext(http.MethodGet, "/memories/graph/mem-1?kb_id=kb1", nil)
-		c.Params = gin.Params{{Key: "id", Value: "mem-1"}}
-		setMemoryV2Auth(c, 42, "")
+	}
+	return out, nil
+}
 
+func (g *graphRepoFake) RelationsOf(_ context.Context, _ string, ids []string, _ int) ([]*types.MemoryRelation, error) {
+	set := map[string]bool{}
+	for _, id := range ids {
+		set[id] = true
+	}
+	var out []*types.MemoryRelation
+	for _, r := range g.rels {
+		if set[r.FromUUID] || set[r.ToUUID] {
+			out = append(out, r)
+		}
+	}
+	return out, nil
+}
+
+func (g *graphRepoFake) TopHubs(_ context.Context, _, kbID string, _ int) ([]*types.AgentMemory, error) {
+	var out []*types.AgentMemory
+	for _, id := range []string{"m1", "m2", "m3", "x"} {
+		if g.mems[id].KbID == kbID {
+			out = append(out, g.mems[id])
+		}
+	}
+	return out, nil
+}
+
+func graphRequest(t *testing.T, h *MemoryV2Handler, path string, id string) (map[string]any, *gin.Context) {
+	t.Helper()
+	c, rec := newMemoryV2HandlerTestContext(http.MethodGet, path, nil)
+	if id != "" {
+		c.Params = gin.Params{{Key: "id", Value: id}}
 		h.GetMemoryGraph(c)
+	} else {
+		setMemoryV2Auth(c, 42, "")
+		h.GetMemoryGraphOverview(c)
+		if len(c.Errors) > 0 {
+			return nil, c
+		}
+		return jsonMap(t, decodeJSONBody(t, rec)["data"]), c
+	}
+	if len(c.Errors) > 0 {
+		return nil, c
+	}
+	return jsonMap(t, decodeJSONBody(t, rec)["data"]), c
+}
 
-		require.Equal(t, http.StatusOK, recorder.Code)
-		filter := repo.searchFilters[0]
-		assert.Equal(t, "42", filter.TenantID)
-		assert.Equal(t, "kb1", filter.KbID)
-		assert.Equal(t, 20, filter.Limit)
-		data := jsonMap(t, decodeJSONBody(t, recorder)["data"])
-		nodes := jsonSlice(t, data["nodes"])
-		edges := jsonSlice(t, data["edges"])
-		assert.Len(t, nodes, 2)
-		assert.Len(t, edges, 2)
+func nodeIDs(t *testing.T, data map[string]any) []string {
+	var out []string
+	for _, n := range jsonSlice(t, data["nodes"]) {
+		out = append(out, jsonMap(t, n)["id"].(string))
+	}
+	return out
+}
+
+func TestMemoryV2Handler_GetMemoryGraph(t *testing.T) {
+	t.Run("depth walks hops inside the knowledge base", func(t *testing.T) {
+		h := NewMemoryV2Handler(&memoryV2HandlerServiceFake{}, newGraphRepoFake(), nil, nil)
+		c, rec := newMemoryV2HandlerTestContext(http.MethodGet, "/memories/graph/m1?depth=1", nil)
+		c.Params = gin.Params{{Key: "id", Value: "m1"}}
+		setMemoryV2Auth(c, 42, "")
+		h.GetMemoryGraph(c)
+		require.Equal(t, http.StatusOK, rec.Code)
+		one := jsonMap(t, decodeJSONBody(t, rec)["data"])
+		assert.ElementsMatch(t, []string{"m1", "m2"}, nodeIDs(t, one), "1 hop; the other-KB neighbour never surfaces")
+
+		c, rec = newMemoryV2HandlerTestContext(http.MethodGet, "/memories/graph/m1?depth=2", nil)
+		c.Params = gin.Params{{Key: "id", Value: "m1"}}
+		setMemoryV2Auth(c, 42, "")
+		h.GetMemoryGraph(c)
+		two := jsonMap(t, decodeJSONBody(t, rec)["data"])
+		assert.ElementsMatch(t, []string{"m1", "m2", "m3"}, nodeIDs(t, two))
+		assert.Len(t, jsonSlice(t, two["edges"]), 2)
 	})
 
-	t.Run("get error", func(t *testing.T) {
+	t.Run("wire format matches the web UI GraphNode/GraphEdge", func(t *testing.T) {
+		h := NewMemoryV2Handler(&memoryV2HandlerServiceFake{}, newGraphRepoFake(), nil, nil)
+		c, rec := newMemoryV2HandlerTestContext(http.MethodGet, "/memories/graph/m1?depth=2", nil)
+		c.Params = gin.Params{{Key: "id", Value: "m1"}}
+		setMemoryV2Auth(c, 42, "")
+		h.GetMemoryGraph(c)
+		data := jsonMap(t, decodeJSONBody(t, rec)["data"])
+		for _, raw := range jsonSlice(t, data["nodes"]) {
+			n := jsonMap(t, raw)
+			for _, k := range []string{"id", "label", "type", "importance", "verdict", "hub_score", "is_stale"} {
+				assert.Contains(t, n, k, "node field %s", k)
+			}
+			assert.IsType(t, float64(0), n["importance"], "numeric importance (NaN radius before)")
+			assert.LessOrEqual(t, utf8.RuneCountInString(n["label"].(string)), 80)
+		}
+		for _, raw := range jsonSlice(t, data["edges"]) {
+			e := jsonMap(t, raw)
+			for _, k := range []string{"source", "target", "relation_type", "weight"} {
+				assert.Contains(t, e, k, "edge field %s", k)
+			}
+			assert.IsType(t, float64(0), e["weight"])
+		}
+	})
+
+	t.Run("missing memory", func(t *testing.T) {
 		repo := &memoryV2HandlerRepoFake{getErr: errors.New("missing")}
 		h := NewMemoryV2Handler(&memoryV2HandlerServiceFake{}, repo, nil, nil)
 		c, _ := newMemoryV2HandlerTestContext(http.MethodGet, "/memories/graph/mem-1", nil)
 		c.Params = gin.Params{{Key: "id", Value: "mem-1"}}
 		setMemoryV2Auth(c, 42, "")
-
 		h.GetMemoryGraph(c)
-
 		require.Len(t, c.Errors, 1)
 		assert.Contains(t, c.Errors.Last().Error(), "Memory not found")
 	})
+}
 
-	t.Run("search error is non fatal", func(t *testing.T) {
-		repo := &memoryV2HandlerRepoFake{getMemory: &types.AgentMemory{ID: "mem-1", Content: "focal"}, searchErr: errors.New("search failed")}
-		h := NewMemoryV2Handler(&memoryV2HandlerServiceFake{}, repo, nil, nil)
-		c, recorder := newMemoryV2HandlerTestContext(http.MethodGet, "/memories/graph/mem-1", nil)
-		c.Params = gin.Params{{Key: "id", Value: "mem-1"}}
-		setMemoryV2Auth(c, 42, "")
+func TestMemoryV2Handler_GetMemoryGraphOverview(t *testing.T) {
+	h := NewMemoryV2Handler(&memoryV2HandlerServiceFake{}, newGraphRepoFake(), nil, nil)
+	data, c := graphRequest(t, h, "/memories/graph?kb_id=kb1", "")
+	require.Empty(t, c.Errors)
+	assert.ElementsMatch(t, []string{"m1", "m2", "m3"}, nodeIDs(t, data))
+	assert.Len(t, jsonSlice(t, data["edges"]), 2, "only edges between overview nodes")
 
-		h.GetMemoryGraph(c)
-
-		require.Equal(t, http.StatusOK, recorder.Code)
-		data := jsonMap(t, decodeJSONBody(t, recorder)["data"])
-		assert.Len(t, jsonSlice(t, data["nodes"]), 1)
-		assert.Empty(t, jsonSlice(t, data["edges"]))
-	})
+	_, c = graphRequest(t, h, "/memories/graph", "")
+	require.Len(t, c.Errors, 1, "kb_id is required")
 }
 
 func TestMemoryV2Handler_GetMemoryStats(t *testing.T) {
