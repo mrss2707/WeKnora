@@ -130,7 +130,11 @@ tenant:
 #                                           # start and manual dream passes are dry runs.
 #                                           # (env MEMORY_V2_WORKER_MUTATIONS)
 #   max_search_results: 20                  # Max results per hybrid search
-#   min_score_threshold: 0.4                # Minimum similarity score (0..1)
+#   min_cosine: 0.45                        # Drop vector-only matches below this cosine similarity.
+#                                           # Calibrated for bge-m3 (relevant hits >= 0.48, unrelated
+#                                           # queries <= 0.50); re-run the recall eval for other models:
+#                                           # go test -tags memory_eval -run TestRecallEval ./internal/application/service/memory_v2/
+#   relative_score_floor: 0.25              # Keep results scoring >= this fraction of the best result
 #   hnsw_m: 16                              # HNSW index M parameter (pgvector)
 #   hnsw_ef_construction: 200               # HNSW ef_construction (pgvector)
 #   hnsw_ef_search: 100                     # HNSW ef_search (pgvector)

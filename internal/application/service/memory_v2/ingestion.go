@@ -12,6 +12,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/Tencent/WeKnora/internal/infrastructure/langdata"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/pgvector/pgvector-go"
 )
@@ -270,65 +271,63 @@ func (s *MemoryServiceV2Impl) checkSemanticDedup(ctx context.Context, memory *ty
 	return nil, nil
 }
 
-// detectMemoryType uses keyword heuristics to detect the memory type.
+// memoryTermsFor returns the classification cues for the content's
+// language (Vietnamese, English, ...), from the langdata registry.
+func memoryTermsFor(content string) *langdata.MemoryTerms {
+	return langdata.GetMemoryTerms(langdata.DetectMemoryLanguage(content))
+}
+
+// containsPhrase reports whether phrase occurs in text on word boundaries
+// (so "was" does not match "wasm"). Both must be lowercase.
+func containsPhrase(text, phrase string) bool {
+	for start := 0; ; {
+		i := strings.Index(text[start:], phrase)
+		if i < 0 {
+			return false
+		}
+		i += start
+		end := i + len(phrase)
+		before, after := ' ', ' '
+		if i > 0 {
+			before, _ = utf8.DecodeLastRuneInString(text[:i])
+		}
+		if end < len(text) {
+			after, _ = utf8.DecodeRuneInString(text[end:])
+		}
+		if !unicode.IsLetter(before) && !unicode.IsDigit(before) && !unicode.IsLetter(after) && !unicode.IsDigit(after) {
+			return true
+		}
+		start = i + 1
+	}
+}
+
+// memoryTypeOrder breaks score ties deterministically, most specific first.
+var memoryTypeOrder = []string{"decision", "procedural", "preference", "episodic", "semantic"}
+
+// detectMemoryType classifies content by the phrases of its language; with no
+// cue it is a plain "fact".
 func detectMemoryType(content string) string {
 	lower := strings.ToLower(content)
-
-	episodicKeywords := []string{"happened", "occurred", "was", "were", "today", "yesterday", "earlier", "remember", "recall", "event"}
-	semanticKeywords := []string{"is a", "is an", "are", "means", "defined as", "refers to", "consists of", "is used", "typically"}
-	proceduralKeywords := []string{"steps", "how to", "procedure", "process", "workflow", "first", "then", "next", "finally", "instructions"}
-	decisionKeywords := []string{"decided", "chose", "selected", "approved", "agreed", "resolution", "conclusion", "decision"}
-	preferenceKeywords := []string{"prefer", "like", "dislike", "favorite", "better", "rather", "would rather", "opinion"}
-
-	score := map[string]int{
-		"episodic":   0,
-		"semantic":   0,
-		"procedural": 0,
-		"decision":   0,
-		"preference": 0,
-	}
-
-	for _, kw := range episodicKeywords {
-		if strings.Contains(lower, kw) {
-			score["episodic"]++
+	terms := memoryTermsFor(content)
+	bestType, bestScore := "fact", 0
+	for _, typ := range memoryTypeOrder {
+		score := 0
+		for _, kw := range terms.TypeKeywords[typ] {
+			if containsPhrase(lower, kw) {
+				score++
+			}
+		}
+		if score > bestScore {
+			bestType, bestScore = typ, score
 		}
 	}
-	for _, kw := range semanticKeywords {
-		if strings.Contains(lower, kw) {
-			score["semantic"]++
-		}
-	}
-	for _, kw := range proceduralKeywords {
-		if strings.Contains(lower, kw) {
-			score["procedural"]++
-		}
-	}
-	for _, kw := range decisionKeywords {
-		if strings.Contains(lower, kw) {
-			score["decision"]++
-		}
-	}
-	for _, kw := range preferenceKeywords {
-		if strings.Contains(lower, kw) {
-			score["preference"]++
-		}
-	}
-
-	bestType := "fact"
-	bestScore := 0
-	for typ, s := range score {
-		if s > bestScore {
-			bestScore = s
-			bestType = typ
-		}
-	}
-
 	return bestType
 }
 
-// suggestTags extracts simple keyword tags from content.
+// suggestTags extracts keyword tags from content, skipping the stopwords of
+// its language.
 func suggestTags(content string, memoryType string) types.TagsArray {
-	// Simple tag extraction: pick significant words
+	stop := langdata.Get(langdata.DetectMemoryLanguage(content)).Stopwords
 	words := strings.Fields(content)
 	seen := make(map[string]bool)
 	var tags []string
@@ -340,16 +339,10 @@ func suggestTags(content string, memoryType string) types.TagsArray {
 
 	for _, word := range words {
 		cleaned := strings.TrimFunc(strings.ToLower(word), func(r rune) bool {
-			return !unicode.IsLetter(r)
+			return !unicode.IsLetter(r) && !unicode.IsDigit(r)
 		})
-		if len(cleaned) < 3 || len(cleaned) > 30 {
-			continue
-		}
-		if seen[cleaned] {
-			continue
-		}
-		// Skip common stop words
-		if isStopWord(cleaned) {
+		n := utf8.RuneCountInString(cleaned)
+		if n < 3 || n > 30 || seen[cleaned] || stop[cleaned] || isStopWord(cleaned) {
 			continue
 		}
 		if len(tags) >= 10 {
@@ -364,34 +357,26 @@ func suggestTags(content string, memoryType string) types.TagsArray {
 
 // isStopWord checks if a word is a common English stop word.
 func isStopWord(word string) bool {
-	stopWords := map[string]bool{
-		"the": true, "a": true, "an": true, "is": true, "are": true, "was": true,
-		"were": true, "be": true, "been": true, "being": true, "have": true,
-		"has": true, "had": true, "do": true, "does": true, "did": true,
-		"will": true, "would": true, "could": true, "should": true, "may": true,
-		"might": true, "shall": true, "can": true, "need": true, "dare": true,
-		"ought": true, "used": true, "to": true, "of": true, "in": true,
-		"for": true, "on": true, "with": true, "at": true, "by": true,
-		"from": true, "as": true, "into": true, "through": true, "during": true,
-		"before": true, "after": true, "above": true, "below": true, "between": true,
-		"and": true, "but": true, "or": true, "nor": true, "not": true,
-		"so": true, "yet": true, "both": true, "either": true, "neither": true,
-		"this": true, "that": true, "these": true, "those": true, "i": true,
-		"you": true, "he": true, "she": true, "it": true, "we": true,
-		"they": true, "me": true, "him": true, "her": true, "us": true,
-		"them": true, "my": true, "your": true, "his": true, "its": true,
-		"our": true, "their": true, "mine": true, "yours": true, "hers": true,
-		"ours": true, "theirs": true, "myself": true, "yourself": true,
-		"himself": true, "herself": true, "itself": true, "ourselves": true,
-		"themselves": true, "what": true, "which": true, "who": true, "whom": true,
-		"whose": true, "when": true, "where": true, "why": true, "how": true,
-		"all": true, "each": true, "every": true, "few": true,
-		"more": true, "most": true, "other": true, "some": true, "such": true,
-		"no": true, "any": true, "only": true, "own": true, "same": true,
-		"than": true, "too": true, "very": true, "just": true, "about": true,
-		"also": true, "if": true, "then": true, "else": true, "over": true,
-	}
-	return stopWords[word]
+	return langdata.Get("en").Stopwords[word] || englishStopWords[word]
+}
+
+// englishStopWords complements langdata's English list with words that carry
+// no meaning as a memory tag.
+var englishStopWords = map[string]bool{
+	"the": true, "a": true, "an": true, "is": true, "are": true, "was": true,
+	"were": true, "be": true, "been": true, "being": true, "have": true,
+	"has": true, "had": true, "do": true, "does": true, "did": true,
+	"will": true, "would": true, "could": true, "should": true, "may": true,
+	"might": true, "shall": true, "can": true, "need": true, "used": true,
+	"to": true, "of": true, "in": true, "for": true, "on": true, "with": true,
+	"at": true, "by": true, "from": true, "as": true, "into": true,
+	"and": true, "but": true, "or": true, "not": true, "so": true,
+	"this": true, "that": true, "these": true, "those": true, "it": true,
+	"we": true, "they": true, "our": true, "their": true, "its": true,
+	"what": true, "which": true, "who": true, "when": true, "where": true,
+	"why": true, "how": true, "all": true, "each": true, "some": true,
+	"than": true, "too": true, "very": true, "just": true, "about": true,
+	"also": true, "if": true, "then": true, "else": true, "over": true,
 }
 
 // computeImportance scores content from -5 to +6.
@@ -421,34 +406,25 @@ func computeImportance(content string, memoryType string) int {
 		score += 1
 	}
 
-	// Keyword bonuses
+	// Keyword bonuses, in the content's language
 	lower := strings.ToLower(content)
-
-	// High-importance signals
-	highSig := []string{"critical", "important", "urgent", "mandatory", "required", "essential", "vital", "key", "significant"}
-	for _, kw := range highSig {
-		if strings.Contains(lower, kw) {
-			score++
-			break
+	terms := memoryTermsFor(content)
+	anyOf := func(phrases []string) bool {
+		for _, p := range phrases {
+			if containsPhrase(lower, p) {
+				return true
+			}
 		}
+		return false
 	}
-
-	// Decision signals
-	decisionSig := []string{"decided", "approved", "agreed", "confirmed", "finalized", "resolved"}
-	for _, kw := range decisionSig {
-		if strings.Contains(lower, kw) {
-			score += 2
-			break
-		}
+	if anyOf(terms.HighImportance) {
+		score++
 	}
-
-	// Low-importance signals
-	lowSig := []string{"maybe", "perhaps", "possibly", "might", "could be", "not sure", "unclear", "ambiguous"}
-	for _, kw := range lowSig {
-		if strings.Contains(lower, kw) {
-			score--
-			break
-		}
+	if anyOf(terms.DecisionSignals) {
+		score += 2
+	}
+	if anyOf(terms.LowImportance) {
+		score--
 	}
 
 	// Clamp to [-5, +6]

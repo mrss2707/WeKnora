@@ -527,3 +527,32 @@ func TestComputeImportance_KeywordAndClampBranches(t *testing.T) {
 	assert.Equal(t, 3, computeImportance("A vector database is important for retrieval", "semantic"))
 	assert.Equal(t, 0, computeImportance("Plain content without configured importance signals", "fact"))
 }
+
+func TestHeuristics_Vietnamese(t *testing.T) {
+	cases := map[string]string{
+		"Nhóm đã quyết định dùng pgbouncer, mọi người thống nhất phương án này":             "decision",
+		"Các bước triển khai: đầu tiên build image, sau đó chạy migrate, cuối cùng restart": "procedural",
+		"Hôm qua đã xảy ra sự cố mất kết nối database lúc 3 giờ sáng":                       "episodic",
+		"Anh Tú thích giao diện tối và ưu tiên bảng gọn":                                    "preference",
+		"Cổng mặc định của dịch vụ là 8080":                                                 "fact",
+	}
+	for content, want := range cases {
+		assert.Equal(t, want, detectMemoryType(content), content)
+	}
+
+	assert.Equal(t, 6, computeImportance("Đây là quyết định quan trọng đã được phê duyệt cho toàn hệ thống", "decision"))
+	assert.Equal(t, -1, computeImportance("Có lẽ cấu hình này chưa rõ ràng", "fact"))
+
+	tags := suggestTags("Kết nối postgres của hệ thống bị đầy pool khi tải cao", "fact")
+	assert.Contains(t, tags, "postgres")
+	assert.Contains(t, tags, "pool")
+	assert.NotContains(t, tags, "của", "Vietnamese stopwords removed")
+	assert.NotContains(t, tags, "khi")
+}
+
+func TestHeuristics_WordBoundaries(t *testing.T) {
+	assert.Equal(t, "fact", detectMemoryType("Build the wasm module with the release profile flag set"), "\"was\" inside \"wasm\" is not a cue")
+	assert.True(t, containsPhrase("we decided today", "decided"))
+	assert.False(t, containsPhrase("undecidedness", "decided"))
+	assert.True(t, containsPhrase("đã quyết định xong", "quyết định"))
+}

@@ -50,241 +50,84 @@ func makeSearchResult(memory *types.AgentMemory, score float64) *types.MemorySea
 }
 
 // ---------------------------------------------------------------------------
-// Hybrid search score merging
+// Reciprocal Rank Fusion
 // ---------------------------------------------------------------------------
 
-func TestMergeResults_BothPresent(t *testing.T) {
+func TestFuseRankings_BothSignalsRankFirst(t *testing.T) {
 	svc := newTestService()
-
 	now := time.Now()
+	a := makeMemory("a", "in both lists", 0, types.VerdictNone, "", now)
+	b := makeMemory("b", "keyword only", 0, types.VerdictNone, "", now)
+	c := makeMemory("c", "vector only", 0, types.VerdictNone, "", now)
 
-	// Two memories that appear in both BM25 and cosine results
-	memA := makeMemory("mem-a", "memory A", 3, types.VerdictNone, "", now)
-	memB := makeMemory("mem-b", "memory B", 5, types.VerdictNone, "", now)
+	fused := svc.fuseRankings(
+		[]*types.MemorySearchResult{makeSearchResult(a, 9), makeSearchResult(b, 3)},
+		[]*types.MemorySearchResult{makeSearchResult(c, 0.9), makeSearchResult(a, 0.8)},
+	)
 
-	// BM25 results: order matters for position-based scoring
-	// memB first (higher BM25 position), memA second
-	bm25Results := []*types.MemorySearchResult{
-		makeSearchResult(memB, 0.0), // Score unused for BM25, position is used
-		makeSearchResult(memA, 0.0),
-	}
-
-	// Cosine results: memA similarity=0.9, memB similarity=0.7
-	cosineResults := []*types.MemorySearchResult{
-		makeSearchResult(memA, 0.9),
-		makeSearchResult(memB, 0.7),
-	}
-
-	merged := svc.mergeResults(bm25Results, cosineResults, 10)
-	require.Len(t, merged, 2, "should contain both memories, deduped")
-
-	// Build a map for easier assertions
-	scores := make(map[string]float64)
-	for _, r := range merged {
+	require.Len(t, fused, 3)
+	scores := map[string]float64{}
+	for _, r := range fused {
 		scores[r.Memory.ID] = r.Score
 	}
-
-	// memB: BM25 position 0 of 2 => (2-0)/2 = 1.0, so bm25score = 1.0 * 0.15 = 0.15
-	// cosine score = 0.7 * 0.45 = 0.315
-	// importance = (5+5)/11 = 0.90909... * 0.15 = 0.13636...
-	// hubScore = 0/5 = 0 * 0.25 = 0
-	// Total ~= 0.15 + 0.315 + 0 + 0.13636 = 0.60136...
-	bm25scoreB := float64(2-0) / float64(2) * weightBM25
-	impScoreB := float64(5+5) / 11.0
-	expectedB := bm25scoreB + 0.7*weightCosine + 0*weightHubScore + impScoreB*weightImpor
-	assert.InDelta(t, expectedB, scores["mem-b"], 0.0001, "mem-b merged score")
-
-	// memA: BM25 position 1 of 2 => (2-1)/2 = 0.5, so bm25score = 0.5 * 0.15 = 0.075
-	// cosine score = 0.9 * 0.45 = 0.405
-	// importance = (3+5)/11 = 0.72727... * 0.15 = 0.10909...
-	// hubScore = 0/5 * 0.25 = 0
-	// Total ~= 0.075 + 0.405 + 0 + 0.10909 = 0.58909...
-	bm25scoreA := float64(2-1) / float64(2) * weightBM25
-	impScoreA := float64(3+5) / 11.0
-	expectedA := bm25scoreA + 0.9*weightCosine + 0*weightHubScore + impScoreA*weightImpor
-	assert.InDelta(t, expectedA, scores["mem-a"], 0.0001, "mem-a merged score")
+	assert.Greater(t, scores["a"], scores["c"], "found by both signals beats either alone")
+	assert.Greater(t, scores["a"], scores["b"])
+	assert.InDelta(t, (1.0/61+1.0/62)/(2.0/61), scores["a"], 1e-9, "normalized RRF")
+	assert.LessOrEqual(t, scores["a"], 1.0)
 }
 
-func TestMergeResults_OnlyBM25(t *testing.T) {
+func TestFuseRankings_ScaleFree(t *testing.T) {
+	// Raw BM25 scores (unbounded) and cosine scores (0..1) never mix: only
+	// ranks matter, so a huge BM25 score cannot dominate.
 	svc := newTestService()
 	now := time.Now()
-
-	memA := makeMemory("mem-a", "memory A", 0, types.VerdictNone, "", now)
-	memB := makeMemory("mem-b", "memory B", 0, types.VerdictNone, "", now)
-	memC := makeMemory("mem-c", "memory C", 0, types.VerdictNone, "", now)
-
-	bm25Results := []*types.MemorySearchResult{
-		makeSearchResult(memA, 0.0),
-		makeSearchResult(memB, 0.0),
-		makeSearchResult(memC, 0.0),
-	}
-
-	merged := svc.mergeResults(bm25Results, nil, 10)
-	require.Len(t, merged, 3)
-
-	// Position-based scores for BM25-only
-	// Position 0: (3-0)/3 * 0.15 = 0.15
-	// Position 1: (3-1)/3 * 0.15 = 0.10
-	// Position 2: (3-2)/3 * 0.15 = 0.05
-	assert.InDelta(t, 0.15, merged[0].Score, 0.0001, "first BM25 result should have score 0.15")
-	assert.InDelta(t, 0.10, merged[1].Score, 0.0001, "second BM25 result should have score 0.10")
-	assert.InDelta(t, 0.05, merged[2].Score, 0.0001, "third BM25 result should have score 0.05")
+	a := makeMemory("a", "a", 0, types.VerdictNone, "", now)
+	b := makeMemory("b", "b", 0, types.VerdictNone, "", now)
+	fused := svc.fuseRankings(
+		[]*types.MemorySearchResult{makeSearchResult(a, 1000)},
+		[]*types.MemorySearchResult{makeSearchResult(b, 0.99)},
+	)
+	require.Len(t, fused, 2)
+	assert.InDelta(t, fused[0].Score, fused[1].Score, 1e-9)
 }
 
-func TestMergeResults_OnlyCosine(t *testing.T) {
+func TestFuseRankings_DropsWeakVectorOnlyMatches(t *testing.T) {
+	svc := newTestService()
+	svc.config.MinCosine = 0.5
+	now := time.Now()
+	weak := makeMemory("weak", "unrelated", 0, types.VerdictNone, "", now)
+	kw := makeMemory("kw", "keyword hit", 0, types.VerdictNone, "", now)
+	strong := makeMemory("strong", "close", 0, types.VerdictNone, "", now)
+
+	fused := svc.fuseRankings(
+		[]*types.MemorySearchResult{makeSearchResult(kw, 1)},
+		[]*types.MemorySearchResult{makeSearchResult(strong, 0.7), makeSearchResult(weak, 0.2), makeSearchResult(kw, 0.1)},
+	)
+
+	got := map[string]bool{}
+	for _, r := range fused {
+		got[r.Memory.ID] = true
+	}
+	assert.Equal(t, map[string]bool{"kw": true, "strong": true}, got, "keyword matches survive a low cosine; weak vector-only ones do not")
+}
+
+func TestFuseRankings_EmptyAndNil(t *testing.T) {
+	svc := newTestService()
+	assert.Empty(t, svc.fuseRankings(nil, nil))
+	assert.Empty(t, svc.fuseRankings([]*types.MemorySearchResult{nil, {Memory: nil}}, nil))
+}
+
+func TestApplySignalBoost_ImportanceAndHub(t *testing.T) {
 	svc := newTestService()
 	now := time.Now()
-
-	memA := makeMemory("mem-a", "memory A", 0, types.VerdictNone, "", now)
-	memB := makeMemory("mem-b", "memory B", 0, types.VerdictNone, "", now)
-
-	cosineResults := []*types.MemorySearchResult{
-		makeSearchResult(memA, 0.8),
-		makeSearchResult(memB, 0.6),
-	}
-
-	merged := svc.mergeResults(nil, cosineResults, 10)
-	require.Len(t, merged, 2)
-
-	// Cosine-only: score * weightCosine
-	assert.InDelta(t, 0.8*weightCosine, merged[0].Score, 0.0001, "first cosine result")
-	assert.InDelta(t, 0.6*weightCosine, merged[1].Score, 0.0001, "second cosine result")
-}
-
-func TestMergeResults_BothEmpty(t *testing.T) {
-	svc := newTestService()
-	merged := svc.mergeResults(nil, nil, 10)
-	assert.Nil(t, merged, "should return nil when both result sets are empty")
-}
-
-func TestMergeResults_Deduplication(t *testing.T) {
-	svc := newTestService()
-	now := time.Now()
-
-	memA := makeMemory("mem-a", "memory A", 2, types.VerdictNone, "", now)
-	memB := makeMemory("mem-b", "memory B", 1, types.VerdictNone, "", now)
-
-	// memA appears twice in cosine results; BM25 has memA and memB
-	bm25Results := []*types.MemorySearchResult{
-		makeSearchResult(memA, 0.0),
-		makeSearchResult(memB, 0.0),
-	}
-	cosineResults := []*types.MemorySearchResult{
-		makeSearchResult(memA, 0.9),
-		makeSearchResult(memA, 0.95), // duplicate entry for memA
-		makeSearchResult(memB, 0.7),
-	}
-
-	merged := svc.mergeResults(bm25Results, cosineResults, 10)
-	require.Len(t, merged, 2, "should deduplicate to 2 unique memories")
-}
-
-func TestMergeResults_WithImportanceAndHubScore(t *testing.T) {
-	svc := newTestService()
-	now := time.Now()
-
-	// High importance, high hub score
-	memA := makeMemory("mem-a", "important memory", 6, types.VerdictNone, "", now)
-	memA.HubScore = 4.0
-
-	// Low importance, low hub score
-	memB := makeMemory("mem-b", "trivial memory", -4, types.VerdictNone, "", now)
-	memB.HubScore = 0.5
-
-	// Use both BM25 and cosine results to test the full merge path
-	// (cosine-only path skips hubScore/importance weighting)
-	bm25Results := []*types.MemorySearchResult{
-		makeSearchResult(memA, 0.0),
-		makeSearchResult(memB, 0.0),
-	}
-	cosineResults := []*types.MemorySearchResult{
-		makeSearchResult(memA, 0.8),
-		makeSearchResult(memB, 0.7),
-	}
-
-	merged := svc.mergeResults(bm25Results, cosineResults, 10)
-	require.Len(t, merged, 2)
-
-	scores := make(map[string]float64)
-	for _, r := range merged {
-		scores[r.Memory.ID] = r.Score
-	}
-
-	// Full merge (bm25 + cosine): score = bm25score*weightBM25 + cosScore*weightCosine + hubScore*weightHubScore + impScore*weightImpor
-	// memA: BM25 pos 0 of 2 => (2-0)/2 * 0.15 = 0.15
-	//     + 0.8*0.45 + min(4/5,1)*0.25 + (6+5)/11*0.15
-	//     = 0.15 + 0.36 + 0.20 + 0.15 = 0.86
-	bm25scoreA := float64(2-0) / float64(2) * weightBM25
-	expectedA := bm25scoreA + 0.8*weightCosine + (4.0/5.0)*weightHubScore + (float64(6+5)/11.0)*weightImpor
-	// memB: BM25 pos 1 of 2 => (2-1)/2 * 0.15 = 0.075
-	//     + 0.7*0.45 + min(0.5/5,1)*0.25 + (-4+5)/11*0.15
-	//     = 0.075 + 0.315 + 0.025 + 0.013636 = 0.428636
-	bm25scoreB := float64(2-1) / float64(2) * weightBM25
-	expectedB := bm25scoreB + 0.7*weightCosine + (0.5/5.0)*weightHubScore + (float64(-4+5)/11.0)*weightImpor
-
-	assert.InDelta(t, expectedA, scores["mem-a"], 0.0001, "high importance/hub score")
-	assert.InDelta(t, expectedB, scores["mem-b"], 0.0001, "low importance/hub score")
-	assert.Greater(t, scores["mem-a"], scores["mem-b"], "high importance/hub should rank higher")
-}
-
-func TestMergeResults_ClampedImportance(t *testing.T) {
-	svc := newTestService()
-	now := time.Now()
-
-	// Importance at extreme values
-	memHigh := makeMemory("mem-high", "max importance", 100, types.VerdictNone, "", now)
-	memLow := makeMemory("mem-low", "min importance", -100, types.VerdictNone, "", now)
-
-	// Use both BM25 and cosine to test the full merge path
-	bm25Results := []*types.MemorySearchResult{
-		makeSearchResult(memHigh, 0.0),
-		makeSearchResult(memLow, 0.0),
-	}
-	cosineResults := []*types.MemorySearchResult{
-		makeSearchResult(memHigh, 0.0),
-		makeSearchResult(memLow, 0.0),
-	}
-
-	merged := svc.mergeResults(bm25Results, cosineResults, 10)
-	require.Len(t, merged, 2)
-
-	scores := make(map[string]float64)
-	for _, r := range merged {
-		scores[r.Memory.ID] = r.Score
-	}
-
-	// Full merge: importance clamped to [0,1]:
-	// memHigh: importance=100 -> clamped to 1.0, impScore = 1.0 * 0.15 = 0.15
-	// memLow: importance=-100 -> clamped to 0.0, impScore = 0.0 * 0.15 = 0
-	// For memHigh (BM25 pos 0 of 2): 0.15 (bm25) + 0 + 0 + 0.15 = 0.30
-	// For memLow (BM25 pos 1 of 2): 0.075 (bm25) + 0 + 0 + 0 = 0.075
-	bm25scoreHigh := float64(2-0) / float64(2) * weightBM25
-	expectedHigh := bm25scoreHigh + 0*weightCosine + 0*weightHubScore + (1.0)*weightImpor
-	bm25scoreLow := float64(2-1) / float64(2) * weightBM25
-	expectedLow := bm25scoreLow + 0*weightCosine + 0*weightHubScore + (0.0)*weightImpor
-
-	assert.InDelta(t, expectedHigh, scores["mem-high"], 0.0001, "clamped high importance")
-	assert.InDelta(t, expectedLow, scores["mem-low"], 0.0001, "clamped low importance")
-}
-
-func TestMergeResults_CosineWithMissingBM25Score(t *testing.T) {
-	svc := newTestService()
-	now := time.Now()
-
-	// A memory only in cosine, not in BM25
-	memOnlyCosine := makeMemory("mem-only-cos", "only in cosine", 0, types.VerdictNone, "", now)
-	memBoth := makeMemory("mem-both", "in both", 0, types.VerdictNone, "", now)
-
-	bm25Results := []*types.MemorySearchResult{
-		makeSearchResult(memBoth, 0.0),
-	}
-	cosineResults := []*types.MemorySearchResult{
-		makeSearchResult(memBoth, 0.5),
-		makeSearchResult(memOnlyCosine, 0.3),
-	}
-
-	merged := svc.mergeResults(bm25Results, cosineResults, 10)
-	require.Len(t, merged, 2, "should include both BM25-joined and cosine-only memories")
+	low := makeMemory("low", "x", -5, types.VerdictNone, "", now)
+	high := makeMemory("high", "x", 6, types.VerdictNone, "", now)
+	hub := makeMemory("hub", "x", 0, types.VerdictNone, "", now)
+	hub.HubScore = 10
+	rs := svc.applySignalBoost([]*types.MemorySearchResult{makeSearchResult(low, 1), makeSearchResult(high, 1), makeSearchResult(hub, 1)})
+	assert.InDelta(t, 0.75, rs[0].Score, 1e-9)
+	assert.InDelta(t, 1.3, rs[1].Score, 1e-9)
+	assert.InDelta(t, 1.3, rs[2].Score, 1e-9, "hub capped at 3")
 }
 
 // ---------------------------------------------------------------------------
@@ -547,86 +390,30 @@ func TestSessionBoost_MultipleMemories(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// Score threshold filtering
+// Relative score floor
 // ---------------------------------------------------------------------------
 
-func TestScoreThreshold_AboveThresholdKept(t *testing.T) {
+func TestScoreThreshold_RelativeToBest(t *testing.T) {
 	svc := newTestService()
-	svc.config.MinScoreThreshold = 0.5
-
+	svc.config.RelativeScoreFloor = 0.5
 	now := time.Now()
-	mem := makeMemory("mem-1", "good memory", 0, types.VerdictNone, "", now)
-	results := []*types.MemorySearchResult{
-		makeSearchResult(mem, 0.7),
+	rs := []*types.MemorySearchResult{
+		makeSearchResult(makeMemory("a", "a", 0, types.VerdictNone, "", now), 0.8),
+		makeSearchResult(makeMemory("b", "b", 0, types.VerdictNone, "", now), 0.4),
+		makeSearchResult(makeMemory("c", "c", 0, types.VerdictNone, "", now), 0.39),
 	}
-
-	filtered := svc.applyScoreThreshold(results)
-	require.Len(t, filtered, 1, "score above threshold should be kept")
+	got := svc.applyScoreThreshold(rs)
+	require.Len(t, got, 2)
+	assert.Equal(t, "b", got[1].Memory.ID, "exactly half of the best is kept")
 }
 
-func TestScoreThreshold_BelowThresholdExcluded(t *testing.T) {
+func TestScoreThreshold_DisabledAndEmpty(t *testing.T) {
 	svc := newTestService()
-	svc.config.MinScoreThreshold = 0.5
-
+	svc.config.RelativeScoreFloor = 0
 	now := time.Now()
-	mem := makeMemory("mem-1", "weak memory", 0, types.VerdictNone, "", now)
-	results := []*types.MemorySearchResult{
-		makeSearchResult(mem, 0.3),
-	}
-
-	filtered := svc.applyScoreThreshold(results)
-	require.Empty(t, filtered, "score below threshold should be excluded")
-}
-
-func TestScoreThreshold_DefaultThreshold(t *testing.T) {
-	svc := newTestService()
-	svc.config.MinScoreThreshold = 0 // forces default of 0.4
-
-	now := time.Now()
-	memLow := makeMemory("mem-low", "low", 0, types.VerdictNone, "", now)
-	memHigh := makeMemory("mem-high", "high", 0, types.VerdictNone, "", now)
-
-	results := []*types.MemorySearchResult{
-		makeSearchResult(memLow, 0.2),
-		makeSearchResult(memHigh, 0.6),
-	}
-
-	filtered := svc.applyScoreThreshold(results)
-
-	// Default threshold 0.4 filters out 0.2, keeps 0.6
-	require.Len(t, filtered, 1)
-	assert.Equal(t, "mem-high", filtered[0].Memory.ID)
-}
-
-func TestScoreThreshold_AtThresholdKept(t *testing.T) {
-	svc := newTestService()
-	svc.config.MinScoreThreshold = 0.5
-
-	now := time.Now()
-	mem := makeMemory("mem-1", "at threshold", 0, types.VerdictNone, "", now)
-	results := []*types.MemorySearchResult{
-		makeSearchResult(mem, 0.5),
-	}
-
-	filtered := svc.applyScoreThreshold(results)
-	require.Len(t, filtered, 1, "score exactly at threshold should be kept")
-}
-
-func TestScoreThreshold_AllBelowExcluded(t *testing.T) {
-	svc := newTestService()
-	svc.config.MinScoreThreshold = 0.8
-
-	now := time.Now()
-	memA := makeMemory("mem-a", "low", 0, types.VerdictNone, "", now)
-	memB := makeMemory("mem-b", "lower", 0, types.VerdictNone, "", now)
-
-	results := []*types.MemorySearchResult{
-		makeSearchResult(memA, 0.1),
-		makeSearchResult(memB, 0.2),
-	}
-
-	filtered := svc.applyScoreThreshold(results)
-	require.Empty(t, filtered, "all scores below threshold should be excluded")
+	rs := []*types.MemorySearchResult{makeSearchResult(makeMemory("a", "a", 0, types.VerdictNone, "", now), 0.01)}
+	assert.Len(t, svc.applyScoreThreshold(rs), 1)
+	assert.Empty(t, svc.applyScoreThreshold(nil))
 }
 
 // ---------------------------------------------------------------------------
@@ -1115,9 +902,6 @@ func TestSearchMemories_EmptyQuery(t *testing.T) {
 		config:      types.DefaultMemoryV2Config(),
 		tokenBudget: NewTokenBudgetManager(),
 	}
-	// BM25-only scores (max 0.15) are below default threshold 0.4, so lower it
-	svc.config.MinScoreThreshold = 0.1
-
 	results, err := svc.SearchMemories(context.Background(), "", &types.MemoryFilter{
 		TenantID: "t1",
 		Limit:    10,

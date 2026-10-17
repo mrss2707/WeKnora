@@ -13,21 +13,19 @@ import (
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 )
 
-// Hybrid search weights for merging signals.
-const (
-	weightBM25     = 0.15
-	weightCosine   = 0.45
-	weightHubScore = 0.25
-	weightImpor    = 0.15
-)
+// rrfK is the Reciprocal Rank Fusion constant: fused = sum 1/(rrfK + rank).
+// RRF needs no score calibration between BM25 and cosine, which live on
+// unrelated scales.
+const rrfK = 60
 
 // ErrEmbeddingDimensionMismatch is returned when the query embedding dimension
 // does not match the stored embedding dimension, indicating a model mismatch.
 var ErrEmbeddingDimensionMismatch = fmt.Errorf("embedding dimension mismatch: query embedding model differs from the model used for stored memories; re-ingest memories with the current embedding model")
 
-// SearchMemories performs the hybrid search pipeline:
-// BM25 full-text search + HNSW cosine search + hub_score + importance scoring,
-// merges with configured weights, applies boosts and filters.
+// SearchMemories performs the hybrid search pipeline: BM25 keyword ranking
+// and HNSW vector ranking (both with every filter applied) fused by
+// Reciprocal Rank Fusion, then importance/hub/verdict/recency/session boosts,
+// then a vector-similarity floor and a floor relative to the best result.
 func (s *MemoryServiceV2Impl) SearchMemories(ctx context.Context, query string, filter *types.MemoryFilter) ([]*types.MemorySearchResult, error) {
 	if filter == nil {
 		return nil, fmt.Errorf("filter is required")
@@ -38,65 +36,45 @@ func (s *MemoryServiceV2Impl) SearchMemories(ctx context.Context, query string, 
 	if filter.Limit <= 0 {
 		filter.Limit = s.config.MaxSearchResults
 	}
+	if strings.TrimSpace(query) == "" {
+		// No query: the newest memories matching the filter, unranked.
+		f := *filter
+		f.Query = ""
+		results, _, err := s.repo.Search(ctx, &f)
+		return results, err
+	}
+	candidates := filter.Limit * 3
 
-	// Step 1: Run full-text search (BM25 via postgres text search)
-	bm25Results, err := s.fullTextSearch(ctx, query, filter)
+	// Step 1: Keyword ranking (BM25)
+	bm25Results, err := s.fullTextSearch(ctx, query, filter, candidates)
 	if err != nil {
 		logger.Errorf(ctx, "full-text search failed: %v", err)
 		bm25Results = nil
 	}
 
-	// Step 2: Run cosine vector search (requires embedding)
+	// Step 2: Vector ranking (requires embedding)
 	var cosineResults []*types.MemorySearchResult
-	if query != "" {
-		embedder, modelID, err := s.embedderFor(ctx, filter.TenantID, filter.KbID)
-		if err != nil {
-			logger.Errorf(ctx, "embedder not available: %v", err)
-		} else {
-			vector, err := embedder.Embed(ctx, query)
-			if err != nil {
-				logger.Errorf(ctx, "embedding query failed: %v", err)
-			} else if len(vector) > 0 {
-				cosineFilter := &types.MemoryFilter{
-					TenantID:         filter.TenantID,
-					KbID:             filter.KbID,
-					Verdicts:         filter.Verdicts,
-					EmbeddingModelID: modelID,
-				}
-				cosineResults, err = s.repo.CosineSearch(ctx, cosineFilter, vector, filter.Limit*2)
-				if err != nil {
-					if isDimensionMismatch(err) {
-						logger.Warnf(ctx, "[MemoryV2] Embedding dimension mismatch: %v. "+
-							"Stored memories were embedded with a different model. "+
-							"Re-ingest memories or switch to the original embedding model.", err)
-					} else {
-						logger.Errorf(ctx, "cosine search failed: %v", err)
-					}
-					cosineResults = nil
-				}
-			}
-		}
+	if strings.TrimSpace(query) != "" {
+		cosineResults = s.vectorSearch(ctx, query, filter, candidates)
 	}
 
-	// Step 3: Merge results with weighted scoring
-	merged := s.mergeResults(bm25Results, cosineResults, filter.Limit)
+	// Step 3: Fuse rankings, drop weak vector-only matches
+	merged := s.fuseRankings(bm25Results, cosineResults)
 
-	// Step 4: Apply recency boost
+	// Step 4: Boosts
+	merged = s.applySignalBoost(merged)
 	merged = s.applyRecencyBoost(merged)
-
-	// Step 5: Apply verdict filtering and boost
 	merged = s.applyVerdictFilter(merged, filter)
-
-	// Step 6: Apply session boost
 	merged = s.applySessionBoost(merged, filter.SessionID)
 
-	// Step 7: Apply score threshold
-	merged = s.applyScoreThreshold(merged)
-
-	// Step 8: Sort by score descending and limit
-	sort.Slice(merged, func(i, j int) bool {
+	// Step 5: Sort, keep results close to the best one, limit
+	sort.SliceStable(merged, func(i, j int) bool {
 		return merged[i].Score > merged[j].Score
 	})
+	merged = s.applyScoreThreshold(merged)
+	if filter.MinScore > 0 {
+		merged = keepAtLeast(merged, filter.MinScore)
+	}
 	if len(merged) > filter.Limit {
 		merged = merged[:filter.Limit]
 	}
@@ -112,6 +90,39 @@ func (s *MemoryServiceV2Impl) SearchMemories(ctx context.Context, query string, 
 
 	s.trackAccess(ctx, filter.TenantID, merged)
 	return merged, nil
+}
+
+// vectorSearch embeds the query with the scope's model and runs the filtered
+// vector search. Failures degrade to keyword-only results.
+func (s *MemoryServiceV2Impl) vectorSearch(ctx context.Context, query string, filter *types.MemoryFilter, limit int) []*types.MemorySearchResult {
+	embedder, modelID, err := s.embedderFor(ctx, filter.TenantID, filter.KbID)
+	if err != nil {
+		logger.Errorf(ctx, "embedder not available: %v", err)
+		return nil
+	}
+	vector, err := embedder.Embed(ctx, query)
+	if err != nil {
+		logger.Errorf(ctx, "embedding query failed: %v", err)
+		return nil
+	}
+	if len(vector) == 0 {
+		return nil
+	}
+	f := *filter
+	f.Query = ""
+	f.EmbeddingModelID = modelID
+	results, err := s.repo.CosineSearch(ctx, &f, vector, limit)
+	if err != nil {
+		if isDimensionMismatch(err) {
+			logger.Warnf(ctx, "[MemoryV2] Embedding dimension mismatch: %v. "+
+				"Stored memories were embedded with a different model. "+
+				"Re-ingest memories or switch to the original embedding model.", err)
+		} else {
+			logger.Errorf(ctx, "cosine search failed: %v", err)
+		}
+		return nil
+	}
+	return results
 }
 
 // trackAccess records, off the request path, that these memories were
@@ -139,105 +150,98 @@ func (s *MemoryServiceV2Impl) trackAccess(ctx context.Context, tenantID string, 
 	}()
 }
 
-// fullTextSearch runs BM25-like full text search using postgres text search via the repo.
-func (s *MemoryServiceV2Impl) fullTextSearch(ctx context.Context, query string, filter *types.MemoryFilter) ([]*types.MemorySearchResult, error) {
-	searchFilter := &types.MemoryFilter{
-		TenantID:   filter.TenantID,
-		KbID:       filter.KbID,
-		UserID:     filter.UserID,
-		Query:      query,
-		MemoryType: filter.MemoryType,
-		Tier:       filter.Tier,
-		Verdicts:   filter.Verdicts,
-		SessionID:  filter.SessionID,
-		Limit:      filter.Limit * 2,
+// fullTextSearch ranks memories by keyword relevance (BM25 when the
+// repository supports it, otherwise keyword matches in recency order).
+func (s *MemoryServiceV2Impl) fullTextSearch(ctx context.Context, query string, filter *types.MemoryFilter, limit int) ([]*types.MemorySearchResult, error) {
+	if strings.TrimSpace(query) == "" {
+		return nil, nil
 	}
-
-	results, _, err := s.repo.Search(ctx, searchFilter)
+	f := *filter
+	f.Query = query
+	f.Limit = limit
+	f.Offset = 0
+	if ranker, ok := s.repo.(interfaces.MemoryV2KeywordRanker); ok {
+		return ranker.BM25Search(ctx, &f)
+	}
+	results, _, err := s.repo.Search(ctx, &f)
 	return results, err
 }
 
-// mergeResults combines BM25 and cosine results with weighted scoring.
-func (s *MemoryServiceV2Impl) mergeResults(bm25, cosine []*types.MemorySearchResult, limit int) []*types.MemorySearchResult {
-	if len(bm25) == 0 && len(cosine) == 0 {
-		return nil
+// fuseRankings merges the keyword and vector rankings with Reciprocal Rank
+// Fusion. The fused score is normalized so a memory ranked first by both
+// signals scores 1. Vector-only matches below MinCosine are dropped: they
+// share no keyword with the query and are not similar enough to be relevant.
+func (s *MemoryServiceV2Impl) fuseRankings(bm25, cosine []*types.MemorySearchResult) []*types.MemorySearchResult {
+	type entry struct {
+		result  *types.MemorySearchResult
+		fused   float64
+		keyword bool
+		cosine  float64
 	}
-	if len(bm25) == 0 {
-		// Only cosine: use cosine scores directly
-		for _, r := range cosine {
-			r.Score = r.Score * weightCosine
+	byID := map[string]*entry{}
+	var order []string
+	add := func(r *types.MemorySearchResult, rank int, keyword bool) {
+		if r == nil || r.Memory == nil || r.Memory.ID == "" {
+			return
 		}
-		return cosine
-	}
-	if len(cosine) == 0 {
-		// Only BM25: assign heuristic score based on position
-		for i, r := range bm25 {
-			r.Score = float64(len(bm25)-i) / float64(len(bm25)) * weightBM25
+		e, ok := byID[r.Memory.ID]
+		if !ok {
+			e = &entry{result: r}
+			byID[r.Memory.ID] = e
+			order = append(order, r.Memory.ID)
 		}
-		return bm25
-	}
-
-	// Build score map from cosine results
-	cosineScores := make(map[string]float64)
-	cosineImportance := make(map[string]int)
-	cosineHubScore := make(map[string]float64)
-	for _, r := range cosine {
-		if r.Memory != nil {
-			cosineScores[r.Memory.ID] = r.Score
-			cosineImportance[r.Memory.ID] = r.Memory.Importance
-			cosineHubScore[r.Memory.ID] = r.Memory.HubScore
+		e.fused += 1.0 / float64(rrfK+rank+1)
+		if keyword {
+			e.keyword = true
+		} else {
+			e.cosine = r.Score
+			// Prefer the vector result's projection: it carries hub_score.
+			e.result = r
 		}
 	}
-
-	// Track seen IDs to avoid duplicates
-	seen := make(map[string]bool)
-	var merged []*types.MemorySearchResult
-
-	// Process BM25 results first
 	for i, r := range bm25 {
+		add(r, i, true)
+	}
+	for i, r := range cosine {
+		add(r, i, false)
+	}
+
+	minCos := s.config.MinCosine
+	best := 2.0 / float64(rrfK+1)
+	out := make([]*types.MemorySearchResult, 0, len(order))
+	for _, id := range order {
+		e := byID[id]
+		if !e.keyword && e.cosine < minCos {
+			continue
+		}
+		e.result.Score = e.fused / best
+		out = append(out, e.result)
+	}
+	return out
+}
+
+// applySignalBoost scales scores by stored importance and graph centrality.
+func (s *MemoryServiceV2Impl) applySignalBoost(results []*types.MemorySearchResult) []*types.MemorySearchResult {
+	for _, r := range results {
 		if r.Memory == nil {
 			continue
 		}
-		id := r.Memory.ID
-		seen[id] = true
-
-		bm25score := float64(len(bm25)-i) / float64(len(bm25))
-
-		cosScore := cosineScores[id]
-		impScore := float64(cosineImportance[id]+5) / 11.0 // Normalize [-5,6] to [0,1]
-		if impScore > 1 {
-			impScore = 1
-		}
-		if impScore < 0 {
-			impScore = 0
-		}
-		hubScore := math.Min(cosineHubScore[id]/5.0, 1.0)
-
-		r.Score = bm25score*weightBM25 + cosScore*weightCosine + hubScore*weightHubScore + impScore*weightImpor
-		merged = append(merged, r)
+		imp := float64(clampInt(r.Memory.Importance, minImportance, maxImportance))
+		r.Score *= 1 + 0.05*imp
+		r.Score *= 1 + 0.1*math.Min(math.Max(r.Memory.HubScore, 0), 3)
 	}
+	return results
+}
 
-	// Add cosine-only results
-	for _, r := range cosine {
-		if r.Memory == nil || seen[r.Memory.ID] {
-			continue
+// keepAtLeast drops results scoring below min.
+func keepAtLeast(results []*types.MemorySearchResult, min float64) []*types.MemorySearchResult {
+	out := results[:0]
+	for _, r := range results {
+		if r.Score >= min {
+			out = append(out, r)
 		}
-		seen[r.Memory.ID] = true
-
-		impScore := float64(r.Memory.Importance+5) / 11.0
-		if impScore > 1 {
-			impScore = 1
-		}
-		if impScore < 0 {
-			impScore = 0
-		}
-		hubScore := math.Min(r.Memory.HubScore/5.0, 1.0)
-
-		r.Score = r.Score*weightCosine + hubScore*weightHubScore + impScore*weightImpor
-		merged = append(merged, r)
 	}
-
-	return merged
+	return out
 }
 
 // applyRecencyBoost applies a 2-tier recency boost.
@@ -321,21 +325,24 @@ func (s *MemoryServiceV2Impl) applySessionBoost(results []*types.MemorySearchRes
 	return results
 }
 
-// applyScoreThreshold discards results below the configured minimum score.
+// applyScoreThreshold keeps results scoring at least RelativeScoreFloor of
+// the best result. Results must be sorted by score, best first.
 func (s *MemoryServiceV2Impl) applyScoreThreshold(results []*types.MemorySearchResult) []*types.MemorySearchResult {
-	threshold := s.config.MinScoreThreshold
-	if threshold <= 0 {
-		threshold = 0.4
+	if len(results) == 0 {
+		return results
 	}
-
-	var filtered []*types.MemorySearchResult
+	ratio := s.config.RelativeScoreFloor
+	if ratio <= 0 {
+		return results
+	}
+	floor := results[0].Score * ratio
+	out := results[:0]
 	for _, r := range results {
-		if r.Score >= threshold {
-			filtered = append(filtered, r)
+		if r.Score >= floor {
+			out = append(out, r)
 		}
 	}
-
-	return filtered
+	return out
 }
 
 // extractKeywordsFromQuery extracts important words from a query for BM25 search.

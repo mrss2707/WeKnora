@@ -338,18 +338,26 @@ type DedupConfig struct {
 // MemoryV2Config is the top-level configuration for the Memory v2 module.
 // See design.md section 2.7 for field specifications.
 type MemoryV2Config struct {
-	Enabled            bool               `json:"enabled" yaml:"enabled"`
-	MaxSearchResults   int                `json:"max_search_results" yaml:"max_search_results"`
-	SemanticDedup      DedupConfig        `json:"semantic_dedup" yaml:"semantic_dedup"`
-	RecencyBoost       RecencyBoostConfig `json:"recency_boost" yaml:"recency_boost"`
-	TokenBudget        TokenBudgetConfig  `json:"token_budget" yaml:"token_budget"`
-	Dreamer            DreamerConfig      `json:"dreamer" yaml:"dreamer"`
-	CacheWarmer        CacheWarmerConfig  `json:"cache_warmer" yaml:"cache_warmer"`
-	LintOnWrite        LintOnWriteConfig  `json:"lint_on_write" yaml:"lint_on_write"`
-	MinScoreThreshold  float64            `json:"min_score_threshold" yaml:"min_score_threshold"`   // default: 0.4
-	HNSWM              int                `json:"hnsw_m" yaml:"hnsw_m"`                             // default: 16
-	HNSWEfConstruction int                `json:"hnsw_ef_construction" yaml:"hnsw_ef_construction"` // default: 200
-	HNSWEfSearch       int                `json:"hnsw_ef_search" yaml:"hnsw_ef_search"`             // default: 100
+	Enabled          bool               `json:"enabled" yaml:"enabled"`
+	MaxSearchResults int                `json:"max_search_results" yaml:"max_search_results"`
+	SemanticDedup    DedupConfig        `json:"semantic_dedup" yaml:"semantic_dedup"`
+	RecencyBoost     RecencyBoostConfig `json:"recency_boost" yaml:"recency_boost"`
+	TokenBudget      TokenBudgetConfig  `json:"token_budget" yaml:"token_budget"`
+	Dreamer          DreamerConfig      `json:"dreamer" yaml:"dreamer"`
+	CacheWarmer      CacheWarmerConfig  `json:"cache_warmer" yaml:"cache_warmer"`
+	LintOnWrite      LintOnWriteConfig  `json:"lint_on_write" yaml:"lint_on_write"`
+	// MinScoreThreshold is deprecated: fused scores are relative, see
+	// MinCosine and RelativeScoreFloor. Kept so existing configs still load.
+	MinScoreThreshold float64 `json:"min_score_threshold" yaml:"min_score_threshold"`
+	// MinCosine drops vector-only matches below this cosine similarity
+	// (keyword matches are kept). Calibrated on the recall eval.
+	MinCosine float64 `json:"min_cosine" yaml:"min_cosine"`
+	// RelativeScoreFloor drops results scoring below this fraction of the
+	// best result's fused score.
+	RelativeScoreFloor float64 `json:"relative_score_floor" yaml:"relative_score_floor"`
+	HNSWM              int     `json:"hnsw_m" yaml:"hnsw_m"`                             // default: 16
+	HNSWEfConstruction int     `json:"hnsw_ef_construction" yaml:"hnsw_ef_construction"` // default: 200
+	HNSWEfSearch       int     `json:"hnsw_ef_search" yaml:"hnsw_ef_search"`             // default: 100
 	// WorkerMutations arms the background workers that modify or delete
 	// stored memories (scheduled dreamer, consolidator, pruner, entity
 	// extractor). Off by default: until those workers are scoped per knowledge
@@ -400,6 +408,8 @@ func DefaultMemoryV2Config() MemoryV2Config {
 			NearDuplicateThreshold: 0.90,
 		},
 		MinScoreThreshold:  0.4,
+		MinCosine:          0.45,
+		RelativeScoreFloor: 0.25,
 		HNSWM:              16,
 		HNSWEfConstruction: 200,
 		HNSWEfSearch:       100,

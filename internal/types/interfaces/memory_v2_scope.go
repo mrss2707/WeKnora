@@ -12,3 +12,9 @@ import (
 type MemoryV2ScopeLister interface {
 	ListMemoryScopes(ctx context.Context) ([]types.MemoryScope, error)
 }
+
+// MemoryV2KeywordRanker is an optional capability of MemoryRepositoryV2 that
+// ranks memories by keyword relevance (BM25) instead of recency.
+type MemoryV2KeywordRanker interface {
+	BM25Search(ctx context.Context, filter *types.MemoryFilter) ([]*types.MemorySearchResult, error)
+}
