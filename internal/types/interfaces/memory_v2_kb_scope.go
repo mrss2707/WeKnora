@@ -36,3 +36,10 @@ type MemoryV2KBScopeRepository interface {
 	// soft-deletes relations whose endpoints ended up in different tenants.
 	SyncRelationTenants(ctx context.Context, memoryIDs []string) (retenanted, dropped int64, err error)
 }
+
+// MemoryV2OrphanReclaimer is an optional capability of MemoryRepositoryV2 that
+// finds and removes memories whose knowledge base was deleted.
+type MemoryV2OrphanReclaimer interface {
+	ListOrphanedKBMemories(ctx context.Context, limit int) ([]*types.AgentMemory, error)
+	SoftDeleteMemoriesWithRelations(ctx context.Context, tenantID string, ids []string) error
+}

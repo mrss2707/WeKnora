@@ -4,6 +4,7 @@ import (
 	stderrors "errors"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
@@ -22,11 +23,9 @@ type createMemoryRequest struct {
 	SessionID string `json:"session_id"`
 }
 
-// updateMemoryRequest is a partial metadata update. Content edits re-run the
-// ingestion pipeline and are not accepted by this endpoint.
+// updateMemoryRequest is a partial update; see interfaces.MemoryV2Patch.
 type updateMemoryRequest struct {
 	interfaces.MemoryV2Patch
-	Content *string `json:"content,omitempty"`
 }
 
 // ---------------------------------------------------------------------------
@@ -44,7 +43,7 @@ func (h *MemoryV2Handler) CreateMemory(c *gin.Context) {
 		return
 	}
 	ctx, tenantID, ok := h.scopeForKB(c, req.KbID, types.OrgRoleEditor)
-	if !ok {
+	if !ok || !h.limitWrite(c) {
 		return
 	}
 
@@ -73,8 +72,10 @@ func (h *MemoryV2Handler) CreateMemory(c *gin.Context) {
 // PUT /api/v1/memories/:id
 // ---------------------------------------------------------------------------
 
-// UpdateMemory applies a partial metadata update (verdict, importance, tier,
-// memory_type, tags) and returns the updated memory.
+// UpdateMemory applies a partial update (content, verdict, importance, tier,
+// memory_type, tags) and returns the updated memory. Send the memory's
+// updated_at as expected_updated_at (or an If-Unmodified-Since header) to
+// reject the write with 409 when someone else changed it meanwhile.
 func (h *MemoryV2Handler) UpdateMemory(c *gin.Context) {
 	if !h.requireTenant(c) {
 		return
@@ -90,9 +91,12 @@ func (h *MemoryV2Handler) UpdateMemory(c *gin.Context) {
 		c.Error(errors.NewBadRequestError("Invalid request: " + err.Error()))
 		return
 	}
-	if req.Content != nil {
-		c.Error(errors.NewBadRequestError("Editing memory content is not supported; create a new memory instead"))
-		return
+	if req.ExpectedUpdatedAt == nil {
+		if raw := strings.TrimSpace(c.GetHeader("If-Unmodified-Since")); raw != "" {
+			if t, err := time.Parse(time.RFC3339Nano, raw); err == nil {
+				req.ExpectedUpdatedAt = &t
+			}
+		}
 	}
 	if req.IsEmpty() {
 		c.Error(errors.NewBadRequestError("No updatable fields provided"))
@@ -100,7 +104,7 @@ func (h *MemoryV2Handler) UpdateMemory(c *gin.Context) {
 	}
 
 	ctx, tenantID, ok := h.scopeForMemory(c, id, types.OrgRoleEditor)
-	if !ok {
+	if !ok || !h.limitWrite(c) {
 		return
 	}
 	patcher, ok := h.memorySvc.(interfaces.MemoryV2Patcher)
@@ -117,11 +121,18 @@ func (h *MemoryV2Handler) UpdateMemory(c *gin.Context) {
 }
 
 // writeMemoryError maps Memory V2 service errors to API errors: validation →
-// 400, missing → 404, protected verdict → 409, anything else → 500.
+// 400, missing → 404, protected verdict or conflict → 409, else → 500.
 func (h *MemoryV2Handler) writeMemoryError(c *gin.Context, err error, msg, tenantID, memoryID string) {
 	var validation *types.ErrMemoryValidation
 	var protected *types.ErrProtectedVerdict
+	var conflict *types.MemoryV2ConflictError
 	switch {
+	case stderrors.As(err, &conflict):
+		appErr := errors.NewConflictError(conflict.Message)
+		if conflict.ExistingID != "" {
+			appErr.Details = gin.H{"existing_id": conflict.ExistingID}
+		}
+		c.Error(appErr)
 	case stderrors.As(err, &validation):
 		c.Error(errors.NewValidationError(validation.Message))
 	case stderrors.Is(err, gorm.ErrRecordNotFound):

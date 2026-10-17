@@ -16,10 +16,12 @@ import (
 
 // MemoryV2Handler handles Memory V2 API requests (11 endpoints).
 type MemoryV2Handler struct {
-	memorySvc  interfaces.MemoryServiceV2
-	memoryRepo interfaces.MemoryRepositoryV2
-	kbService  interfaces.KnowledgeBaseService
-	kbShares   interfaces.KBShareService
+	memorySvc    interfaces.MemoryServiceV2
+	memoryRepo   interfaces.MemoryRepositoryV2
+	kbService    interfaces.KnowledgeBaseService
+	kbShares     interfaces.KBShareService
+	writeLimiter *memoryV2Limiter
+	dreamLimiter *memoryV2Limiter
 }
 
 // NewMemoryV2Handler creates a new MemoryV2Handler.
@@ -30,10 +32,12 @@ func NewMemoryV2Handler(
 	kbShares interfaces.KBShareService,
 ) *MemoryV2Handler {
 	return &MemoryV2Handler{
-		memorySvc:  memorySvc,
-		memoryRepo: memoryRepo,
-		kbService:  kbService,
-		kbShares:   kbShares,
+		memorySvc:    memorySvc,
+		memoryRepo:   memoryRepo,
+		kbService:    kbService,
+		kbShares:     kbShares,
+		writeLimiter: memoryV2WriteLimiterFromEnv(),
+		dreamLimiter: memoryV2DreamLimiterFromEnv(),
 	}
 }
 
@@ -186,16 +190,18 @@ func (h *MemoryV2Handler) DeleteMemory(c *gin.Context) {
 		return
 	}
 	ctx, tenantID, ok := h.scopeForMemory(c, id, types.OrgRoleEditor)
-	if !ok {
+	if !ok || !h.limitWrite(c) {
 		return
 	}
 
-	if err := h.memoryRepo.Delete(ctx, tenantID, id); err != nil {
-		logger.ErrorWithFields(ctx, err, map[string]interface{}{
-			"tenant_id": tenantID,
-			"memory_id": id,
-		})
-		c.Error(errors.NewInternalServerError("Failed to delete memory: " + err.Error()))
+	var err error
+	if deleter, ok := h.memorySvc.(interfaces.MemoryV2Deleter); ok {
+		err = deleter.DeleteMemory(ctx, tenantID, id)
+	} else {
+		err = h.memoryRepo.Delete(ctx, tenantID, id)
+	}
+	if err != nil {
+		h.writeMemoryError(c, err, "Failed to delete memory", tenantID, id)
 		return
 	}
 
@@ -370,6 +376,17 @@ func (h *MemoryV2Handler) GetMemoryStats(c *gin.Context) {
 		return
 	}
 
+	if reader, ok := h.memoryRepo.(interfaces.MemoryV2StatsReader); ok {
+		stats, err := reader.Stats(ctx, tenantID, kbID)
+		if err != nil {
+			logger.ErrorWithFields(ctx, err, map[string]interface{}{"tenant_id": tenantID})
+			c.Error(errors.NewInternalServerError("Failed to get memory stats"))
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"success": true, "data": stats})
+		return
+	}
+
 	// Total count (Limit=1 is enough since total is returned separately)
 	totalFilter := &types.MemoryFilter{
 		TenantID: tenantID,
@@ -464,7 +481,7 @@ func (h *MemoryV2Handler) TriggerDream(c *gin.Context) {
 		}
 	}
 	ctx, tenantID, ok := h.scopeForKB(c, kbID, types.OrgRoleAdmin)
-	if !ok {
+	if !ok || !h.limitDream(c, tenantID, kbID) {
 		return
 	}
 

@@ -134,9 +134,19 @@ func (r *MemoryRepository) Delete(ctx context.Context, tenantID, id string) erro
 			return &types.ErrProtectedVerdict{}
 		}
 	}
-	return r.db.WithContext(ctx).
-		Where("tenant_id = ? AND id = ?", tenantID, id).
-		Delete(&types.AgentMemory{}).Error
+	// The memory and its relations go together: an edge to a deleted memory
+	// would otherwise linger in the graph and in hub scores.
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		res := tx.Where("tenant_id = ? AND id = ?", tenantID, id).Delete(&types.AgentMemory{})
+		if res.Error != nil || res.RowsAffected == 0 {
+			return res.Error
+		}
+		return softDeleteRelationsOf(tx, tenantID, []string{id})
+	})
+	if err == nil {
+		r.InvalidateResultCache(ctx, tenantID)
+	}
+	return err
 }
 
 // isAutomatedActor reports whether ctx carries an automated actor identity.

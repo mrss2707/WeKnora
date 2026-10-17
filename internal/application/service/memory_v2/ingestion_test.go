@@ -320,12 +320,14 @@ func TestCheckSemanticDedupNearDuplicateOverCapIsStoredSeparately(t *testing.T) 
 	assert.Equal(t, strings.Repeat("x", 40), existing.Content)
 }
 
-func TestMergeMemoryUpdateErrorIsWrapped(t *testing.T) {
+func TestMergeMemoriesUpdateErrorIsWrapped(t *testing.T) {
 	repo := newIngestionRepo()
 	repo.updateErr = errors.New("write conflict")
 	svc := newIngestionService(repo)
 
-	result, err := svc.mergeMemory(context.Background(), &types.AgentMemory{Content: "new content"}, &types.AgentMemory{ID: "existing-1", Content: "existing content"}, 0.94)
+	result, err := svc.mergeMemories(context.Background(),
+		&types.AgentMemory{ID: "existing-1", TenantID: "1", Content: "existing content"}, nil,
+		&types.AgentMemory{Content: "new content"})
 
 	assert.Nil(t, result)
 	require.Error(t, err)

@@ -11,6 +11,8 @@ Native Go + PostgreSQL/pgvector memory module (per-KB, multi-tenant). Schema:
 | 900075 | `memory_v2_verdict` | Verdict system on `agent_memories` + `dreamer_state` |
 | 900076 | `memory_v2_hnsw` | Replaces ivfflat with HNSW vector index |
 | 900078 | `memory_v2_kb_scope_repair` | Audit log for moving shared-KB memories to the KB owner's tenant |
+| 900079 | `memory_v2_audit` | Per-memory audit trail (actor, before/after) for History and merge undo |
+| 900080 | `memory_v2_access_trigger` | Reads (access_count) no longer bump updated_at |
 
 Module migrations live in the reserved range **900000–909999** so they can never
 collide with core migrations in `migrations/versioned/` (which upstream `main`

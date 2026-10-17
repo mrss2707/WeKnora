@@ -132,6 +132,11 @@ func runMemoryV2KBScopeRepair(repo interfaces.MemoryRepositoryV2) {
 	if err != nil {
 		logger.Errorf(ctx, "[MemoryV2] kb scope repair (%s) failed: %v", mode, err)
 	}
+	if n, err := memoryServiceV2.ReclaimOrphanedMemories(ctx, repo, mode); err != nil {
+		logger.Errorf(ctx, "[MemoryV2] orphan reclaim (%s) failed: %v", mode, err)
+	} else if n > 0 {
+		logger.Warnf(ctx, "[MemoryV2] orphan reclaim mode=%s: %d memories of deleted knowledge bases", mode, n)
+	}
 	if report == nil || report.Detected == 0 {
 		return
 	}

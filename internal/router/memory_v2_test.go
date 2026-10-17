@@ -28,11 +28,13 @@ var memoryV2RouteCases = []struct {
 	{http.MethodGet, "/api/v1/memories/stats", "/api/v1/memories/stats", types.TenantRoleViewer},
 	{http.MethodGet, "/api/v1/memories/health", "/api/v1/memories/health", types.TenantRoleViewer},
 	{http.MethodGet, "/api/v1/memories/graph/:id", "/api/v1/memories/graph/m1", types.TenantRoleViewer},
+	{http.MethodGet, "/api/v1/memories/history", "/api/v1/memories/history", types.TenantRoleViewer},
 	{http.MethodGet, "/api/v1/memories/:id", "/api/v1/memories/m1", types.TenantRoleViewer},
 	{http.MethodPost, "/api/v1/memories", "/api/v1/memories", types.TenantRoleContributor},
 	{http.MethodPut, "/api/v1/memories/:id", "/api/v1/memories/m1", types.TenantRoleContributor},
 	{http.MethodDelete, "/api/v1/memories/:id", "/api/v1/memories/m1", types.TenantRoleContributor},
 	{http.MethodPost, "/api/v1/memories/dream", "/api/v1/memories/dream", types.TenantRoleAdmin},
+	{http.MethodPost, "/api/v1/memories/:id/undo-merge", "/api/v1/memories/m1/undo-merge", types.TenantRoleAdmin},
 	{http.MethodGet, "/api/v1/tenants/memory-status", "/api/v1/tenants/memory-status", types.TenantRoleViewer},
 }
 

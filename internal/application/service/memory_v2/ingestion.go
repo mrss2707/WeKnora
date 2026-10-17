@@ -126,12 +126,15 @@ func (s *MemoryServiceV2Impl) SaveMemory(ctx context.Context, memory *types.Agen
 	if err := s.repo.Create(ctx, memory); err != nil {
 		return nil, fmt.Errorf("store failed: %w", err)
 	}
+	s.recordAudit(ctx, newAudit(ctx, types.MemoryAuditCreated, nil, memory, nil))
 
 	// Step 9: Lint on write (pass pre-computed embedding to avoid re-embed)
 	lintIssues := RunLintOnWrite(ctx, memory, s.repo, s.config.LintOnWrite, embedding)
 
-	// Step 10: Enqueue for batch entity extraction (skip if workers not initialized)
-	if s.entityExtractor != nil {
+	// Step 10: Enqueue for batch entity extraction. The extractor rewrites
+	// tags, so it only runs when mutating workers are armed (an unarmed
+	// extractor would also buffer forever).
+	if s.entityExtractor != nil && s.config.WorkerMutations {
 		s.entityExtractor.Enqueue(memory)
 	}
 
@@ -151,14 +154,15 @@ func (s *MemoryServiceV2Impl) SaveMemory(ctx context.Context, memory *types.Agen
 
 // validateContent validates memory content.
 func validateContent(content string) error {
-	if len(content) < 10 {
+	n := utf8.RuneCountInString(content)
+	if n < 10 {
 		return &ErrMemoryValidation{
-			Message: fmt.Sprintf("content length %d is less than minimum 10 characters", len(content)),
+			Message: fmt.Sprintf("content length %d is less than minimum 10 characters", n),
 		}
 	}
-	if len(content) > 10000 {
+	if n > maxContentChars {
 		return &ErrMemoryValidation{
-			Message: fmt.Sprintf("content length %d exceeds maximum 10000 characters", len(content)),
+			Message: fmt.Sprintf("content length %d exceeds maximum %d characters", n, maxContentChars),
 		}
 	}
 
@@ -249,53 +253,22 @@ func (s *MemoryServiceV2Impl) checkSemanticDedup(ctx context.Context, memory *ty
 			if existing == nil || existing.KbID != memory.KbID {
 				continue
 			}
-			merged, err := s.mergeMemory(ctx, memory, existing, score)
+			if existing.Verdict.IsProtected() {
+				continue // never rewrite a decision/fixed memory automatically
+			}
+			merged, err := s.mergeMemories(ctx, existing, nil, memory)
 			if errors.Is(err, errMergeTooLong) {
 				continue
 			}
-			return merged, err
+			if err != nil {
+				return nil, err
+			}
+			return &types.SaveMemoryResult{Memory: merged, Created: false}, nil
 		}
 	}
 
 	return nil, nil
 }
-
-// mergeMemory merges new content into an existing near-duplicate memory.
-// When the combined text would exceed the merge cap the merge is skipped and
-// errMergeTooLong is returned so the caller stores the new memory on its own
-// rather than silently dropping its content.
-func (s *MemoryServiceV2Impl) mergeMemory(ctx context.Context, newMem, existingMem *types.AgentMemory, similarity float64) (*types.SaveMemoryResult, error) {
-	maxChars := s.config.SemanticDedup.MergeMaxChars
-	if maxChars <= 0 || maxChars > maxContentChars {
-		maxChars = maxContentChars
-	}
-
-	mergedContent := existingMem.Content + "\n---\n" + newMem.Content
-	if utf8.RuneCountInString(mergedContent) > maxChars {
-		return nil, errMergeTooLong
-	}
-
-	existingMem.Content = mergedContent
-	existingMem.UpdatedAt = time.Now()
-
-	// Update importance to the max of both
-	if newMem.Importance > existingMem.Importance {
-		existingMem.Importance = newMem.Importance
-	}
-
-	if err := s.repo.Update(ctx, existingMem); err != nil {
-		return nil, fmt.Errorf("merge update failed: %w", err)
-	}
-
-	return &types.SaveMemoryResult{
-		Memory:  existingMem,
-		Created: false,
-	}, nil
-}
-
-// errMergeTooLong signals that a near-duplicate merge was skipped because the
-// merged content would exceed the cap.
-var errMergeTooLong = errors.New("merged content exceeds cap")
 
 // detectMemoryType uses keyword heuristics to detect the memory type.
 func detectMemoryType(content string) string {

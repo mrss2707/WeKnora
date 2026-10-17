@@ -102,3 +102,35 @@ func TestKBScopeRepairMovesMismatchedRowsToOwnerTenant(t *testing.T) {
 	assert.Empty(t, again, "repair is idempotent")
 	require.NoError(t, repo.MoveToKBOwnerTenant(ctx, found[0], "x"), "a stale replay is a no-op")
 }
+
+func TestOrphanedKBMemoriesAreFoundAndReclaimed(t *testing.T) {
+	db := memoryV2PostgresDB(t)
+	require.NoError(t, db.Exec(kbScopeExtraDDL).Error)
+	require.NoError(t, db.Exec(`INSERT INTO knowledge_bases (id, tenant_id) VALUES ('kb-live', 1)`).Error)
+	require.NoError(t, db.Exec(`INSERT INTO knowledge_bases (id, tenant_id, deleted_at) VALUES ('kb-gone', 1, now())`).Error)
+	seedMemory(t, db, "keep", "1", "kb-live", "")
+	seedMemory(t, db, "orphan-deleted-kb", "1", "kb-gone", "")
+	seedMemory(t, db, "orphan-missing-kb", "1", "kb-never-existed", "")
+	seedMemory(t, db, "no-kb", "1", "", "")
+	require.NoError(t, db.Exec(`INSERT INTO memory_relations (id, tenant_id, from_uuid, to_uuid, relation_type) VALUES ('r1', '1', 'keep', 'orphan-deleted-kb', 'related_to')`).Error)
+	repo := NewMemoryRepository(db)
+	ctx := context.Background()
+
+	orphans, err := repo.ListOrphanedKBMemories(ctx, 0)
+	require.NoError(t, err)
+	ids := []string{}
+	for _, m := range orphans {
+		ids = append(ids, m.ID)
+	}
+	assert.ElementsMatch(t, []string{"orphan-deleted-kb", "orphan-missing-kb"}, ids)
+
+	require.NoError(t, repo.SoftDeleteMemoriesWithRelations(ctx, "1", ids))
+	again, err := repo.ListOrphanedKBMemories(ctx, 0)
+	require.NoError(t, err)
+	assert.Empty(t, again)
+	var liveRelations int64
+	require.NoError(t, db.Table("memory_relations").Where("deleted_at IS NULL").Count(&liveRelations).Error)
+	assert.Zero(t, liveRelations, "edges into reclaimed memories are removed")
+	_, err = repo.GetByID(ctx, "1", "keep")
+	assert.NoError(t, err, "memories of live knowledge bases are untouched")
+}

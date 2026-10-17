@@ -10,6 +10,7 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
+	"github.com/Tencent/WeKnora/internal/types/interfaces"
 )
 
 // Hybrid search weights for merging signals.
@@ -109,7 +110,33 @@ func (s *MemoryServiceV2Impl) SearchMemories(ctx context.Context, query string, 
 		}
 	}
 
+	s.trackAccess(ctx, filter.TenantID, merged)
 	return merged, nil
+}
+
+// trackAccess records, off the request path, that these memories were
+// returned (feeds pruning and staleness decisions).
+func (s *MemoryServiceV2Impl) trackAccess(ctx context.Context, tenantID string, results []*types.MemorySearchResult) {
+	tracker, ok := s.repo.(interfaces.MemoryV2AccessTracker)
+	if !ok || tenantID == "" || len(results) == 0 {
+		return
+	}
+	ids := make([]string, 0, len(results))
+	for _, r := range results {
+		if r.Memory != nil && r.Memory.ID != "" && r.Memory.TenantID == tenantID {
+			ids = append(ids, r.Memory.ID)
+		}
+	}
+	if len(ids) == 0 {
+		return
+	}
+	bg, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	go func() {
+		defer cancel()
+		if err := tracker.TouchAccess(bg, tenantID, ids); err != nil {
+			logger.Warnf(bg, "[MemoryV2] access tracking failed: %v", err)
+		}
+	}()
 }
 
 // fullTextSearch runs BM25-like full text search using postgres text search via the repo.

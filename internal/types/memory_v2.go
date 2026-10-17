@@ -452,6 +452,16 @@ func (e *ErrMemoryValidation) Error() string {
 	return "memory validation error: " + e.Message
 }
 
+// MemoryV2ConflictError is returned when a memory changed since the caller read
+// it (optimistic lock) or a write would duplicate another memory; API layers
+// map it to 409.
+type MemoryV2ConflictError struct {
+	Message    string
+	ExistingID string
+}
+
+func (e *MemoryV2ConflictError) Error() string { return "memory conflict: " + e.Message }
+
 // ErrProtectedVerdict is returned when an automated process tries to change a
 // protected verdict (decision, fixed).
 type ErrProtectedVerdict struct{}
@@ -492,4 +502,60 @@ func NewMemory(tenantID, content string) *AgentMemory {
 // Matches the SQL: LN(1 + degree) * avg_weight
 func HubScoreFromDegree(degree, avgWeight float64) float64 {
 	return math.Log(1+degree) * avgWeight
+}
+
+// ---------------------------------------------------------------------------
+// Audit
+// ---------------------------------------------------------------------------
+
+// Memory audit actions.
+const (
+	MemoryAuditCreated   = "created"
+	MemoryAuditPatched   = "patched"
+	MemoryAuditMerged    = "merged"
+	MemoryAuditMergedIn  = "merged_into"
+	MemoryAuditDeleted   = "deleted"
+	MemoryAuditUnmerged  = "unmerged"
+	MemoryAuditDreamed   = "dreamed"
+	MemoryAuditReclaimed = "reclaimed"
+)
+
+// MemoryAuditEntry is one row of agent_memories_audit: who changed which
+// memory, how, and its state before and after.
+type MemoryAuditEntry struct {
+	ID        int64     `gorm:"column:id;primaryKey;autoIncrement" json:"id"`
+	TenantID  string    `gorm:"column:tenant_id" json:"tenant_id"`
+	KbID      string    `gorm:"column:kb_id" json:"kb_id"`
+	MemoryID  string    `gorm:"column:memory_id" json:"memory_id"`
+	Actor     string    `gorm:"column:actor" json:"actor"`
+	UserID    string    `gorm:"column:user_id" json:"user_id,omitempty"`
+	Action    string    `gorm:"column:action" json:"action"`
+	Before    []byte    `gorm:"column:before;type:jsonb" json:"-"`
+	After     []byte    `gorm:"column:after;type:jsonb" json:"-"`
+	Details   []byte    `gorm:"column:details;type:jsonb;default:'{}'" json:"-"`
+	CreatedAt time.Time `gorm:"column:created_at" json:"created_at"`
+}
+
+// TableName overrides the GORM table name.
+func (MemoryAuditEntry) TableName() string { return "agent_memories_audit" }
+
+// MemoryAuditFilter selects audit entries of one knowledge base (and
+// optionally one memory), newest first.
+type MemoryAuditFilter struct {
+	TenantID string
+	KbID     string
+	MemoryID string
+	Actions  []string
+	Limit    int
+	Offset   int
+}
+
+// MemoryStats aggregates the live memories of a scope.
+type MemoryStats struct {
+	TotalMemories int64            `json:"total_memories"`
+	ByType        map[string]int64 `json:"by_type"`
+	ByTier        map[string]int64 `json:"by_tier"`
+	ByVerdict     map[string]int64 `json:"by_verdict"`
+	AvgImportance float64          `json:"avg_importance"`
+	AvgHubScore   float64          `json:"avg_hub_score"`
 }

@@ -84,6 +84,20 @@ CREATE UNIQUE INDEX idx_memory_relations_unique
     ON memory_relations(from_uuid, to_uuid, relation_type)
     WHERE deleted_at IS NULL;
 
+CREATE TABLE agent_memories_audit (
+    id BIGSERIAL PRIMARY KEY,
+    tenant_id VARCHAR(36) NOT NULL,
+    kb_id VARCHAR(36) NOT NULL DEFAULT '',
+    memory_id VARCHAR(36) NOT NULL,
+    actor VARCHAR(64) NOT NULL DEFAULT '',
+    user_id VARCHAR(36) NOT NULL DEFAULT '',
+    action VARCHAR(32) NOT NULL,
+    before JSONB,
+    after JSONB,
+    details JSONB NOT NULL DEFAULT '{}',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
 CREATE TABLE dreamer_state (
     id VARCHAR(36) PRIMARY KEY,
     tenant_id VARCHAR(36) NOT NULL UNIQUE,

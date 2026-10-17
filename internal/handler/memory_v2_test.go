@@ -541,7 +541,7 @@ func TestMemoryV2Handler_UpdateMemory(t *testing.T) {
 			{name: "missing tenant", body: map[string]any{"verdict": "wip"}, id: "mem-1", noAuth: true, wantErr: "Tenant ID"},
 			{name: "missing id", body: map[string]any{"verdict": "wip"}, wantErr: "Memory ID"},
 			{name: "invalid json", raw: "{", id: "mem-1", wantErr: "Invalid request"},
-			{name: "content edit rejected", body: map[string]any{"content": "new text here"}, id: "mem-1", wantErr: "content is not supported", wantHTTP: http.StatusBadRequest},
+			{name: "stale write", body: map[string]any{"content": "new text here"}, id: "mem-1", svcErr: &types.MemoryV2ConflictError{Message: "the memory was changed by someone else"}, wantErr: "changed by someone else", wantHTTP: http.StatusConflict},
 			{name: "empty patch", body: map[string]any{}, id: "mem-1", wantErr: "No updatable fields", wantHTTP: http.StatusBadRequest},
 			{name: "validation", body: map[string]any{"importance": 99}, id: "mem-1", svcErr: &types.ErrMemoryValidation{Message: "importance must be between -5 and 6"}, wantErr: "importance must be", wantHTTP: http.StatusBadRequest},
 			{name: "protected verdict", body: map[string]any{"verdict": "none"}, id: "mem-1", svcErr: &types.ErrProtectedVerdict{}, wantErr: "protected verdict", wantHTTP: http.StatusConflict},
@@ -576,6 +576,39 @@ func TestMemoryV2Handler_UpdateMemory(t *testing.T) {
 			})
 		}
 	})
+}
+
+func TestMemoryV2Handler_UpdateMemoryContentAndLock(t *testing.T) {
+	svc := &memoryV2HandlerServiceFake{patchResult: &types.AgentMemory{ID: "mem-1"}}
+	h := NewMemoryV2Handler(svc, &memoryV2HandlerRepoFake{}, nil, nil)
+	c, recorder := newMemoryV2HandlerTestContext(http.MethodPut, "/memories/mem-1", map[string]any{"content": "Kết nối postgres đã được tăng lên"})
+	c.Params = gin.Params{{Key: "id", Value: "mem-1"}}
+	c.Request.Header.Set("If-Unmodified-Since", "2026-10-17T10:00:00.123456Z")
+	setMemoryV2Auth(c, 42, "user-1")
+
+	h.UpdateMemory(c)
+
+	require.Equal(t, http.StatusOK, recorder.Code)
+	require.NotNil(t, svc.patch.Content)
+	assert.Equal(t, "Kết nối postgres đã được tăng lên", *svc.patch.Content)
+	require.NotNil(t, svc.patch.ExpectedUpdatedAt, "If-Unmodified-Since becomes the optimistic lock")
+	assert.Equal(t, 123456000, svc.patch.ExpectedUpdatedAt.Nanosecond())
+}
+
+func TestMemoryV2Handler_UpdateMemoryDuplicateConflictCarriesExistingID(t *testing.T) {
+	svc := &memoryV2HandlerServiceFake{patchErr: &types.MemoryV2ConflictError{Message: "duplicate", ExistingID: "mem-9"}}
+	h := NewMemoryV2Handler(svc, &memoryV2HandlerRepoFake{}, nil, nil)
+	c, _ := newMemoryV2HandlerTestContext(http.MethodPut, "/memories/mem-1", map[string]any{"content": "same as mem-9 text"})
+	c.Params = gin.Params{{Key: "id", Value: "mem-1"}}
+	setMemoryV2Auth(c, 42, "")
+
+	h.UpdateMemory(c)
+
+	require.Len(t, c.Errors, 1)
+	var appErr *apperrors.AppError
+	require.ErrorAs(t, c.Errors.Last().Err, &appErr)
+	assert.Equal(t, http.StatusConflict, appErr.HTTPCode)
+	assert.Equal(t, gin.H{"existing_id": "mem-9"}, appErr.Details)
 }
 
 func TestMemoryV2Handler_DeleteMemory(t *testing.T) {

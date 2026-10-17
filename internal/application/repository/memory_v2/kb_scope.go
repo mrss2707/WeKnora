@@ -133,3 +133,37 @@ WHERE f.id = r.from_uuid AND t.id = r.to_uuid
 	})
 	return retenanted, dropped, err
 }
+
+// ListOrphanedKBMemories returns up to limit live memories whose knowledge
+// base no longer exists (deleted or missing). Memories without a knowledge
+// base are not orphans.
+func (r *MemoryRepository) ListOrphanedKBMemories(ctx context.Context, limit int) ([]*types.AgentMemory, error) {
+	q := r.db.WithContext(ctx).Table("agent_memories AS m").
+		Select("m.id, m.tenant_id, m.kb_id, m.user_id, m.content, m.memory_type, m.importance, m.tier, m.verdict, m.tags, m.created_at, m.updated_at").
+		Where("m.deleted_at IS NULL AND m.kb_id <> ''").
+		Where("NOT EXISTS (SELECT 1 FROM knowledge_bases kb WHERE kb.id = m.kb_id AND kb.deleted_at IS NULL)").
+		Order("m.created_at ASC")
+	if limit > 0 {
+		q = q.Limit(limit)
+	}
+	var rows []*types.AgentMemory
+	return rows, q.Scan(&rows).Error
+}
+
+// SoftDeleteMemoriesWithRelations soft-deletes the given memories of one
+// tenant and every relation touching them, in one transaction.
+func (r *MemoryRepository) SoftDeleteMemoriesWithRelations(ctx context.Context, tenantID string, ids []string) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Where("tenant_id = ? AND id IN ?", tenantID, ids).Delete(&types.AgentMemory{}).Error; err != nil {
+			return err
+		}
+		return softDeleteRelationsOf(tx, tenantID, ids)
+	})
+	if err == nil {
+		r.InvalidateResultCache(ctx, tenantID)
+	}
+	return err
+}
