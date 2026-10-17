@@ -562,3 +562,9 @@ func TestHeuristics_WordBoundaries(t *testing.T) {
 	assert.False(t, containsPhrase("undecidedness", "decided"))
 	assert.True(t, containsPhrase("đã quyết định xong", "quyết định"))
 }
+
+func TestHeuristics_EnglishInflections(t *testing.T) {
+	// Phrases match on word boundaries, so inflected cue words are listed.
+	assert.Equal(t, "preference", detectMemoryType("The user prefers clean architecture with dependency injection"))
+	assert.Equal(t, "decision", detectMemoryType("We decide on Postgres for every new service"))
+}

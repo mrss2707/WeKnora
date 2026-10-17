@@ -13,6 +13,7 @@ Native Go + PostgreSQL/pgvector memory module (per-KB, multi-tenant). Schema:
 | 900078 | `memory_v2_kb_scope_repair` | Audit log for moving shared-KB memories to the KB owner's tenant |
 | 900079 | `memory_v2_audit` | Per-memory audit trail (actor, before/after) for History and merge undo |
 | 900080 | `memory_v2_access_trigger` | Reads (access_count) no longer bump updated_at |
+| 900081 | `memory_v2_dreamer_scope` | Dreamer lock/state per (tenant, knowledge base) with heartbeat |
 
 Module migrations live in the reserved range **900000–909999** so they can never
 collide with core migrations in `migrations/versioned/` (which upstream `main`
@@ -88,8 +89,25 @@ Disable with `MEMORY_V2_KB_SCOPE_REPAIR=off`; use `=audit` to only log findings.
 
 ## Background workers
 
-Workers that modify or delete stored memories (scheduled dreamer, consolidator,
-pruner, entity extractor) are disarmed by default via
-`memory_v2.worker_mutations: false` (env `MEMORY_V2_WORKER_MUTATIONS`). While
-disarmed they do not start, and `POST /memories/dream` returns proposals only
-(dry run). Arm them only once they are scoped per knowledge base and audited.
+Workers iterate live (tenant, knowledge base) scopes and use each knowledge
+base's own models. `memory_v2.worker_mutations` (env
+`MEMORY_V2_WORKER_MUTATIONS`, default on) is the kill switch for all workers
+that modify memories; while off none starts and `POST /memories/dream` only
+returns proposals. Per worker:
+
+- **Dreamer** (default on, env `MEMORY_V2_DREAMER_ENABLED`): one pass per
+  changed knowledge base, locked per scope in `dreamer_state` (900081) with a
+  heartbeat TTL. Allowed: verdict changes among refuted/gotcha/wip/none and
+  importance ±1; never to or from a protected verdict (decision, fixed). Merges
+  are proposals for the first `merge_live_after_runs` passes, then require a
+  server-side cosine ≥ `merge_min_cosine`. Remove is off. A circuit breaker,
+  a per-tenant daily token budget and an `updated_at` re-check guard every
+  pass. Changes go through the service, so each one lands in
+  `agent_memories_audit` and merges can be undone (`POST /memories/:id/undo-merge`).
+  Reviewing a memory sets `metadata.dreamed_at` without bumping `updated_at`.
+- **Consolidator** (default on): hub scores, and importance −1 for memories
+  unread and unchanged for a year (floor 0, protected excluded).
+- **Pruner** (default on): soft-deletes memories past `expires_at`, and tier-3
+  memories never read, importance ≤ 0, older than 30 days; never protected
+  ones. Soft-deleted rows are purged 30 days later.
+- **Entity extractor** (default off).

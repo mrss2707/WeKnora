@@ -2,15 +2,12 @@ package workers
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/Tencent/WeKnora/internal/models/embedding"
 	"strings"
 	"sync"
 	"testing"
 	"time"
-	"unicode/utf8"
 
 	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -20,1554 +17,417 @@ import (
 )
 
 // ---------------------------------------------------------------------------
-// Mock types
+// Fakes
 // ---------------------------------------------------------------------------
 
-// mockDreamerRepo implements interfaces.MemoryRepositoryV2 for testing the dreamer.
-type mockDreamerRepo struct {
-	mu                 sync.Mutex
-	createFunc         func(ctx context.Context, memory *types.AgentMemory) error
-	getByIDFunc        func(ctx context.Context, tenantID, id string) (*types.AgentMemory, error)
-	updateFunc         func(ctx context.Context, memory *types.AgentMemory) error
-	deleteFunc         func(ctx context.Context, tenantID, id string) error
-	searchFunc         func(ctx context.Context, filter *types.MemoryFilter) ([]*types.MemorySearchResult, int64, error)
-	cosineSearchFunc   func(ctx context.Context, filter *types.MemoryFilter, embedding []float32, limit int) ([]*types.MemorySearchResult, error)
-	tryDreamerLockFunc func(ctx context.Context, tenantID string, workerID string) (bool, error)
-	unlockDreamerFunc  func(ctx context.Context, tenantID string) error
-	computeHubScores   func(ctx context.Context, tenantID string) error
-	invalidateCache    func(ctx context.Context, tenantID string)
+// dreamStore is an in-memory repository with every capability the dreamer
+// uses: scope lock, scope listing, batch loading, pair similarity.
+type dreamStore struct {
+	interfaces.MemoryRepositoryV2 // unused methods panic if called
 
-	// Tracking
-	tryLockCalls []tryLockCall
-	unlockCalls  []string
-	updateCalls  []*types.AgentMemory
-	deleteCalls  []deleteCall
-	searchCalls  int
+	mu        sync.Mutex
+	mems      map[string]*types.AgentMemory
+	order     []string
+	scopes    []Scope
+	state     map[string]*types.DreamerState
+	lockedBy  map[string]string
+	changed   bool
+	sim       map[[2]string]float64
+	marked    []string
+	released  []map[string]interface{}
+	lockCalls int
 }
 
-type tryLockCall struct {
-	TenantID string
-	WorkerID string
-}
-
-func (m *mockDreamerRepo) Create(ctx context.Context, memory *types.AgentMemory) error {
-	if m.createFunc != nil {
-		return m.createFunc(ctx, memory)
+func newDreamStore(mems ...*types.AgentMemory) *dreamStore {
+	s := &dreamStore{mems: map[string]*types.AgentMemory{}, state: map[string]*types.DreamerState{},
+		lockedBy: map[string]string{}, changed: true, sim: map[[2]string]float64{}}
+	seen := map[Scope]bool{}
+	for _, m := range mems {
+		s.mems[m.ID] = m
+		s.order = append(s.order, m.ID)
+		sc := Scope{TenantID: m.TenantID, KbID: m.KbID}
+		if !seen[sc] {
+			seen[sc] = true
+			s.scopes = append(s.scopes, sc)
+		}
 	}
-	return nil
+	return s
 }
 
-func (m *mockDreamerRepo) GetByID(ctx context.Context, tenantID, id string) (*types.AgentMemory, error) {
-	if m.getByIDFunc != nil {
-		return m.getByIDFunc(ctx, tenantID, id)
-	}
-	return nil, nil
+func key(t, k string) string { return t + "/" + k }
+
+func (s *dreamStore) ListMemoryScopes(context.Context) ([]types.MemoryScope, error) {
+	return s.scopes, nil
 }
 
-func (m *mockDreamerRepo) Update(ctx context.Context, memory *types.AgentMemory) error {
-	m.mu.Lock()
-	cpy := *memory
-	m.updateCalls = append(m.updateCalls, &cpy)
-	m.mu.Unlock()
-	if m.updateFunc != nil {
-		return m.updateFunc(ctx, memory)
+func (s *dreamStore) TryScopeLock(_ context.Context, t, k, w string, _ time.Duration) (bool, *types.DreamerState, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.lockCalls++
+	if holder := s.lockedBy[key(t, k)]; holder != "" && holder != w {
+		return false, &types.DreamerState{}, nil
 	}
-	return nil
+	s.lockedBy[key(t, k)] = w
+	st, ok := s.state[key(t, k)]
+	if !ok {
+		st = &types.DreamerState{TenantID: t, KbID: k}
+		s.state[key(t, k)] = st
+	}
+	cp := *st
+	return true, &cp, nil
 }
 
-func (m *mockDreamerRepo) Delete(ctx context.Context, tenantID, id string) error {
-	m.mu.Lock()
-	m.deleteCalls = append(m.deleteCalls, deleteCall{TenantID: tenantID, ID: id})
-	m.mu.Unlock()
-	if m.deleteFunc != nil {
-		return m.deleteFunc(ctx, tenantID, id)
-	}
-	return nil
-}
-
-func (m *mockDreamerRepo) Search(ctx context.Context, filter *types.MemoryFilter) ([]*types.MemorySearchResult, int64, error) {
-	m.mu.Lock()
-	m.searchCalls++
-	m.mu.Unlock()
-	if m.searchFunc != nil {
-		return m.searchFunc(ctx, filter)
-	}
-	return nil, 0, nil
-}
-
-func (m *mockDreamerRepo) CosineSearch(ctx context.Context, filter *types.MemoryFilter, embedding []float32, limit int) ([]*types.MemorySearchResult, error) {
-	if m.cosineSearchFunc != nil {
-		return m.cosineSearchFunc(ctx, filter, embedding, limit)
-	}
-	return nil, nil
-}
-
-func (m *mockDreamerRepo) TryDreamerLock(ctx context.Context, tenantID string, workerID string) (bool, error) {
-	m.mu.Lock()
-	m.tryLockCalls = append(m.tryLockCalls, tryLockCall{TenantID: tenantID, WorkerID: workerID})
-	m.mu.Unlock()
-	if m.tryDreamerLockFunc != nil {
-		return m.tryDreamerLockFunc(ctx, tenantID, workerID)
-	}
+func (s *dreamStore) HeartbeatScopeLock(context.Context, string, string, string, time.Duration) (bool, error) {
 	return true, nil
 }
 
-func (m *mockDreamerRepo) UnlockDreamer(ctx context.Context, tenantID string) error {
-	m.mu.Lock()
-	m.unlockCalls = append(m.unlockCalls, tenantID)
-	m.mu.Unlock()
-	if m.unlockDreamerFunc != nil {
-		return m.unlockDreamerFunc(ctx, tenantID)
+func (s *dreamStore) ReleaseScopeLock(_ context.Context, t, k, w string, ran bool, stats map[string]interface{}) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.lockedBy[key(t, k)] == w {
+		delete(s.lockedBy, key(t, k))
+	}
+	if ran {
+		st := s.state[key(t, k)]
+		st.Runs++
+		now := time.Now()
+		st.LastRunAt = &now
+		s.released = append(s.released, stats)
 	}
 	return nil
 }
 
-func (m *mockDreamerRepo) ComputeHubScores(ctx context.Context, tenantID string) error {
-	if m.computeHubScores != nil {
-		return m.computeHubScores(ctx, tenantID)
+func (s *dreamStore) ScopeChangedSince(_ context.Context, _, _ string, t *time.Time) (bool, error) {
+	return t == nil || s.changed, nil
+}
+
+func (s *dreamStore) LeastRecentlyDreamed(_ context.Context, t, k string, limit int) ([]*types.AgentMemory, error) {
+	var out []*types.AgentMemory
+	for _, id := range s.order {
+		m := s.mems[id]
+		if m != nil && m.TenantID == t && m.KbID == k && len(out) < limit {
+			cp := *m
+			out = append(out, &cp)
+		}
 	}
+	return out, nil
+}
+
+func (s *dreamStore) MarkDreamed(_ context.Context, _ string, ids []string, _ time.Time) error {
+	s.marked = append(s.marked, ids...)
 	return nil
 }
 
-func (m *mockDreamerRepo) InvalidateResultCache(ctx context.Context, tenantID string) {
-	if m.invalidateCache != nil {
-		m.invalidateCache(ctx, tenantID)
+func (s *dreamStore) GetByID(_ context.Context, t, id string) (*types.AgentMemory, error) {
+	m := s.mems[id]
+	if m == nil || m.TenantID != t {
+		return nil, errors.New("not found")
 	}
+	cp := *m
+	return &cp, nil
 }
 
-func (m *mockDreamerRepo) GetByFingerprint(ctx context.Context, tenantID, fingerprint string) (*types.AgentMemory, error) {
+func (s *dreamStore) PairSimilarity(_ context.Context, _ string, a, b string) (float64, error) {
+	if v, ok := s.sim[[2]string{a, b}]; ok {
+		return v, nil
+	}
+	return s.sim[[2]string{b, a}], nil
+}
+
+// recordingApplier records the changes the dreamer asks the service to make.
+type recordingApplier struct {
+	patches []string
+	merges  []string
+	deletes []string
+	err     error
+}
+
+func (a *recordingApplier) PatchMemory(_ context.Context, _, id string, p interfaces.MemoryV2Patch) (*types.AgentMemory, error) {
+	switch {
+	case p.Verdict != nil:
+		a.patches = append(a.patches, fmt.Sprintf("%s verdict=%s", id, *p.Verdict))
+	case p.Importance != nil:
+		a.patches = append(a.patches, fmt.Sprintf("%s importance=%d", id, *p.Importance))
+	}
+	if p.ExpectedUpdatedAt == nil {
+		a.patches = append(a.patches, "MISSING OPTIMISTIC LOCK")
+	}
+	return &types.AgentMemory{ID: id}, a.err
+}
+
+func (a *recordingApplier) MergeInto(_ context.Context, s *types.AgentMemory, l []*types.AgentMemory) (*types.AgentMemory, error) {
+	a.merges = append(a.merges, s.ID+"<-"+l[0].ID)
+	return s, a.err
+}
+
+func (a *recordingApplier) DeleteMemory(_ context.Context, _, id string) error {
+	a.deletes = append(a.deletes, id)
+	return a.err
+}
+
+// scriptedChat replies with a fixed text and records the prompt.
+type scriptedChat struct {
+	reply  string
+	err    error
+	prompt string
+	opts   *chat.ChatOptions
+	calls  int
+}
+
+func (c *scriptedChat) Chat(_ context.Context, msgs []chat.Message, opts *chat.ChatOptions) (*types.ChatResponse, error) {
+	c.calls++
+	c.prompt, c.opts = msgs[len(msgs)-1].Content, opts
+	return &types.ChatResponse{Content: c.reply}, c.err
+}
+func (c *scriptedChat) ChatStream(context.Context, []chat.Message, *chat.ChatOptions) (<-chan types.StreamResponse, error) {
 	return nil, nil
 }
-func (m *mockDreamerRepo) CreateRelation(ctx context.Context, rel *types.MemoryRelation) error {
-	return nil
-}
-func (m *mockDreamerRepo) GetRelations(ctx context.Context, memoryID, tenantID string) ([]*types.MemoryRelation, error) {
-	return nil, nil
-}
-func (m *mockDreamerRepo) DeleteRelation(ctx context.Context, id, tenantID string) error {
-	return nil
-}
-func (m *mockDreamerRepo) HardDeleteExpired(ctx context.Context, tenantID string, olderThan time.Time) (int64, error) {
-	return 0, nil
-}
-func (m *mockDreamerRepo) SetCacheInvalidator(invalidator interfaces.CacheInvalidator) {}
-func (m *mockDreamerRepo) GetEmbeddingDimension(ctx context.Context, tenantID string) (int, error) {
-	return 0, nil
+func (c *scriptedChat) GetModelName() string { return "scripted" }
+func (c *scriptedChat) GetModelID() string   { return "scripted" }
+
+func dmem(id string, v types.MemoryVerdict, importance int) *types.AgentMemory {
+	past := time.Now().Add(-time.Hour)
+	return &types.AgentMemory{ID: id, TenantID: "1", KbID: "kb", Content: "memory " + id,
+		MemoryType: "fact", Verdict: v, Importance: importance, Tier: 2, CreatedAt: past, UpdatedAt: past}
 }
 
-// mockDreamerChat implements chat.Chat for testing.
-type mockDreamerChat struct {
-	chatFunc func(ctx context.Context, messages []chat.Message, opts *chat.ChatOptions) (*types.ChatResponse, error)
-}
-
-func (m *mockDreamerChat) Chat(ctx context.Context, messages []chat.Message, opts *chat.ChatOptions) (*types.ChatResponse, error) {
-	if m.chatFunc != nil {
-		return m.chatFunc(ctx, messages, opts)
+func newDreamer(store *dreamStore, c chat.Chat, a DreamApplier, mut ...func(*types.DreamerConfig)) *DreamerWorker {
+	cfg := types.DefaultMemoryV2Config().Dreamer
+	for _, m := range mut {
+		m(&cfg)
 	}
-	return &types.ChatResponse{Content: `{"actions":[]}`}, nil
+	d := NewDreamerWorker(store, c, cfg, nil)
+	if a != nil {
+		d.WithApplier(a)
+	}
+	return d
 }
 
-func (m *mockDreamerChat) ChatStream(ctx context.Context, messages []chat.Message, opts *chat.ChatOptions) (<-chan types.StreamResponse, error) {
-	return nil, nil
-}
-
-func (m *mockDreamerChat) GetModelName() string { return "mock-dreamer" }
-
-func (m *mockDreamerChat) GetModelID() string { return "mock-dreamer-model" }
+const conf = `"confidence":0.95,"reason":"r"`
 
 // ---------------------------------------------------------------------------
-// Helpers
+// Tests
 // ---------------------------------------------------------------------------
 
-func makeDreamerMemory(id, tenantID, content string, verdict types.MemoryVerdict, importance, tier int) *types.AgentMemory {
-	return &types.AgentMemory{
-		ID:         id,
-		TenantID:   tenantID,
-		Content:    content,
-		Importance: importance,
-		Verdict:    verdict,
-		HubScore:   0,
-		CreatedAt:  time.Now().Add(-1 * time.Hour),
-		UpdatedAt:  time.Now().Add(-1 * time.Hour),
-		MemoryType: "semantic",
-		Tier:       tier,
+func TestDreamer_AppliesVerdictAndImportanceWithLocks(t *testing.T) {
+	store := newDreamStore(dmem("a", types.VerdictNone, 1), dmem("b", types.VerdictNone, 6))
+	llm := &scriptedChat{reply: "```json\n{\"actions\":[" +
+		`{"type":"update_verdict","index":1,"new_verdict":"gotcha",` + conf + `},` +
+		`{"type":"adjust_importance","index":2,"delta":1,` + conf + `}` + "]}\n```"}
+	app := &recordingApplier{}
+
+	res, err := newDreamer(store, llm, app).RunScopePass(context.Background(), "1", "kb")
+
+	require.NoError(t, err)
+	assert.Equal(t, []string{"a verdict=gotcha"}, app.patches, "importance already 6: +1 is skipped")
+	assert.Equal(t, 2, res.ActionsProposed)
+	assert.Equal(t, 1, res.ActionsApplied)
+	assert.Zero(t, llm.opts.Temperature, "deterministic")
+	assert.ElementsMatch(t, []string{"a", "b"}, store.marked, "the batch is marked reviewed")
+	assert.NotContains(t, llm.prompt, "\"a\"", "the model sees indexes, never database ids")
+}
+
+func TestDreamer_NeverTouchesProtectedVerdicts(t *testing.T) {
+	store := newDreamStore(dmem("d", types.VerdictDecision, 3), dmem("f", types.VerdictFixed, 3), dmem("n", types.VerdictNone, 3))
+	llm := &scriptedChat{reply: `{"actions":[` +
+		`{"type":"update_verdict","index":1,"new_verdict":"refuted",` + conf + `},` +
+		`{"type":"adjust_importance","index":2,"delta":-1,` + conf + `},` +
+		`{"type":"update_verdict","index":3,"new_verdict":"decision",` + conf + `},` +
+		`{"type":"update_verdict","index":3,"new_verdict":"fixed",` + conf + `}]}`}
+	app := &recordingApplier{}
+
+	res, err := newDreamer(store, llm, app).RunScopePass(context.Background(), "1", "kb")
+
+	require.NoError(t, err)
+	assert.Empty(t, app.patches, "decision/fixed can neither be changed nor be set by the dreamer")
+	assert.Zero(t, res.ActionsProposed)
+	assert.Contains(t, llm.prompt, "[protected]")
+}
+
+func TestDreamer_RejectsInvalidProposals(t *testing.T) {
+	store := newDreamStore(dmem("a", types.VerdictNone, 1))
+	llm := &scriptedChat{reply: `{"actions":[` +
+		`{"type":"update_verdict","index":9,"new_verdict":"gotcha",` + conf + `},` +
+		`{"type":"update_verdict","index":1,"new_verdict":"bogus",` + conf + `},` +
+		`{"type":"update_verdict","index":1,"new_verdict":"none",` + conf + `},` +
+		`{"type":"adjust_importance","index":1,"delta":3,` + conf + `},` +
+		`{"type":"adjust_importance","index":1,"delta":1,"confidence":0.5},` +
+		`{"type":"remove","index":1,` + conf + `},` +
+		`{"type":"explode","index":1,` + conf + `}]}`}
+	app := &recordingApplier{}
+
+	res, err := newDreamer(store, llm, app).RunScopePass(context.Background(), "1", "kb")
+
+	require.NoError(t, err)
+	assert.Zero(t, res.ActionsProposed, "out-of-range index, unknown verdict, no-op, big delta, low confidence, remove (off), unknown type")
+	assert.Empty(t, app.patches)
+	assert.Empty(t, app.deletes)
+}
+
+func TestDreamer_GarbageRepliesProposeNothing(t *testing.T) {
+	for _, reply := range []string{"", "I think all memories look fine.", "{not json", `{"actions": "x"}`} {
+		store := newDreamStore(dmem("a", types.VerdictNone, 1))
+		res, err := newDreamer(store, &scriptedChat{reply: reply}, &recordingApplier{}).RunScopePass(context.Background(), "1", "kb")
+		require.NoError(t, err, reply)
+		assert.Zero(t, res.ActionsProposed, reply)
 	}
 }
 
-func newTestDreamer(repo *mockDreamerRepo, chatClient chat.Chat, config types.DreamerConfig) *DreamerWorker {
-	return NewDreamerWorker(repo, chatClient, config, nil)
-}
-
-func TestParseDuration_DefaultInvalidAndValid(t *testing.T) {
-	fallback := 15 * time.Minute
-
-	assert.Equal(t, fallback, parseDuration("", fallback))
-	assert.Equal(t, fallback, parseDuration("not-a-duration", fallback))
-	assert.Equal(t, 2*time.Hour, parseDuration("2h", fallback))
-}
-
-func TestDreamer_DreamPassRunsAllTenantsAndContinuesAfterTenantError(t *testing.T) {
-	repo := &mockDreamerRepo{
-		searchFunc: func(ctx context.Context, filter *types.MemoryFilter) ([]*types.MemorySearchResult, int64, error) {
-			if filter.TenantID == "t1" {
-				return nil, 0, assert.AnError
-			}
-			return nil, 0, nil
-		},
+func TestDreamer_CircuitBreakerAbortsMassChanges(t *testing.T) {
+	var mems []*types.AgentMemory
+	var acts []string
+	for i := 1; i <= 9; i++ {
+		mems = append(mems, dmem(fmt.Sprintf("m%d", i), types.VerdictNone, 0))
+		acts = append(acts, fmt.Sprintf(`{"type":"update_verdict","index":%d,"new_verdict":"refuted",%s}`, i, conf))
 	}
-	d := NewDreamerWorker(repo, &mockDreamerChat{}, types.DreamerConfig{Enabled: true}, []string{"t1", "t2"})
+	store := newDreamStore(mems...)
+	app := &recordingApplier{}
+
+	res, err := newDreamer(store, &scriptedChat{reply: `{"actions":[` + strings.Join(acts, ",") + `]}`}, app).
+		RunScopePass(context.Background(), "1", "kb")
+
+	require.NoError(t, err)
+	assert.Empty(t, app.patches, "9 of 9 memories refuted at once is not trusted")
+	assert.Zero(t, res.ActionsApplied)
+	require.Len(t, store.released, 1)
+	assert.Contains(t, store.released[0]["aborted"], "circuit breaker")
+}
+
+func TestDreamer_MergeIsProbationaryAndServerVerified(t *testing.T) {
+	reply := `{"actions":[{"type":"merge","indexes":[1,2],` + conf + `}]}`
+	setup := func(runs int, sim float64) (*dreamStore, *recordingApplier, *types.DreamResult) {
+		store := newDreamStore(dmem("a", types.VerdictNone, 1), dmem("b", types.VerdictNone, 1))
+		store.state[key("1", "kb")] = &types.DreamerState{Runs: runs}
+		store.sim[[2]string{"a", "b"}] = sim
+		app := &recordingApplier{}
+		res, err := newDreamer(store, &scriptedChat{reply: reply}, app).RunScopePass(context.Background(), "1", "kb")
+		require.NoError(t, err)
+		return store, app, res
+	}
+
+	_, app, res := setup(0, 0.99)
+	assert.Empty(t, app.merges, "first passes only propose merges")
+	assert.Equal(t, 1, res.ActionsProposed)
+	assert.Len(t, res.Actions, 1)
+
+	_, app, _ = setup(3, 0.80)
+	assert.Empty(t, app.merges, "the model's opinion is not enough: stored vectors must agree")
+
+	_, app, res = setup(3, 0.97)
+	assert.Equal(t, []string{"a<-b"}, app.merges)
+	assert.Equal(t, 1, res.ActionsApplied)
+}
+
+func TestDreamer_SkipsMemoriesChangedAfterReview(t *testing.T) {
+	store := newDreamStore(dmem("a", types.VerdictNone, 1))
+	llm := &scriptedChat{reply: `{"actions":[{"type":"update_verdict","index":1,"new_verdict":"wip",` + conf + `}]}`}
+	d := newDreamer(store, llm, &recordingApplier{})
+	// A user edits the memory while the model is thinking.
+	store.mems["a"].UpdatedAt = time.Now().Add(time.Hour)
+	app := &recordingApplier{}
+	d.WithApplier(app)
+
+	res, err := d.RunScopePass(context.Background(), "1", "kb")
+
+	require.NoError(t, err)
+	assert.Empty(t, app.patches)
+	assert.Zero(t, res.ActionsApplied)
+}
+
+func TestDreamer_DryRunAndNoApplierOnlyPropose(t *testing.T) {
+	reply := `{"actions":[{"type":"update_verdict","index":1,"new_verdict":"wip",` + conf + `}]}`
+	app := &recordingApplier{}
+	res, err := newDreamer(newDreamStore(dmem("a", types.VerdictNone, 1)), &scriptedChat{reply: reply}, app,
+		func(c *types.DreamerConfig) { c.DryRun = true }).RunScopePass(context.Background(), "1", "kb")
+	require.NoError(t, err)
+	assert.Empty(t, app.patches)
+	assert.Equal(t, 1, res.ActionsProposed)
+	assert.Zero(t, res.ActionsApplied)
+
+	res, err = newDreamer(newDreamStore(dmem("a", types.VerdictNone, 1)), &scriptedChat{reply: reply}, nil).
+		RunScopePass(context.Background(), "1", "kb")
+	require.NoError(t, err)
+	assert.Zero(t, res.ActionsApplied, "without an applier nothing is written")
+}
+
+func TestDreamer_RemoveOnlyWhenAllowed(t *testing.T) {
+	reply := `{"actions":[{"type":"remove","index":1,` + conf + `}]}`
+	app := &recordingApplier{}
+	newDreamer(newDreamStore(dmem("a", types.VerdictNone, 1)), &scriptedChat{reply: reply}, app).
+		RunScopePass(context.Background(), "1", "kb")
+	assert.Empty(t, app.deletes, "remove is off by default")
+
+	newDreamer(newDreamStore(dmem("a", types.VerdictNone, 1)), &scriptedChat{reply: reply}, app,
+		func(c *types.DreamerConfig) { c.AllowRemove = true }).RunScopePass(context.Background(), "1", "kb")
+	assert.Equal(t, []string{"a"}, app.deletes)
+}
+
+func TestDreamer_ScheduledPassSkipsUnchangedScopesAndRunsPerKB(t *testing.T) {
+	other := dmem("x", types.VerdictNone, 1)
+	other.KbID = "kb-2"
+	store := newDreamStore(dmem("a", types.VerdictNone, 1), other)
+	llm := &scriptedChat{reply: `{"actions":[]}`}
+	d := newDreamer(store, llm, &recordingApplier{})
 
 	d.dreamPass(context.Background())
+	assert.Equal(t, 2, llm.calls, "one pass per knowledge base")
+	assert.NotContains(t, llm.prompt, "memory a", "a pass never mixes knowledge bases")
 
-	repo.mu.Lock()
-	defer repo.mu.Unlock()
-	require.Len(t, repo.tryLockCalls, 2)
-	assert.Equal(t, "t1", repo.tryLockCalls[0].TenantID)
-	assert.Equal(t, "t2", repo.tryLockCalls[1].TenantID)
-	assert.Equal(t, []string{"t1", "t2"}, repo.unlockCalls)
-}
-
-// scopedDreamerRepo adds scope enumeration to the dreamer repo mock.
-type scopedDreamerRepo struct {
-	*mockDreamerRepo
-	scopes []Scope
-}
-
-func (r *scopedDreamerRepo) ListMemoryScopes(context.Context) ([]Scope, error) {
-	return r.scopes, nil
-}
-
-// fakeResolver hands out a per-scope chat client and records lookups.
-type fakeResolver struct {
-	mu    sync.Mutex
-	chats map[string]chat.Chat
-	calls []string
-}
-
-func (f *fakeResolver) Embedder(context.Context, string, string) (embedding.Embedder, string, error) {
-	return nil, "", errors.New("no embedder in this test")
-}
-
-func (f *fakeResolver) Chat(_ context.Context, tenantID, kbID string) (chat.Chat, error) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.calls = append(f.calls, tenantID+"/"+kbID)
-	if c, ok := f.chats[tenantID+"/"+kbID]; ok {
-		return c, nil
-	}
-	return nil, errors.New("no chat model")
-}
-
-func TestDreamer_DreamPassRunsPerScopeWithScopeModel(t *testing.T) {
-	var mu sync.Mutex
-	var filters []types.MemoryFilter
-	base := &mockDreamerRepo{
-		searchFunc: func(ctx context.Context, filter *types.MemoryFilter) ([]*types.MemorySearchResult, int64, error) {
-			mu.Lock()
-			filters = append(filters, *filter)
-			mu.Unlock()
-			mem := makeDreamerMemory("m-"+filter.KbID, filter.TenantID, "content", types.VerdictNone, 1, 2)
-			mem.KbID = filter.KbID
-			return []*types.MemorySearchResult{makeSearchResult(mem)}, 1, nil
-		},
-	}
-	repo := &scopedDreamerRepo{mockDreamerRepo: base, scopes: []Scope{{TenantID: "1", KbID: "kb-a"}, {TenantID: "2", KbID: "kb-b"}}}
-	chatA := &mockDreamerChat{}
-	chatB := &mockDreamerChat{}
-	resolver := &fakeResolver{chats: map[string]chat.Chat{"1/kb-a": chatA, "2/kb-b": chatB}}
-	d := NewDreamerWorker(repo, nil, types.DreamerConfig{Enabled: true}, nil).WithResolver(resolver)
-
+	store.changed = false
 	d.dreamPass(context.Background())
+	assert.Equal(t, 2, llm.calls, "nothing changed since the last pass: no model call")
 
-	assert.Equal(t, []string{"1/kb-a", "2/kb-b"}, resolver.calls, "each scope uses its own knowledge base's model")
-	require.Len(t, filters, 2)
-	assert.Equal(t, "1", filters[0].TenantID)
-	assert.Equal(t, "kb-a", filters[0].KbID, "a pass never mixes knowledge bases")
-	assert.Equal(t, "2", filters[1].TenantID)
-	assert.Equal(t, "kb-b", filters[1].KbID)
-	base.mu.Lock()
-	defer base.mu.Unlock()
-	require.Len(t, base.tryLockCalls, 2)
-	for _, call := range base.tryLockCalls {
-		assert.NotEmpty(t, call.TenantID, "never runs with an empty tenant")
-	}
+	_, err := d.RunScopePass(context.Background(), "1", "kb")
+	require.NoError(t, err)
+	assert.Equal(t, 3, llm.calls, "a manual trigger always runs")
 }
 
-func TestDreamer_EmptyTenantNeverRuns(t *testing.T) {
-	repo := &mockDreamerRepo{}
-	d := NewDreamerWorker(repo, &mockDreamerChat{}, types.DreamerConfig{Enabled: true}, nil)
+func TestDreamer_LockHeldElsewhereSkips(t *testing.T) {
+	store := newDreamStore(dmem("a", types.VerdictNone, 1))
+	store.lockedBy[key("1", "kb")] = "other-replica"
+	llm := &scriptedChat{reply: `{"actions":[]}`}
 
-	// No scope lister: nothing to enumerate, nothing runs.
-	d.dreamPass(context.Background())
-	result, err := d.RunPass(context.Background(), "")
+	res, err := newDreamer(store, llm, &recordingApplier{}).RunScopePass(context.Background(), "1", "kb")
 
 	require.NoError(t, err)
-	assert.Zero(t, result.ActionsProposed)
-	assert.Empty(t, repo.tryLockCalls)
-	assert.Zero(t, repo.searchCalls)
+	assert.Zero(t, llm.calls)
+	assert.Zero(t, res.ActionsProposed)
+	assert.Equal(t, "other-replica", store.lockedBy[key("1", "kb")], "another replica's lock is never released")
 }
 
-func TestDreamer_ScopeWithoutModelIsSkipped(t *testing.T) {
-	repo := &scopedDreamerRepo{mockDreamerRepo: &mockDreamerRepo{}, scopes: []Scope{{TenantID: "1", KbID: "kb-a"}}}
-	d := NewDreamerWorker(repo, nil, types.DreamerConfig{Enabled: true}, nil).WithResolver(&fakeResolver{})
+func TestDreamer_DailyTokenBudget(t *testing.T) {
+	store := newDreamStore(dmem("a", types.VerdictNone, 1))
+	llm := &scriptedChat{reply: `{"actions":[]}`}
+	d := newDreamer(store, llm, &recordingApplier{}, func(c *types.DreamerConfig) { c.DailyTokenBudget = 10 })
 
-	d.dreamPass(context.Background())
+	_, _ = d.RunScopePass(context.Background(), "1", "kb")
+	_, _ = d.RunScopePass(context.Background(), "1", "kb")
+	assert.Equal(t, 1, llm.calls, "the second pass is over budget")
 
-	assert.Empty(t, repo.tryLockCalls, "no lock or search without a chat model")
-	assert.Zero(t, repo.searchCalls)
+	d.now = func() time.Time { return time.Now().Add(24 * time.Hour) }
+	_, _ = d.RunScopePass(context.Background(), "1", "kb")
+	assert.Equal(t, 2, llm.calls, "the budget resets the next day")
 }
 
-// dreamerActionJSON builds the JSON for the LLM to return for a list of actions.
-func dreamerActionJSON(actions []types.DreamAction) string {
-	resp := dreamerResponse{Actions: actions}
-	b, _ := json.Marshal(resp)
-	return string(b)
+func TestDreamer_DisabledOrNoTenantDoesNothing(t *testing.T) {
+	store := newDreamStore(dmem("a", types.VerdictNone, 1))
+	llm := &scriptedChat{reply: `{"actions":[]}`}
+	_, _ = newDreamer(store, llm, nil, func(c *types.DreamerConfig) { c.Enabled = false }).RunScopePass(context.Background(), "1", "kb")
+	_, _ = newDreamer(store, llm, nil).RunScopePass(context.Background(), "", "kb")
+	assert.Zero(t, llm.calls)
+	assert.Zero(t, store.lockCalls)
 }
 
-func makeSearchResult(mem *types.AgentMemory) *types.MemorySearchResult {
-	return &types.MemorySearchResult{Memory: mem, Score: 1.0}
-}
-
-// ---------------------------------------------------------------------------
-// Test: Dreamer lock acquisition
-// ---------------------------------------------------------------------------
-
-func TestDreamer_LockAcquired(t *testing.T) {
-	repo := &mockDreamerRepo{
-		tryDreamerLockFunc: func(ctx context.Context, tenantID, workerID string) (bool, error) {
-			return true, nil
-		},
-		searchFunc: func(ctx context.Context, filter *types.MemoryFilter) ([]*types.MemorySearchResult, int64, error) {
-			mem := makeDreamerMemory("mem-1", "tenant-1", "Test memory", types.VerdictNone, 3, 2)
-			return []*types.MemorySearchResult{makeSearchResult(mem)}, 1, nil
-		},
-	}
-	chatClient := &mockDreamerChat{
-		chatFunc: func(ctx context.Context, messages []chat.Message, opts *chat.ChatOptions) (*types.ChatResponse, error) {
-			return &types.ChatResponse{Content: `{"actions":[]}`}, nil
-		},
-	}
-	config := types.DreamerConfig{Enabled: true, MaxActions: 5, TokenBudget: 4000}
-	d := newTestDreamer(repo, chatClient, config)
-
-	result, err := d.RunPass(context.Background(), "tenant-1")
-	require.NoError(t, err)
-	require.NotNil(t, result)
-
-	// Lock was acquired
-	require.Len(t, repo.tryLockCalls, 1)
-	assert.Equal(t, "tenant-1", repo.tryLockCalls[0].TenantID)
-
-	// Lock was released
-	require.Len(t, repo.unlockCalls, 1)
-	assert.Equal(t, "tenant-1", repo.unlockCalls[0])
-}
-
-func TestDreamer_LockNotAcquired(t *testing.T) {
-	repo := &mockDreamerRepo{
-		tryDreamerLockFunc: func(ctx context.Context, tenantID, workerID string) (bool, error) {
-			return false, nil
-		},
-	}
-	chatClient := &mockDreamerChat{}
-	config := types.DreamerConfig{Enabled: true}
-	d := newTestDreamer(repo, chatClient, config)
-
-	result, err := d.RunPass(context.Background(), "tenant-1")
-	require.NoError(t, err)
-	require.NotNil(t, result)
-
-	// Lock was attempted but not acquired — no search or actions
-	require.Len(t, repo.tryLockCalls, 1)
-	assert.Equal(t, 0, repo.searchCalls, "search should not be called when lock not acquired")
-	assert.Empty(t, repo.unlockCalls, "unlock should not be called when lock was not acquired")
-	assert.Equal(t, 0, result.ActionsProposed)
-}
-
-func TestDreamer_LockError(t *testing.T) {
-	repo := &mockDreamerRepo{
-		tryDreamerLockFunc: func(ctx context.Context, tenantID, workerID string) (bool, error) {
-			return false, assert.AnError
-		},
-	}
-	chatClient := &mockDreamerChat{}
-	config := types.DreamerConfig{Enabled: true}
-	d := newTestDreamer(repo, chatClient, config)
-
-	result, err := d.RunPass(context.Background(), "tenant-1")
+func TestDreamer_ModelErrorReleasesLock(t *testing.T) {
+	store := newDreamStore(dmem("a", types.VerdictNone, 1))
+	_, err := newDreamer(store, &scriptedChat{err: errors.New("provider down")}, nil).RunScopePass(context.Background(), "1", "kb")
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "dreamer lock acquire failed")
-	require.NotNil(t, result)
-	assert.Empty(t, repo.unlockCalls, "unlock should not be called on lock error")
+	assert.Empty(t, store.lockedBy, "the lock is released even when the pass fails")
+	assert.Empty(t, store.marked, "a failed pass does not mark memories reviewed")
 }
 
-// ---------------------------------------------------------------------------
-// Test: Action validation — confidence
-// ---------------------------------------------------------------------------
-
-func TestDreamer_AcceptsHighConfidence(t *testing.T) {
-	repo := &mockDreamerRepo{
-		searchFunc: func(ctx context.Context, filter *types.MemoryFilter) ([]*types.MemorySearchResult, int64, error) {
-			mem := makeDreamerMemory("mem-1", "tenant-1", "Test memory", types.VerdictNone, 3, 2)
-			return []*types.MemorySearchResult{makeSearchResult(mem)}, 1, nil
-		},
-		getByIDFunc: func(ctx context.Context, tenantID, id string) (*types.AgentMemory, error) {
-			return makeDreamerMemory("mem-1", "tenant-1", "Test memory", types.VerdictNone, 3, 2), nil
-		},
-	}
-	chatClient := &mockDreamerChat{
-		chatFunc: func(ctx context.Context, messages []chat.Message, opts *chat.ChatOptions) (*types.ChatResponse, error) {
-			actions := []types.DreamAction{
-				{Type: "update_verdict", TargetID: "mem-1", NewVerdict: "refuted", Reason: "Low quality", Confidence: 0.85},
-			}
-			return &types.ChatResponse{Content: dreamerActionJSON(actions)}, nil
-		},
-	}
-	config := types.DreamerConfig{Enabled: true, MaxActions: 5, TokenBudget: 4000}
-	d := newTestDreamer(repo, chatClient, config)
-
-	result, err := d.RunPass(context.Background(), "tenant-1")
-	require.NoError(t, err)
-	assert.Equal(t, 1, result.ActionsProposed)
-	assert.Equal(t, 1, result.ActionsApplied)
-}
-
-func TestDreamer_RejectsLowConfidence(t *testing.T) {
-	repo := &mockDreamerRepo{
-		searchFunc: func(ctx context.Context, filter *types.MemoryFilter) ([]*types.MemorySearchResult, int64, error) {
-			var results []*types.MemorySearchResult
-			for i := 0; i < 10; i++ {
-				id := fmt.Sprintf("mem-%d", i)
-				mem := makeDreamerMemory(id, "tenant-1", "Test memory", types.VerdictNone, 3, 2)
-				results = append(results, makeSearchResult(mem))
-			}
-			return results, 10, nil
-		},
-		getByIDFunc: func(ctx context.Context, tenantID, id string) (*types.AgentMemory, error) {
-			return makeDreamerMemory(id, "tenant-1", "Test memory", types.VerdictNone, 3, 2), nil
-		},
-	}
-	chatClient := &mockDreamerChat{
-		chatFunc: func(ctx context.Context, messages []chat.Message, opts *chat.ChatOptions) (*types.ChatResponse, error) {
-			actions := []types.DreamAction{
-				{Type: "update_verdict", TargetID: "mem-1", NewVerdict: "refuted", Reason: "Low confidence test", Confidence: 0.60},
-			}
-			return &types.ChatResponse{Content: dreamerActionJSON(actions)}, nil
-		},
-	}
-	config := types.DreamerConfig{Enabled: true, MaxActions: 5, TokenBudget: 4000}
-	d := newTestDreamer(repo, chatClient, config)
-
-	result, err := d.RunPass(context.Background(), "tenant-1")
-	require.NoError(t, err)
-	// Proposed but not applied because confidence too low
-	assert.Equal(t, 1, result.ActionsProposed)
-	assert.Equal(t, 0, result.ActionsApplied)
-}
-
-func TestDreamer_AcceptsExactlyThreshold(t *testing.T) {
-	repo := &mockDreamerRepo{
-		searchFunc: func(ctx context.Context, filter *types.MemoryFilter) ([]*types.MemorySearchResult, int64, error) {
-			mem := makeDreamerMemory("mem-1", "tenant-1", "Test memory", types.VerdictNone, 3, 2)
-			return []*types.MemorySearchResult{makeSearchResult(mem)}, 1, nil
-		},
-		getByIDFunc: func(ctx context.Context, tenantID, id string) (*types.AgentMemory, error) {
-			return makeDreamerMemory("mem-1", "tenant-1", "Test memory", types.VerdictNone, 3, 2), nil
-		},
-	}
-	chatClient := &mockDreamerChat{
-		chatFunc: func(ctx context.Context, messages []chat.Message, opts *chat.ChatOptions) (*types.ChatResponse, error) {
-			actions := []types.DreamAction{
-				{Type: "update_verdict", TargetID: "mem-1", NewVerdict: "refuted", Reason: "Exactly at threshold", Confidence: 0.70},
-			}
-			return &types.ChatResponse{Content: dreamerActionJSON(actions)}, nil
-		},
-	}
-	config := types.DreamerConfig{Enabled: true, MaxActions: 5, TokenBudget: 4000}
-	d := newTestDreamer(repo, chatClient, config)
-
-	result, err := d.RunPass(context.Background(), "tenant-1")
-	require.NoError(t, err)
-	assert.Equal(t, 1, result.ActionsProposed)
-	assert.Equal(t, 1, result.ActionsApplied)
-}
-
-// ---------------------------------------------------------------------------
-// Test: Protected verdicts
-// ---------------------------------------------------------------------------
-
-func TestDreamer_SkipsProtectedVerdictDecision(t *testing.T) {
-	repo := &mockDreamerRepo{
-		searchFunc: func(ctx context.Context, filter *types.MemoryFilter) ([]*types.MemorySearchResult, int64, error) {
-			mem := makeDreamerMemory("mem-1", "tenant-1", "Test memory", types.VerdictDecision, 3, 2)
-			return []*types.MemorySearchResult{makeSearchResult(mem)}, 1, nil
-		},
-		getByIDFunc: func(ctx context.Context, tenantID, id string) (*types.AgentMemory, error) {
-			return makeDreamerMemory("mem-1", "tenant-1", "Test memory", types.VerdictDecision, 3, 2), nil
-		},
-	}
-	chatClient := &mockDreamerChat{
-		chatFunc: func(ctx context.Context, messages []chat.Message, opts *chat.ChatOptions) (*types.ChatResponse, error) {
-			actions := []types.DreamAction{
-				{Type: "update_verdict", TargetID: "mem-1", NewVerdict: "refuted", Reason: "Try to override decision", Confidence: 0.85},
-			}
-			return &types.ChatResponse{Content: dreamerActionJSON(actions)}, nil
-		},
-	}
-	config := types.DreamerConfig{Enabled: true, MaxActions: 5, TokenBudget: 4000}
-	d := newTestDreamer(repo, chatClient, config)
-
-	result, err := d.RunPass(context.Background(), "tenant-1")
-	require.NoError(t, err)
-	// Action was proposed but applyVerdictUpdate should fail because verdict is protected
-	assert.Equal(t, 1, result.ActionsProposed)
-	assert.Equal(t, 0, result.ActionsApplied)
-}
-
-func TestDreamer_SkipsProtectedVerdictFixed(t *testing.T) {
-	repo := &mockDreamerRepo{
-		searchFunc: func(ctx context.Context, filter *types.MemoryFilter) ([]*types.MemorySearchResult, int64, error) {
-			mem := makeDreamerMemory("mem-1", "tenant-1", "Test memory", types.VerdictFixed, 3, 2)
-			return []*types.MemorySearchResult{makeSearchResult(mem)}, 1, nil
-		},
-		getByIDFunc: func(ctx context.Context, tenantID, id string) (*types.AgentMemory, error) {
-			return makeDreamerMemory("mem-1", "tenant-1", "Test memory", types.VerdictFixed, 3, 2), nil
-		},
-	}
-	chatClient := &mockDreamerChat{
-		chatFunc: func(ctx context.Context, messages []chat.Message, opts *chat.ChatOptions) (*types.ChatResponse, error) {
-			actions := []types.DreamAction{
-				{Type: "update_verdict", TargetID: "mem-1", NewVerdict: "refuted", Reason: "Try to override fixed", Confidence: 0.85},
-			}
-			return &types.ChatResponse{Content: dreamerActionJSON(actions)}, nil
-		},
-	}
-	config := types.DreamerConfig{Enabled: true, MaxActions: 5, TokenBudget: 4000}
-	d := newTestDreamer(repo, chatClient, config)
-
-	result, err := d.RunPass(context.Background(), "tenant-1")
-	require.NoError(t, err)
-	assert.Equal(t, 1, result.ActionsProposed)
-	assert.Equal(t, 0, result.ActionsApplied)
-}
-
-func TestDreamer_AllowsNonProtectedVerdict(t *testing.T) {
-	repo := &mockDreamerRepo{
-		searchFunc: func(ctx context.Context, filter *types.MemoryFilter) ([]*types.MemorySearchResult, int64, error) {
-			mem := makeDreamerMemory("mem-1", "tenant-1", "Test memory", types.VerdictNone, 3, 2)
-			return []*types.MemorySearchResult{makeSearchResult(mem)}, 1, nil
-		},
-		getByIDFunc: func(ctx context.Context, tenantID, id string) (*types.AgentMemory, error) {
-			return makeDreamerMemory("mem-1", "tenant-1", "Test memory", types.VerdictNone, 3, 2), nil
-		},
-	}
-	chatClient := &mockDreamerChat{
-		chatFunc: func(ctx context.Context, messages []chat.Message, opts *chat.ChatOptions) (*types.ChatResponse, error) {
-			actions := []types.DreamAction{
-				{Type: "update_verdict", TargetID: "mem-1", NewVerdict: "refuted", Reason: "Good reason", Confidence: 0.85},
-			}
-			return &types.ChatResponse{Content: dreamerActionJSON(actions)}, nil
-		},
-	}
-	config := types.DreamerConfig{Enabled: true, MaxActions: 5, TokenBudget: 4000}
-	d := newTestDreamer(repo, chatClient, config)
-
-	result, err := d.RunPass(context.Background(), "tenant-1")
-	require.NoError(t, err)
-	assert.Equal(t, 1, result.ActionsProposed)
-	assert.Equal(t, 1, result.ActionsApplied)
-	require.Len(t, repo.updateCalls, 1)
-	assert.Equal(t, types.MemoryVerdict("refuted"), repo.updateCalls[0].Verdict)
-}
-
-// ---------------------------------------------------------------------------
-// Test: Max 5 actions enforced
-// ---------------------------------------------------------------------------
-
-func TestDreamer_MaxFiveActions(t *testing.T) {
-	repo := &mockDreamerRepo{
-		searchFunc: func(ctx context.Context, filter *types.MemoryFilter) ([]*types.MemorySearchResult, int64, error) {
-			var results []*types.MemorySearchResult
-			for i := 0; i < 10; i++ {
-				id := fmt.Sprintf("mem-%d", i)
-				mem := makeDreamerMemory(id, "tenant-1", "Test memory", types.VerdictNone, 3, 2)
-				results = append(results, makeSearchResult(mem))
-			}
-			return results, 10, nil
-		},
-		getByIDFunc: func(ctx context.Context, tenantID, id string) (*types.AgentMemory, error) {
-			return makeDreamerMemory(id, "tenant-1", "Test memory", types.VerdictNone, 3, 2), nil
-		},
-	}
-	chatClient := &mockDreamerChat{
-		chatFunc: func(ctx context.Context, messages []chat.Message, opts *chat.ChatOptions) (*types.ChatResponse, error) {
-			actions := make([]types.DreamAction, 10)
-			for i := 0; i < 10; i++ {
-				actions[i] = types.DreamAction{
-					Type:       "adjust_importance",
-					TargetID:   fmt.Sprintf("mem-%d", i),
-					Delta:      1,
-					Reason:     "Increase importance",
-					Confidence: 0.95,
-				}
-			}
-			return &types.ChatResponse{Content: dreamerActionJSON(actions)}, nil
-		},
-	}
-	config := types.DreamerConfig{Enabled: true, MaxActions: 5, TokenBudget: 4000}
-	d := newTestDreamer(repo, chatClient, config)
-
-	result, err := d.RunPass(context.Background(), "tenant-1")
-	require.NoError(t, err)
-	// 5 actions proposed (limited by MaxActions=5), 5 applied
-	assert.Equal(t, 5, result.ActionsProposed)
-	assert.Equal(t, 5, result.ActionsApplied)
-	assert.Len(t, result.Actions, 5)
-}
-
-func TestDreamer_MaxActionsConfigZero(t *testing.T) {
-	repo := &mockDreamerRepo{
-		searchFunc: func(ctx context.Context, filter *types.MemoryFilter) ([]*types.MemorySearchResult, int64, error) {
-			var results []*types.MemorySearchResult
-			for i := 0; i < 10; i++ {
-				id := fmt.Sprintf("mem-%d", i)
-				mem := makeDreamerMemory(id, "tenant-1", "Test memory", types.VerdictNone, 3, 2)
-				results = append(results, makeSearchResult(mem))
-			}
-			return results, 10, nil
-		},
-		getByIDFunc: func(ctx context.Context, tenantID, id string) (*types.AgentMemory, error) {
-			return makeDreamerMemory(id, "tenant-1", "Test memory", types.VerdictNone, 3, 2), nil
-		},
-	}
-	// MaxActions=0 means code defaults to 5
-	chatClient := &mockDreamerChat{
-		chatFunc: func(ctx context.Context, messages []chat.Message, opts *chat.ChatOptions) (*types.ChatResponse, error) {
-			actions := make([]types.DreamAction, 10)
-			for i := 0; i < 10; i++ {
-				actions[i] = types.DreamAction{
-					Type:       "adjust_importance",
-					TargetID:   fmt.Sprintf("mem-%d", i),
-					Delta:      1,
-					Reason:     "Increase importance",
-					Confidence: 0.95,
-				}
-			}
-			return &types.ChatResponse{Content: dreamerActionJSON(actions)}, nil
-		},
-	}
-	config := types.DreamerConfig{Enabled: true, MaxActions: 0, TokenBudget: 4000}
-	d := newTestDreamer(repo, chatClient, config)
-
-	result, err := d.RunPass(context.Background(), "tenant-1")
-	require.NoError(t, err)
-	assert.Equal(t, 5, result.ActionsApplied)
-}
-
-// ---------------------------------------------------------------------------
-// Test: Tier < 2 skip for delete actions
-// ---------------------------------------------------------------------------
-
-func TestDreamer_RemoveActionRequiresTier2OrHigher(t *testing.T) {
-	repo := &mockDreamerRepo{
-		searchFunc: func(ctx context.Context, filter *types.MemoryFilter) ([]*types.MemorySearchResult, int64, error) {
-			mem := makeDreamerMemory("mem-1", "tenant-1", "Low tier memory", types.VerdictNone, 3, 1)
-			return []*types.MemorySearchResult{makeSearchResult(mem)}, 1, nil
-		},
-		getByIDFunc: func(ctx context.Context, tenantID, id string) (*types.AgentMemory, error) {
-			return makeDreamerMemory("mem-1", "tenant-1", "Low tier memory", types.VerdictNone, 3, 1), nil
-		},
-	}
-	chatClient := &mockDreamerChat{
-		chatFunc: func(ctx context.Context, messages []chat.Message, opts *chat.ChatOptions) (*types.ChatResponse, error) {
-			actions := []types.DreamAction{
-				{Type: "remove", TargetID: "mem-1", Reason: "Low quality", Confidence: 0.85},
-			}
-			return &types.ChatResponse{Content: dreamerActionJSON(actions)}, nil
-		},
-	}
-	config := types.DreamerConfig{Enabled: true, MaxActions: 5, TokenBudget: 4000}
-	d := newTestDreamer(repo, chatClient, config)
-
-	result, err := d.RunPass(context.Background(), "tenant-1")
-	require.NoError(t, err)
-	assert.Equal(t, 1, result.ActionsProposed)
-	assert.Equal(t, 0, result.ActionsApplied, "tier < 2 removal should fail")
-	assert.Empty(t, repo.deleteCalls, "no delete should occur for tier < 2")
-}
-
-func TestDreamer_RemoveActionAllowedForTier2(t *testing.T) {
-	repo := &mockDreamerRepo{
-		searchFunc: func(ctx context.Context, filter *types.MemoryFilter) ([]*types.MemorySearchResult, int64, error) {
-			mem := makeDreamerMemory("mem-1", "tenant-1", "Removable memory", types.VerdictNone, 3, 2)
-			return []*types.MemorySearchResult{makeSearchResult(mem)}, 1, nil
-		},
-		getByIDFunc: func(ctx context.Context, tenantID, id string) (*types.AgentMemory, error) {
-			return makeDreamerMemory("mem-1", "tenant-1", "Removable memory", types.VerdictNone, 3, 2), nil
-		},
-	}
-	chatClient := &mockDreamerChat{
-		chatFunc: func(ctx context.Context, messages []chat.Message, opts *chat.ChatOptions) (*types.ChatResponse, error) {
-			actions := []types.DreamAction{
-				{Type: "remove", TargetID: "mem-1", Reason: "Low quality", Confidence: 0.85},
-			}
-			return &types.ChatResponse{Content: dreamerActionJSON(actions)}, nil
-		},
-	}
-	config := types.DreamerConfig{Enabled: true, MaxActions: 5, TokenBudget: 4000}
-	d := newTestDreamer(repo, chatClient, config)
-
-	result, err := d.RunPass(context.Background(), "tenant-1")
-	require.NoError(t, err)
-	assert.Equal(t, 1, result.ActionsProposed)
-	assert.Equal(t, 1, result.ActionsApplied)
-	require.Len(t, repo.deleteCalls, 1)
-	assert.Equal(t, "mem-1", repo.deleteCalls[0].ID)
-	assert.Equal(t, "tenant-1", repo.deleteCalls[0].TenantID)
-}
-
-// ---------------------------------------------------------------------------
-// Test: Soft-delete for removal actions (never permanent delete)
-// ---------------------------------------------------------------------------
-
-func TestDreamer_RemoveUsesSoftDelete(t *testing.T) {
-	// The dreamer calls repo.Delete which uses GORM's gorm.DeletedAt (soft delete).
-	// We verify that the Delete function is called (which is the soft-delete path)
-	// and that there is no hard-delete method called.
-	repo := &mockDreamerRepo{
-		searchFunc: func(ctx context.Context, filter *types.MemoryFilter) ([]*types.MemorySearchResult, int64, error) {
-			mem := makeDreamerMemory("mem-1", "tenant-1", "Removable memory", types.VerdictNone, 3, 2)
-			return []*types.MemorySearchResult{makeSearchResult(mem)}, 1, nil
-		},
-		getByIDFunc: func(ctx context.Context, tenantID, id string) (*types.AgentMemory, error) {
-			return makeDreamerMemory("mem-1", "tenant-1", "Removable memory", types.VerdictNone, 3, 2), nil
-		},
-	}
-	chatClient := &mockDreamerChat{
-		chatFunc: func(ctx context.Context, messages []chat.Message, opts *chat.ChatOptions) (*types.ChatResponse, error) {
-			actions := []types.DreamAction{
-				{Type: "remove", TargetID: "mem-1", Reason: "Cleanup", Confidence: 0.95},
-			}
-			return &types.ChatResponse{Content: dreamerActionJSON(actions)}, nil
-		},
-	}
-	config := types.DreamerConfig{Enabled: true, MaxActions: 5, TokenBudget: 4000}
-	d := newTestDreamer(repo, chatClient, config)
-
-	_, err := d.RunPass(context.Background(), "tenant-1")
-	require.NoError(t, err)
-	require.Len(t, repo.deleteCalls, 1)
-	assert.Equal(t, "tenant-1", repo.deleteCalls[0].TenantID)
-	assert.Equal(t, "mem-1", repo.deleteCalls[0].ID)
-}
-
-// ---------------------------------------------------------------------------
-// Test: DryRun mode
-// ---------------------------------------------------------------------------
-
-func TestDreamer_DryRunActionsProposedNotApplied(t *testing.T) {
-	repo := &mockDreamerRepo{
-		searchFunc: func(ctx context.Context, filter *types.MemoryFilter) ([]*types.MemorySearchResult, int64, error) {
-			var results []*types.MemorySearchResult
-			for i := 0; i < 10; i++ {
-				id := fmt.Sprintf("mem-%d", i)
-				mem := makeDreamerMemory(id, "tenant-1", "Test memory", types.VerdictNone, 3, 2)
-				results = append(results, makeSearchResult(mem))
-			}
-			return results, 10, nil
-		},
-		getByIDFunc: func(ctx context.Context, tenantID, id string) (*types.AgentMemory, error) {
-			return makeDreamerMemory(id, "tenant-1", "Test memory", types.VerdictNone, 3, 2), nil
-		},
-	}
-	chatClient := &mockDreamerChat{
-		chatFunc: func(ctx context.Context, messages []chat.Message, opts *chat.ChatOptions) (*types.ChatResponse, error) {
-			actions := []types.DreamAction{
-				{Type: "update_verdict", TargetID: "mem-1", NewVerdict: "refuted", Reason: "Dry run test", Confidence: 0.85},
-			}
-			return &types.ChatResponse{Content: dreamerActionJSON(actions)}, nil
-		},
-	}
-	// DryRun = true
-	config := types.DreamerConfig{Enabled: true, MaxActions: 5, TokenBudget: 4000, DryRun: true}
-	d := newTestDreamer(repo, chatClient, config)
-
-	result, err := d.RunPass(context.Background(), "tenant-1")
-	require.NoError(t, err)
-	assert.Equal(t, 1, result.ActionsProposed)
-	assert.Equal(t, 0, result.ActionsApplied, "dry-run only proposes; nothing is applied")
-	assert.Len(t, result.Actions, 1)
-	// No actual repo methods should be called for modification
-	assert.Empty(t, repo.updateCalls, "no updates should occur in dry-run mode")
-	assert.Empty(t, repo.deleteCalls, "no deletes should occur in dry-run mode")
-}
-
-func TestDreamer_DryRunWithRemoveAction(t *testing.T) {
-	repo := &mockDreamerRepo{
-		searchFunc: func(ctx context.Context, filter *types.MemoryFilter) ([]*types.MemorySearchResult, int64, error) {
-			mem := makeDreamerMemory("mem-1", "tenant-1", "Removable", types.VerdictNone, 3, 2)
-			return []*types.MemorySearchResult{makeSearchResult(mem)}, 1, nil
-		},
-	}
-	chatClient := &mockDreamerChat{
-		chatFunc: func(ctx context.Context, messages []chat.Message, opts *chat.ChatOptions) (*types.ChatResponse, error) {
-			actions := []types.DreamAction{
-				{Type: "remove", TargetID: "mem-1", Reason: "Dry run remove", Confidence: 0.95},
-			}
-			return &types.ChatResponse{Content: dreamerActionJSON(actions)}, nil
-		},
-	}
-	config := types.DreamerConfig{Enabled: true, MaxActions: 5, TokenBudget: 4000, DryRun: true}
-	d := newTestDreamer(repo, chatClient, config)
-
-	result, err := d.RunPass(context.Background(), "tenant-1")
-	require.NoError(t, err)
-	assert.Equal(t, 1, result.ActionsProposed)
-	assert.Equal(t, 0, result.ActionsApplied)
-	assert.Len(t, result.Actions, 1)
-	assert.Empty(t, repo.deleteCalls, "no delete should occur in dry-run mode")
-}
-
-// ---------------------------------------------------------------------------
-// Test: Action validation — invalid types
-// ---------------------------------------------------------------------------
-
-func TestDreamer_InvalidActionTypeSkipped(t *testing.T) {
-	repo := &mockDreamerRepo{
-		searchFunc: func(ctx context.Context, filter *types.MemoryFilter) ([]*types.MemorySearchResult, int64, error) {
-			mem := makeDreamerMemory("mem-1", "tenant-1", "Test", types.VerdictNone, 3, 2)
-			return []*types.MemorySearchResult{makeSearchResult(mem)}, 1, nil
-		},
-	}
-	chatClient := &mockDreamerChat{
-		chatFunc: func(ctx context.Context, messages []chat.Message, opts *chat.ChatOptions) (*types.ChatResponse, error) {
-			actions := []types.DreamAction{
-				{Type: "unknown_action", TargetID: "mem-1", Reason: "Unknown", Confidence: 0.85},
-			}
-			return &types.ChatResponse{Content: dreamerActionJSON(actions)}, nil
-		},
-	}
-	config := types.DreamerConfig{Enabled: true, MaxActions: 5, TokenBudget: 4000}
-	d := newTestDreamer(repo, chatClient, config)
-
-	result, err := d.RunPass(context.Background(), "tenant-1")
-	require.NoError(t, err)
-	assert.Equal(t, 1, result.ActionsProposed)
-	assert.Equal(t, 0, result.ActionsApplied, "unknown action type should be skipped")
-}
-
-// ---------------------------------------------------------------------------
-// Test: adjust_importance delta validation
-// ---------------------------------------------------------------------------
-
-func TestDreamer_AdjustImportanceValidDelta(t *testing.T) {
-	repo := &mockDreamerRepo{
-		searchFunc: func(ctx context.Context, filter *types.MemoryFilter) ([]*types.MemorySearchResult, int64, error) {
-			mem := makeDreamerMemory("mem-1", "tenant-1", "Test", types.VerdictNone, 3, 2)
-			return []*types.MemorySearchResult{makeSearchResult(mem)}, 1, nil
-		},
-		getByIDFunc: func(ctx context.Context, tenantID, id string) (*types.AgentMemory, error) {
-			return makeDreamerMemory("mem-1", "tenant-1", "Test", types.VerdictNone, 3, 2), nil
-		},
-	}
-	chatClient := &mockDreamerChat{
-		chatFunc: func(ctx context.Context, messages []chat.Message, opts *chat.ChatOptions) (*types.ChatResponse, error) {
-			actions := []types.DreamAction{
-				{Type: "adjust_importance", TargetID: "mem-1", Delta: 3, Reason: "Very important", Confidence: 0.85},
-			}
-			return &types.ChatResponse{Content: dreamerActionJSON(actions)}, nil
-		},
-	}
-	config := types.DreamerConfig{Enabled: true, MaxActions: 5, TokenBudget: 4000}
-	d := newTestDreamer(repo, chatClient, config)
-
-	result, err := d.RunPass(context.Background(), "tenant-1")
-	require.NoError(t, err)
-	assert.Equal(t, 1, result.ActionsApplied)
-	require.Len(t, repo.updateCalls, 1)
-	assert.Equal(t, 6, repo.updateCalls[0].Importance, "importance 3 + delta 3 = 6")
-}
-
-func TestDreamer_AdjustImportanceInvalidDelta(t *testing.T) {
-	repo := &mockDreamerRepo{
-		searchFunc: func(ctx context.Context, filter *types.MemoryFilter) ([]*types.MemorySearchResult, int64, error) {
-			mem := makeDreamerMemory("mem-1", "tenant-1", "Test", types.VerdictNone, 3, 2)
-			return []*types.MemorySearchResult{makeSearchResult(mem)}, 1, nil
-		},
-	}
-	chatClient := &mockDreamerChat{
-		chatFunc: func(ctx context.Context, messages []chat.Message, opts *chat.ChatOptions) (*types.ChatResponse, error) {
-			actions := []types.DreamAction{
-				{Type: "adjust_importance", TargetID: "mem-1", Delta: 5, Reason: "Way too high", Confidence: 0.85},
-			}
-			return &types.ChatResponse{Content: dreamerActionJSON(actions)}, nil
-		},
-	}
-	config := types.DreamerConfig{Enabled: true, MaxActions: 5, TokenBudget: 4000}
-	d := newTestDreamer(repo, chatClient, config)
-
-	result, err := d.RunPass(context.Background(), "tenant-1")
-	require.NoError(t, err)
-	assert.Equal(t, 1, result.ActionsProposed)
-	assert.Equal(t, 0, result.ActionsApplied, "delta > 3 should be rejected")
-}
-
-// ---------------------------------------------------------------------------
-// Test: applyImportanceAdjust clamps to [-5, 6]
-// ---------------------------------------------------------------------------
-
-func TestDreamer_AdjustImportanceClampMin(t *testing.T) {
-	repo := &mockDreamerRepo{
-		searchFunc: func(ctx context.Context, filter *types.MemoryFilter) ([]*types.MemorySearchResult, int64, error) {
-			mem := makeDreamerMemory("mem-1", "tenant-1", "Test", types.VerdictNone, -3, 2)
-			return []*types.MemorySearchResult{makeSearchResult(mem)}, 1, nil
-		},
-		getByIDFunc: func(ctx context.Context, tenantID, id string) (*types.AgentMemory, error) {
-			return makeDreamerMemory("mem-1", "tenant-1", "Test", types.VerdictNone, -3, 2), nil
-		},
-	}
-	chatClient := &mockDreamerChat{
-		chatFunc: func(ctx context.Context, messages []chat.Message, opts *chat.ChatOptions) (*types.ChatResponse, error) {
-			actions := []types.DreamAction{
-				{Type: "adjust_importance", TargetID: "mem-1", Delta: -3, Reason: "Lower", Confidence: 0.85},
-			}
-			return &types.ChatResponse{Content: dreamerActionJSON(actions)}, nil
-		},
-	}
-	config := types.DreamerConfig{Enabled: true, MaxActions: 5, TokenBudget: 4000}
-	d := newTestDreamer(repo, chatClient, config)
-
-	result, err := d.RunPass(context.Background(), "tenant-1")
-	require.NoError(t, err)
-	assert.Equal(t, 1, result.ActionsApplied)
-	require.Len(t, repo.updateCalls, 1)
-	assert.Equal(t, -5, repo.updateCalls[0].Importance, "importance -3 + delta -3 should clamp to -5")
-}
-
-func TestDreamer_AdjustImportanceClampMax(t *testing.T) {
-	repo := &mockDreamerRepo{
-		searchFunc: func(ctx context.Context, filter *types.MemoryFilter) ([]*types.MemorySearchResult, int64, error) {
-			mem := makeDreamerMemory("mem-1", "tenant-1", "Test", types.VerdictNone, 5, 2)
-			return []*types.MemorySearchResult{makeSearchResult(mem)}, 1, nil
-		},
-		getByIDFunc: func(ctx context.Context, tenantID, id string) (*types.AgentMemory, error) {
-			return makeDreamerMemory("mem-1", "tenant-1", "Test", types.VerdictNone, 5, 2), nil
-		},
-	}
-	chatClient := &mockDreamerChat{
-		chatFunc: func(ctx context.Context, messages []chat.Message, opts *chat.ChatOptions) (*types.ChatResponse, error) {
-			actions := []types.DreamAction{
-				{Type: "adjust_importance", TargetID: "mem-1", Delta: 3, Reason: "Higher", Confidence: 0.85},
-			}
-			return &types.ChatResponse{Content: dreamerActionJSON(actions)}, nil
-		},
-	}
-	config := types.DreamerConfig{Enabled: true, MaxActions: 5, TokenBudget: 4000}
-	d := newTestDreamer(repo, chatClient, config)
-
-	result, err := d.RunPass(context.Background(), "tenant-1")
-	require.NoError(t, err)
-	assert.Equal(t, 1, result.ActionsApplied)
-	require.Len(t, repo.updateCalls, 1)
-	assert.Equal(t, 6, repo.updateCalls[0].Importance, "importance 5 + delta 3 should clamp to 6")
-}
-
-// ---------------------------------------------------------------------------
-// Test: merge action validation
-// ---------------------------------------------------------------------------
-
-func TestDreamer_MergeRequiresAtLeastTwoIDs(t *testing.T) {
-	repo := &mockDreamerRepo{
-		searchFunc: func(ctx context.Context, filter *types.MemoryFilter) ([]*types.MemorySearchResult, int64, error) {
-			memA := makeDreamerMemory("mem-a", "tenant-1", "Content A", types.VerdictNone, 3, 2)
-			memB := makeDreamerMemory("mem-b", "tenant-1", "Content B", types.VerdictNone, 5, 2)
-			return []*types.MemorySearchResult{makeSearchResult(memA), makeSearchResult(memB)}, 2, nil
-		},
-		getByIDFunc: func(ctx context.Context, tenantID, id string) (*types.AgentMemory, error) {
-			if id == "mem-a" {
-				return makeDreamerMemory("mem-a", "tenant-1", "Content A", types.VerdictNone, 3, 2), nil
-			}
-			return makeDreamerMemory("mem-b", "tenant-1", "Content B", types.VerdictNone, 5, 2), nil
-		},
-	}
-	chatClient := &mockDreamerChat{
-		chatFunc: func(ctx context.Context, messages []chat.Message, opts *chat.ChatOptions) (*types.ChatResponse, error) {
-			actions := []types.DreamAction{
-				{Type: "merge", TargetIDs: []string{"mem-a"}, Reason: "Single target", Confidence: 0.85},
-			}
-			return &types.ChatResponse{Content: dreamerActionJSON(actions)}, nil
-		},
-	}
-	config := types.DreamerConfig{Enabled: true, MaxActions: 5, TokenBudget: 4000}
-	d := newTestDreamer(repo, chatClient, config)
-
-	result, err := d.RunPass(context.Background(), "tenant-1")
-	require.NoError(t, err)
-	assert.Equal(t, 1, result.ActionsProposed)
-	assert.Equal(t, 0, result.ActionsApplied, "merge with single target should be rejected")
-}
-
-func TestDreamer_MergeApplied(t *testing.T) {
-	repo := &mockDreamerRepo{
-		searchFunc: func(ctx context.Context, filter *types.MemoryFilter) ([]*types.MemorySearchResult, int64, error) {
-			memA := makeDreamerMemory("mem-a", "tenant-1", "Content A", types.VerdictNone, 3, 2)
-			memB := makeDreamerMemory("mem-b", "tenant-1", "Content B", types.VerdictNone, 5, 2)
-			return []*types.MemorySearchResult{makeSearchResult(memA), makeSearchResult(memB)}, 2, nil
-		},
-		getByIDFunc: func(ctx context.Context, tenantID, id string) (*types.AgentMemory, error) {
-			if id == "mem-a" {
-				return makeDreamerMemory("mem-a", "tenant-1", "Content A", types.VerdictNone, 3, 2), nil
-			}
-			return makeDreamerMemory("mem-b", "tenant-1", "Content B", types.VerdictNone, 5, 2), nil
-		},
-	}
-	chatClient := &mockDreamerChat{
-		chatFunc: func(ctx context.Context, messages []chat.Message, opts *chat.ChatOptions) (*types.ChatResponse, error) {
-			actions := []types.DreamAction{
-				{Type: "merge", TargetIDs: []string{"mem-a", "mem-b"}, Reason: "Similar content", Confidence: 0.85},
-			}
-			return &types.ChatResponse{Content: dreamerActionJSON(actions)}, nil
-		},
-	}
-	config := types.DreamerConfig{Enabled: true, MaxActions: 5, TokenBudget: 4000}
-	d := newTestDreamer(repo, chatClient, config)
-
-	result, err := d.RunPass(context.Background(), "tenant-1")
-	require.NoError(t, err)
-	assert.Equal(t, 1, result.ActionsApplied)
-	require.Len(t, repo.updateCalls, 1)
-	assert.Equal(t, "mem-a", repo.updateCalls[0].ID)
-	// mem-b should be deleted (soft-deleted via merge-away)
-	require.Len(t, repo.deleteCalls, 1)
-	assert.Equal(t, "mem-b", repo.deleteCalls[0].ID)
-}
-
-// ---------------------------------------------------------------------------
-// Test: No candidate memories
-// ---------------------------------------------------------------------------
-
-func TestDreamer_NoCandidates(t *testing.T) {
-	repo := &mockDreamerRepo{
-		searchFunc: func(ctx context.Context, filter *types.MemoryFilter) ([]*types.MemorySearchResult, int64, error) {
-			return nil, 0, nil
-		},
-	}
-	chatClient := &mockDreamerChat{}
-	config := types.DreamerConfig{Enabled: true, MaxActions: 5, TokenBudget: 4000}
-	d := newTestDreamer(repo, chatClient, config)
-
-	result, err := d.RunPass(context.Background(), "tenant-1")
-	require.NoError(t, err)
-	assert.Equal(t, 0, result.ActionsProposed)
-	assert.Equal(t, 0, result.ActionsApplied)
-	// Lock should be acquired and released
-	require.Len(t, repo.tryLockCalls, 1)
-	require.Len(t, repo.unlockCalls, 1)
-}
-
-// ---------------------------------------------------------------------------
-// Test: LLM response parsing errors
-// ---------------------------------------------------------------------------
-
-func TestDreamer_InvalidLLMResponse(t *testing.T) {
-	repo := &mockDreamerRepo{
-		searchFunc: func(ctx context.Context, filter *types.MemoryFilter) ([]*types.MemorySearchResult, int64, error) {
-			mem := makeDreamerMemory("mem-1", "tenant-1", "Test", types.VerdictNone, 3, 2)
-			return []*types.MemorySearchResult{makeSearchResult(mem)}, 1, nil
-		},
-	}
-	chatClient := &mockDreamerChat{
-		chatFunc: func(ctx context.Context, messages []chat.Message, opts *chat.ChatOptions) (*types.ChatResponse, error) {
-			return &types.ChatResponse{Content: "not valid json at all"}, nil
-		},
-	}
-	config := types.DreamerConfig{Enabled: true, MaxActions: 5, TokenBudget: 4000}
-	d := newTestDreamer(repo, chatClient, config)
-
-	result, err := d.RunPass(context.Background(), "tenant-1")
-	require.NoError(t, err)
-	assert.Equal(t, 0, result.ActionsProposed, "invalid JSON should produce no actions")
-}
-
-// ---------------------------------------------------------------------------
-// Test: LLM call error
-// ---------------------------------------------------------------------------
-
-func TestDreamer_LLMCallError(t *testing.T) {
-	repo := &mockDreamerRepo{
-		searchFunc: func(ctx context.Context, filter *types.MemoryFilter) ([]*types.MemorySearchResult, int64, error) {
-			mem := makeDreamerMemory("mem-1", "tenant-1", "Test", types.VerdictNone, 3, 2)
-			return []*types.MemorySearchResult{makeSearchResult(mem)}, 1, nil
-		},
-	}
-	chatClient := &mockDreamerChat{
-		chatFunc: func(ctx context.Context, messages []chat.Message, opts *chat.ChatOptions) (*types.ChatResponse, error) {
-			return nil, assert.AnError
-		},
-	}
-	config := types.DreamerConfig{Enabled: true, MaxActions: 5, TokenBudget: 4000}
-	d := newTestDreamer(repo, chatClient, config)
-
-	result, err := d.RunPass(context.Background(), "tenant-1")
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "LLM call failed")
-	require.NotNil(t, result)
-	// Lock should still be released on error
-	require.Len(t, repo.unlockCalls, 1)
-}
-
-// ---------------------------------------------------------------------------
-// Test: Search error handled gracefully
-// ---------------------------------------------------------------------------
-
-func TestDreamer_SearchError(t *testing.T) {
-	repo := &mockDreamerRepo{
-		searchFunc: func(ctx context.Context, filter *types.MemoryFilter) ([]*types.MemorySearchResult, int64, error) {
-			return nil, 0, assert.AnError
-		},
-	}
-	chatClient := &mockDreamerChat{}
-	config := types.DreamerConfig{Enabled: true, MaxActions: 5, TokenBudget: 4000}
-	d := newTestDreamer(repo, chatClient, config)
-
-	_, err := d.RunPass(context.Background(), "tenant-1")
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "search failed")
-	// Lock should still be released
-	require.Len(t, repo.unlockCalls, 1)
-}
-
-// ---------------------------------------------------------------------------
-// Test: Disabled worker
-// ---------------------------------------------------------------------------
-
-func TestDreamer_Disabled(t *testing.T) {
-	repo := &mockDreamerRepo{}
-	chatClient := &mockDreamerChat{}
-	config := types.DreamerConfig{Enabled: false}
-	d := newTestDreamer(repo, chatClient, config)
-
-	result, err := d.RunPass(context.Background(), "tenant-1")
-	require.NoError(t, err)
-	assert.Equal(t, 0, result.ActionsProposed)
-	assert.Equal(t, 0, result.ActionsApplied)
-	// Lock should not be acquired when disabled
-	assert.Empty(t, repo.tryLockCalls)
-	assert.Empty(t, repo.unlockCalls)
-}
-
-// ---------------------------------------------------------------------------
-// Test: Token budget default
-// ---------------------------------------------------------------------------
-
-func TestDreamer_DefaultTokenBudget(t *testing.T) {
-	repo := &mockDreamerRepo{
-		searchFunc: func(ctx context.Context, filter *types.MemoryFilter) ([]*types.MemorySearchResult, int64, error) {
-			mem := makeDreamerMemory("mem-1", "tenant-1", "Test", types.VerdictNone, 3, 2)
-			return []*types.MemorySearchResult{makeSearchResult(mem)}, 1, nil
-		},
-	}
-	var capturedOpts *chat.ChatOptions
-	chatClient := &mockDreamerChat{
-		chatFunc: func(ctx context.Context, messages []chat.Message, opts *chat.ChatOptions) (*types.ChatResponse, error) {
-			capturedOpts = opts
-			return &types.ChatResponse{Content: `{"actions":[]}`}, nil
-		},
-	}
-	config := types.DreamerConfig{Enabled: true, MaxActions: 5, TokenBudget: 0}
-	d := newTestDreamer(repo, chatClient, config)
-
-	_, err := d.RunPass(context.Background(), "tenant-1")
-	require.NoError(t, err)
-	require.NotNil(t, capturedOpts)
-	assert.Equal(t, 4000, capturedOpts.MaxTokens, "default token budget should be 4000")
-}
-
-func TestDreamer_CustomTokenBudget(t *testing.T) {
-	repo := &mockDreamerRepo{
-		searchFunc: func(ctx context.Context, filter *types.MemoryFilter) ([]*types.MemorySearchResult, int64, error) {
-			mem := makeDreamerMemory("mem-1", "tenant-1", "Test", types.VerdictNone, 3, 2)
-			return []*types.MemorySearchResult{makeSearchResult(mem)}, 1, nil
-		},
-	}
-	var capturedOpts *chat.ChatOptions
-	chatClient := &mockDreamerChat{
-		chatFunc: func(ctx context.Context, messages []chat.Message, opts *chat.ChatOptions) (*types.ChatResponse, error) {
-			capturedOpts = opts
-			return &types.ChatResponse{Content: `{"actions":[]}`}, nil
-		},
-	}
-	config := types.DreamerConfig{Enabled: true, MaxActions: 5, TokenBudget: 8000}
-	d := newTestDreamer(repo, chatClient, config)
-
-	_, err := d.RunPass(context.Background(), "tenant-1")
-	require.NoError(t, err)
-	require.NotNil(t, capturedOpts)
-	assert.Equal(t, 8000, capturedOpts.MaxTokens)
-}
-
-// ---------------------------------------------------------------------------
-// Test: applyVerdictUpdate checks protected verdict on target at apply time
-// ---------------------------------------------------------------------------
-
-func TestDreamer_VerdictUpdateProtectedAtApplyTime(t *testing.T) {
-	repo := &mockDreamerRepo{
-		searchFunc: func(ctx context.Context, filter *types.MemoryFilter) ([]*types.MemorySearchResult, int64, error) {
-			mem := makeDreamerMemory("mem-1", "tenant-1", "Test", types.VerdictDecision, 3, 2)
-			return []*types.MemorySearchResult{makeSearchResult(mem)}, 1, nil
-		},
-		getByIDFunc: func(ctx context.Context, tenantID, id string) (*types.AgentMemory, error) {
-			return makeDreamerMemory("mem-1", "tenant-1", "Test", types.VerdictDecision, 3, 2), nil
-		},
-	}
-	chatClient := &mockDreamerChat{
-		chatFunc: func(ctx context.Context, messages []chat.Message, opts *chat.ChatOptions) (*types.ChatResponse, error) {
-			actions := []types.DreamAction{
-				{Type: "update_verdict", TargetID: "mem-1", NewVerdict: "refuted", Reason: "Override", Confidence: 0.85},
-			}
-			return &types.ChatResponse{Content: dreamerActionJSON(actions)}, nil
-		},
-	}
-	config := types.DreamerConfig{Enabled: true, MaxActions: 5, TokenBudget: 4000}
-	d := newTestDreamer(repo, chatClient, config)
-
-	result, err := d.RunPass(context.Background(), "tenant-1")
-	require.NoError(t, err)
-	assert.Equal(t, 1, result.ActionsProposed)
-	assert.Equal(t, 0, result.ActionsApplied)
-}
-
-// ---------------------------------------------------------------------------
-// Test: Dreamer lock release after completion (defer verifies both success and error paths)
-// ---------------------------------------------------------------------------
-
-func TestDreamer_LockReleasedOnSuccess(t *testing.T) {
-	repo := &mockDreamerRepo{
-		searchFunc: func(ctx context.Context, filter *types.MemoryFilter) ([]*types.MemorySearchResult, int64, error) {
-			mem := makeDreamerMemory("mem-1", "tenant-1", "Test", types.VerdictNone, 3, 2)
-			return []*types.MemorySearchResult{makeSearchResult(mem)}, 1, nil
-		},
-	}
-	chatClient := &mockDreamerChat{
-		chatFunc: func(ctx context.Context, messages []chat.Message, opts *chat.ChatOptions) (*types.ChatResponse, error) {
-			return &types.ChatResponse{Content: `{"actions":[]}`}, nil
-		},
-	}
-	config := types.DreamerConfig{Enabled: true, MaxActions: 5, TokenBudget: 4000}
-	d := newTestDreamer(repo, chatClient, config)
-
-	_, err := d.RunPass(context.Background(), "tenant-1")
-	require.NoError(t, err)
-
-	require.Len(t, repo.tryLockCalls, 1)
-	require.Len(t, repo.unlockCalls, 1)
-	assert.Equal(t, repo.tryLockCalls[0].TenantID, repo.unlockCalls[0])
-}
-
-func TestDreamer_LockReleasedOnError(t *testing.T) {
-	repo := &mockDreamerRepo{
-		searchFunc: func(ctx context.Context, filter *types.MemoryFilter) ([]*types.MemorySearchResult, int64, error) {
-			return nil, 0, assert.AnError
-		},
-	}
-	chatClient := &mockDreamerChat{}
-	config := types.DreamerConfig{Enabled: true, MaxActions: 5, TokenBudget: 4000}
-	d := newTestDreamer(repo, chatClient, config)
-
-	_, err := d.RunPass(context.Background(), "tenant-1")
-	require.Error(t, err)
-
-	// Lock should still be released
-	require.Len(t, repo.tryLockCalls, 1)
-	require.Len(t, repo.unlockCalls, 1)
-}
-
-// ---------------------------------------------------------------------------
-// Test: Empty actions from LLM
-// ---------------------------------------------------------------------------
-
-func TestDreamer_EmptyActions(t *testing.T) {
-	repo := &mockDreamerRepo{
-		searchFunc: func(ctx context.Context, filter *types.MemoryFilter) ([]*types.MemorySearchResult, int64, error) {
-			mem := makeDreamerMemory("mem-1", "tenant-1", "Test", types.VerdictNone, 3, 2)
-			return []*types.MemorySearchResult{makeSearchResult(mem)}, 1, nil
-		},
-	}
-	chatClient := &mockDreamerChat{
-		chatFunc: func(ctx context.Context, messages []chat.Message, opts *chat.ChatOptions) (*types.ChatResponse, error) {
-			return &types.ChatResponse{Content: `{"actions":[]}`}, nil
-		},
-	}
-	config := types.DreamerConfig{Enabled: true, MaxActions: 5, TokenBudget: 4000}
-	d := newTestDreamer(repo, chatClient, config)
-
-	result, err := d.RunPass(context.Background(), "tenant-1")
-	require.NoError(t, err)
-	assert.Equal(t, 0, result.ActionsProposed)
-	assert.Equal(t, 0, result.ActionsApplied)
-	assert.Empty(t, result.Actions)
-}
-
-// ---------------------------------------------------------------------------
-// Test: ComputeHubScores must not be called during dreamer pass
-// ---------------------------------------------------------------------------
-
-func TestDreamer_DoesNotCallComputeHubScores(t *testing.T) {
-	computeCalled := false
-	repo := &mockDreamerRepo{
-		computeHubScores: func(ctx context.Context, tenantID string) error {
-			computeCalled = true
-			return nil
-		},
-		searchFunc: func(ctx context.Context, filter *types.MemoryFilter) ([]*types.MemorySearchResult, int64, error) {
-			mem := makeDreamerMemory("mem-1", "tenant-1", "Test", types.VerdictNone, 3, 2)
-			return []*types.MemorySearchResult{makeSearchResult(mem)}, 1, nil
-		},
-	}
-	chatClient := &mockDreamerChat{
-		chatFunc: func(ctx context.Context, messages []chat.Message, opts *chat.ChatOptions) (*types.ChatResponse, error) {
-			return &types.ChatResponse{Content: `{"actions":[]}`}, nil
-		},
-	}
-	config := types.DreamerConfig{Enabled: true, MaxActions: 5, TokenBudget: 4000}
-	d := newTestDreamer(repo, chatClient, config)
-
-	_, err := d.RunPass(context.Background(), "tenant-1")
-	require.NoError(t, err)
-	assert.False(t, computeCalled, "ComputeHubScores should not be called during dreamer pass")
-}
-
-// ---------------------------------------------------------------------------
-// Test: Context cancellation
-// ---------------------------------------------------------------------------
-
-func TestDreamer_Run_ContextCancellation(t *testing.T) {
-	repo := &mockDreamerRepo{
-		searchFunc: func(ctx context.Context, filter *types.MemoryFilter) ([]*types.MemorySearchResult, int64, error) {
-			return nil, 0, nil
-		},
-	}
-	chatClient := &mockDreamerChat{}
-	config := types.DreamerConfig{Enabled: true, MaxActions: 5, TokenBudget: 4000}
-	d := newTestDreamer(repo, chatClient, config)
-
-	ctx, cancel := context.WithCancel(context.Background())
-
-	done := make(chan struct{})
-	go func() {
-		d.Run(ctx)
-		close(done)
-	}()
-
-	// Give the goroutine time to enter the loop
-	time.Sleep(50 * time.Millisecond)
-
-	// Cancel the context
-	cancel()
-
-	select {
-	case <-done:
-		// Run returned cleanly — success
-	case <-time.After(2 * time.Second):
-		t.Fatal("Run did not return within 2 seconds after context cancellation")
-	}
-}
-
-func TestDreamer_Run_PreCancelledContext(t *testing.T) {
-	repo := &mockDreamerRepo{
-		searchFunc: func(ctx context.Context, filter *types.MemoryFilter) ([]*types.MemorySearchResult, int64, error) {
-			return nil, 0, nil
-		},
-	}
-	chatClient := &mockDreamerChat{}
-	config := types.DreamerConfig{Enabled: true, MaxActions: 5, TokenBudget: 4000}
-	d := newTestDreamer(repo, chatClient, config)
-
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-
-	done := make(chan struct{})
-	go func() {
-		d.Run(ctx)
-		close(done)
-	}()
-
-	select {
-	case <-done:
-		// Run returned immediately
-	case <-time.After(2 * time.Second):
-		t.Fatal("Run did not return within 2 seconds after pre-cancelled context")
-	}
-}
-
-func TestDreamer_ExecutePass_CancelledContext(t *testing.T) {
-	repo := &mockDreamerRepo{}
-	chatClient := &mockDreamerChat{}
-	config := types.DreamerConfig{Enabled: true, MaxActions: 5, TokenBudget: 4000}
-	d := newTestDreamer(repo, chatClient, config)
-
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-
-	result, err := d.RunPass(ctx, "tenant-1")
-	// Context cancellation means TryDreamerLock may or may not succeed,
-	// but the function should not panic
-	if err != nil {
-		t.Logf("expected error with cancelled context: %v", err)
-	} else {
-		require.NotNil(t, result)
-	}
-}
-
-// ---------------------------------------------------------------------------
-// Test: applyAction returns error for unknown type
-// ---------------------------------------------------------------------------
-
-func TestDreamer_ApplyActionUnknownType(t *testing.T) {
-	d := &DreamerWorker{}
-	err := d.applyAction(context.Background(), "tenant-1", types.DreamAction{
-		Type: "nonexistent", TargetID: "mem-1", Reason: "test", Confidence: 0.95,
-	})
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "unknown action type")
-}
-
-// ---------------------------------------------------------------------------
-// Test: Merge keeps full content (never truncates)
-// ---------------------------------------------------------------------------
-
-func TestDreamer_MergeKeepsFullContent(t *testing.T) {
-	longContentA := strings.Repeat("quyết định ", 120)
-	longContentB := strings.Repeat("pgbouncer ", 120)
-
-	repo := &mockDreamerRepo{
-		searchFunc: func(ctx context.Context, filter *types.MemoryFilter) ([]*types.MemorySearchResult, int64, error) {
-			memA := makeDreamerMemory("mem-a", "tenant-1", longContentA, types.VerdictNone, 3, 2)
-			memB := makeDreamerMemory("mem-b", "tenant-1", longContentB, types.VerdictNone, 5, 2)
-			return []*types.MemorySearchResult{makeSearchResult(memA), makeSearchResult(memB)}, 2, nil
-		},
-		getByIDFunc: func(ctx context.Context, tenantID, id string) (*types.AgentMemory, error) {
-			if id == "mem-a" {
-				return makeDreamerMemory("mem-a", "tenant-1", longContentA, types.VerdictNone, 3, 2), nil
-			}
-			return makeDreamerMemory("mem-b", "tenant-1", longContentB, types.VerdictNone, 5, 2), nil
-		},
-	}
-	chatClient := &mockDreamerChat{
-		chatFunc: func(ctx context.Context, messages []chat.Message, opts *chat.ChatOptions) (*types.ChatResponse, error) {
-			actions := []types.DreamAction{
-				{Type: "merge", TargetIDs: []string{"mem-a", "mem-b"}, Reason: "Similar", Confidence: 0.85},
-			}
-			return &types.ChatResponse{Content: dreamerActionJSON(actions)}, nil
-		},
-	}
-	config := types.DreamerConfig{Enabled: true, MaxActions: 5, TokenBudget: 4000}
-	d := newTestDreamer(repo, chatClient, config)
-
-	result, err := d.RunPass(context.Background(), "tenant-1")
-	require.NoError(t, err)
-	assert.Equal(t, 1, result.ActionsApplied)
-	require.Len(t, repo.updateCalls, 1)
-	assert.Equal(t, longContentA+"\n---\n"+longContentB, repo.updateCalls[0].Content)
-	assert.True(t, utf8.ValidString(repo.updateCalls[0].Content))
-}
-
-// ---------------------------------------------------------------------------
-// Test: Panic recovery in dreamPass
-// ---------------------------------------------------------------------------
-
-func TestDreamer_RunPass_PanicPropagates(t *testing.T) {
-	// executePass has no recover of its own; the service's runWorker wrapper
-	// recovers panics. Verify a panic is not swallowed silently here.
-	repo := &mockDreamerRepo{
-		searchFunc: func(ctx context.Context, filter *types.MemoryFilter) ([]*types.MemorySearchResult, int64, error) {
-			panic("simulated panic in dreamer")
-		},
-	}
-	d := newTestDreamer(repo, &mockDreamerChat{}, types.DreamerConfig{Enabled: true, MaxActions: 5, TokenBudget: 4000})
-
-	defer func() {
-		r := recover()
-		require.NotNil(t, r, "expected panic to propagate from RunPass")
-		assert.Contains(t, r, "simulated panic in dreamer")
-	}()
-	_, _ = d.RunPass(context.Background(), "tenant-1")
-}
-
-// ---------------------------------------------------------------------------
-// Test: URL encoding / query building helpers
-// ---------------------------------------------------------------------------
-
-func TestTruncateContent(t *testing.T) {
-	short := "short content"
-	assert.Equal(t, "short content", truncateContent(short, 200))
-
-	long := string(make([]byte, 500))
-	truncated := truncateContent(long, 50)
-	assert.Equal(t, 53, len(truncated), "50 chars + '...' = 53")
-	assert.Equal(t, "...", truncated[50:])
-}
-
-func TestTruncateContentExactBoundary(t *testing.T) {
-	// Build a string of exactly 200 runes
-	content := ""
-	for i := 0; i < 200; i++ {
-		content += "a"
-	}
-	// Truncate at exactly the length — should be a no-op
-	assert.Equal(t, content, truncateContent(content, 200))
-}
-
-// ---------------------------------------------------------------------------
-// Test: Unknown action type in validateAction
-// ---------------------------------------------------------------------------
-
-func TestValidateAction_UnknownType(t *testing.T) {
-	d := &DreamerWorker{}
-	valid := d.validateAction(types.DreamAction{
-		Type: "bogus", TargetID: "mem-1", Reason: "test", Confidence: 0.95,
-	})
-	assert.False(t, valid, "unknown action type should be invalid")
-}
-
-func TestValidateAction_EmptyType(t *testing.T) {
-	d := &DreamerWorker{}
-	valid := d.validateAction(types.DreamAction{
-		Type: "", TargetID: "mem-1", Reason: "test", Confidence: 0.95,
-	})
-	assert.False(t, valid, "empty action type should be invalid")
-}
-
-// ---------------------------------------------------------------------------
-// Test: DreamerWorker ID is unique
-// ---------------------------------------------------------------------------
-
-func TestDreamer_WorkerIDFormat(t *testing.T) {
-	config := types.DreamerConfig{Enabled: true}
-	d1 := newTestDreamer(&mockDreamerRepo{}, &mockDreamerChat{}, config)
-	d2 := newTestDreamer(&mockDreamerRepo{}, &mockDreamerChat{}, config)
-	assert.Contains(t, d1.workerID, "dreamer-", "worker ID should contain dreamer- prefix")
-	assert.Contains(t, d2.workerID, "dreamer-", "worker ID should contain dreamer- prefix")
-	assert.NotEmpty(t, d1.workerID)
-	assert.NotEmpty(t, d2.workerID)
-}
-
-func TestDreamer_WorkerIDInLockCall(t *testing.T) {
-	var capturedWorkerID string
-	repo := &mockDreamerRepo{
-		tryDreamerLockFunc: func(ctx context.Context, tenantID, workerID string) (bool, error) {
-			capturedWorkerID = workerID
-			return true, nil
-		},
-		searchFunc: func(ctx context.Context, filter *types.MemoryFilter) ([]*types.MemorySearchResult, int64, error) {
-			return nil, 0, nil
-		},
-	}
-	chatClient := &mockDreamerChat{}
-	config := types.DreamerConfig{Enabled: true, MaxActions: 5, TokenBudget: 4000}
-	d := newTestDreamer(repo, chatClient, config)
-
-	_, err := d.RunPass(context.Background(), "tenant-1")
-	require.NoError(t, err)
-	assert.Contains(t, capturedWorkerID, "dreamer-")
+func TestParseDreamActions_ToleratesFencesAndProse(t *testing.T) {
+	got := parseDreamActions("Sure! Here you go:\n```json\n{\"actions\":[{\"type\":\"merge\",\"indexes\":[1,2],\"confidence\":0.9}]}\n```\nDone.")
+	require.Len(t, got, 1)
+	assert.Equal(t, []int{1, 2}, got[0].Indexes)
 }

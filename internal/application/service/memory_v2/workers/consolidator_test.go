@@ -2,11 +2,9 @@ package workers
 
 import (
 	"context"
-	"strings"
 	"sync"
 	"testing"
 	"time"
-	"unicode/utf8"
 
 	"github.com/Tencent/WeKnora/internal/models/embedding"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -37,6 +35,9 @@ type mockConsolidatorRepo struct {
 	scopes []Scope
 
 	// Tracking
+	hubTenants            []string
+	fieldUpdates          []fieldUpdate
+	updateErr             error
 	computeHubScoresCalls int
 	updateCalls           []*types.AgentMemory
 	deleteCalls           []deleteCall
@@ -114,6 +115,7 @@ func (m *mockConsolidatorRepo) UnlockDreamer(ctx context.Context, tenantID strin
 func (m *mockConsolidatorRepo) ComputeHubScores(ctx context.Context, tenantID string) error {
 	m.mu.Lock()
 	m.computeHubScoresCalls++
+	m.hubTenants = append(m.hubTenants, tenantID)
 	m.mu.Unlock()
 	if m.computeHubScores != nil {
 		return m.computeHubScores(ctx, tenantID)
@@ -202,735 +204,107 @@ func (m *mockConsolidatorRepo) ListMemoryScopes(context.Context) ([]Scope, error
 	return []Scope{testScope}, nil
 }
 
-func newTestConsolidator(repo *mockConsolidatorRepo, embedder *mockConsolidatorEmbedder) *Consolidator {
-	return &Consolidator{
-		repo:     repo,
-		embedder: embedder,
-		interval: 6 * time.Hour,
-	}
+func newTestConsolidator(repo *mockConsolidatorRepo) *Consolidator {
+	return NewConsolidator(repo, nil)
 }
 
-// ---------------------------------------------------------------------------
-// Test: ComputeHubScores is called
-// ---------------------------------------------------------------------------
-
-func TestConsolidator_ComputeHubScoresCalled(t *testing.T) {
-	repo := &mockConsolidatorRepo{}
-	embedder := &mockConsolidatorEmbedder{}
-	c := newTestConsolidator(repo, embedder)
-
-	c.consolidateAll(context.Background())
-
-	assert.Equal(t, 1, repo.computeHubScoresCalls,
-		"ComputeHubScores should be called exactly once per consolidation cycle")
+type fieldUpdate struct {
+	id       string
+	fields   map[string]interface{}
+	expected *time.Time
 }
 
-func TestConsolidator_ComputeHubScoresErrorLogged(t *testing.T) {
-	// When ComputeHubScores returns an error, the cycle should continue
-	// to the next step (decay) rather than aborting.
-	repo := &mockConsolidatorRepo{
-		computeHubScores: func(ctx context.Context, tenantID string) error {
-			return assert.AnError
-		},
-		searchFunc: func(ctx context.Context, filter *types.MemoryFilter) ([]*types.MemorySearchResult, int64, error) {
-			return nil, 0, nil
-		},
-	}
-	embedder := &mockConsolidatorEmbedder{}
-	c := newTestConsolidator(repo, embedder)
-
-	// Should not panic or deadlock when ComputeHubScores returns an error
-	c.consolidateAll(context.Background())
-
-	// ComputeHubScores was attempted
-	assert.Equal(t, 1, repo.computeHubScoresCalls)
+func (m *mockConsolidatorRepo) UpdateFields(ctx context.Context, tenantID, id string, fields map[string]interface{}) error {
+	return m.UpdateFieldsIf(ctx, tenantID, id, fields, nil)
 }
 
-// ---------------------------------------------------------------------------
-// Test: Importance decay for memories > 1 year (10% reduction)
-// ---------------------------------------------------------------------------
-
-func TestConsolidator_DecayOldMemories_ReducesImportance(t *testing.T) {
-	oneYearAgo := time.Now().AddDate(-1, -1, 0) // 13 months ago
-
-	mem := makeConsolidatorMemory("mem-1", "tenant-1", "old memory content", 5, oneYearAgo)
-
-	repo := &mockConsolidatorRepo{
-		searchFunc: func(ctx context.Context, filter *types.MemoryFilter) ([]*types.MemorySearchResult, int64, error) {
-			return []*types.MemorySearchResult{
-				{Memory: mem, Score: 1.0},
-			}, 1, nil
-		},
+func (m *mockConsolidatorRepo) UpdateFieldsIf(_ context.Context, _, id string, fields map[string]interface{}, expected *time.Time) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.updateErr != nil {
+		return m.updateErr
 	}
-	embedder := &mockConsolidatorEmbedder{}
-	c := newTestConsolidator(repo, embedder)
-
-	err := c.decayOldMemories(context.Background(), testScope)
-	require.NoError(t, err)
-
-	// Importance 5 * 0.9 = 4.5, floor = 4
-	require.Len(t, repo.updateCalls, 1, "should update the decayed memory")
-	assert.Equal(t, 4, repo.updateCalls[0].Importance, "importance should be reduced by 10% (rounded down)")
+	m.fieldUpdates = append(m.fieldUpdates, fieldUpdate{id: id, fields: fields, expected: expected})
+	return nil
 }
 
-func TestConsolidator_DecayOldMemories_DoesNotDecayRecent(t *testing.T) {
-	recently := time.Now().AddDate(0, -6, 0) // 6 months ago
-
-	mem := makeConsolidatorMemory("mem-2", "tenant-1", "recent memory", 5, recently)
-
-	repo := &mockConsolidatorRepo{
-		searchFunc: func(ctx context.Context, filter *types.MemoryFilter) ([]*types.MemorySearchResult, int64, error) {
-			return []*types.MemorySearchResult{
-				{Memory: mem, Score: 1.0},
-			}, 1, nil
-		},
-	}
-	embedder := &mockConsolidatorEmbedder{}
-	c := newTestConsolidator(repo, embedder)
-
-	err := c.decayOldMemories(context.Background(), testScope)
-	require.NoError(t, err)
-
-	// Memory is less than 1 year old, should not be decayed
-	assert.Empty(t, repo.updateCalls, "recent memories should not be decayed")
+func memAged(id string, v types.MemoryVerdict, importance int, unused time.Duration, accessed *time.Time) *types.AgentMemory {
+	t := time.Now().Add(-unused)
+	return &types.AgentMemory{ID: id, TenantID: "tenant-1", KbID: "kb-1", Verdict: v, Importance: importance,
+		CreatedAt: t, UpdatedAt: t, LastAccessedAt: accessed}
 }
 
-func TestConsolidator_DecayOldMemories_FloorAtMinusFive(t *testing.T) {
-	oneYearAgo := time.Now().AddDate(-1, -1, 0)
-
-	mem := makeConsolidatorMemory("mem-3", "tenant-1", "low importance", -4, oneYearAgo)
-
-	repo := &mockConsolidatorRepo{
-		searchFunc: func(ctx context.Context, filter *types.MemoryFilter) ([]*types.MemorySearchResult, int64, error) {
-			return []*types.MemorySearchResult{
-				{Memory: mem, Score: 1.0},
-			}, 1, nil
-		},
-	}
-	embedder := &mockConsolidatorEmbedder{}
-	c := newTestConsolidator(repo, embedder)
-
-	err := c.decayOldMemories(context.Background(), testScope)
-	require.NoError(t, err)
-
-	// -4 * 0.9 = -3.6, floor = -4. Since floor(-3.6) = -4, which is >= -5, it should update.
-	// But check the code: if r.Memory.Importance > -5 (true, -4 > -5) AND decayed >= -5 (true, -4 >= -5)
-	// So it should update to -4
-	// Actually, -4 * 0.9 = -3.6. math.Floor(-3.6) = -4. Then if decayed >= -5 → true.
-	// So importance goes from -4 to -4 — effectively no change but still an update call.
-	require.Len(t, repo.updateCalls, 1)
-}
-
-func TestConsolidator_DecayOldMemories_BelowMinusFiveNotUpdated(t *testing.T) {
-	oneYearAgo := time.Now().AddDate(-1, -1, 0)
-
-	// Importance -5: condition r.Memory.Importance > -5 => false, so skip entirely
-	mem := makeConsolidatorMemory("mem-4", "tenant-1", "at floor", -5, oneYearAgo)
-
-	repo := &mockConsolidatorRepo{
-		searchFunc: func(ctx context.Context, filter *types.MemoryFilter) ([]*types.MemorySearchResult, int64, error) {
-			return []*types.MemorySearchResult{
-				{Memory: mem, Score: 1.0},
-			}, 1, nil
-		},
-	}
-	embedder := &mockConsolidatorEmbedder{}
-	c := newTestConsolidator(repo, embedder)
-
-	err := c.decayOldMemories(context.Background(), testScope)
-	require.NoError(t, err)
-
-	// Importance -5 means guard condition `Importance > -5` is false, so no update
-	assert.Empty(t, repo.updateCalls, "memories at importance -5 should not be decayed")
-}
-
-func TestConsolidator_DecayOldMemories_SkipsNilMemory(t *testing.T) {
-	repo := &mockConsolidatorRepo{
-		searchFunc: func(ctx context.Context, filter *types.MemoryFilter) ([]*types.MemorySearchResult, int64, error) {
-			return []*types.MemorySearchResult{
-				{Memory: nil, Score: 1.0},
-			}, 1, nil
-		},
-	}
-	embedder := &mockConsolidatorEmbedder{}
-	c := newTestConsolidator(repo, embedder)
-
-	err := c.decayOldMemories(context.Background(), testScope)
-	require.NoError(t, err)
-	assert.Empty(t, repo.updateCalls, "nil memory entries should be skipped")
-}
-
-func TestConsolidator_DecayOldMemories_SearchError(t *testing.T) {
-	repo := &mockConsolidatorRepo{
-		searchFunc: func(ctx context.Context, filter *types.MemoryFilter) ([]*types.MemorySearchResult, int64, error) {
-			return nil, 0, assert.AnError
-		},
-	}
-	embedder := &mockConsolidatorEmbedder{}
-	c := newTestConsolidator(repo, embedder)
-
-	err := c.decayOldMemories(context.Background(), testScope)
-	require.Error(t, err, "should propagate search error")
-}
-
-// ---------------------------------------------------------------------------
-// Test: Near-duplicate merging (cosine > 0.93)
-// ---------------------------------------------------------------------------
-
-func TestConsolidator_MergeNearDuplicates_MergesHighSimilarity(t *testing.T) {
-	memA := makeConsolidatorMemory("mem-a", "tenant-1", "The sky appears blue during daytime.", 3, time.Now().Add(-24*time.Hour))
-	memB := makeConsolidatorMemory("mem-b", "tenant-1", "The sky looks blue in daylight hours.", 5, time.Now().Add(-12*time.Hour))
-
-	repo := &mockConsolidatorRepo{
-		searchFunc: func(ctx context.Context, filter *types.MemoryFilter) ([]*types.MemorySearchResult, int64, error) {
-			return []*types.MemorySearchResult{
-				{Memory: memA, Score: 0.5},
-				{Memory: memB, Score: 0.5},
-			}, 2, nil
-		},
-	}
-
-	// Return vectors with cosine similarity > 0.93
-	embedder := &mockConsolidatorEmbedder{
-		embedFunc: func(ctx context.Context, text string) ([]float32, error) {
-			return []float32{1.0, 0.0, 0.0}, nil
-		},
-	}
-	c := newTestConsolidator(repo, embedder)
-
-	err := c.mergeNearDuplicates(context.Background(), testScope)
-	require.NoError(t, err)
-
-	// memB should be merged into memA and then deleted
-	require.Len(t, repo.updateCalls, 1, "should update mem-a with merged content")
-	assert.Equal(t, "mem-a", repo.updateCalls[0].ID, "should update the surviving memory")
-	assert.Contains(t, repo.updateCalls[0].Content, "The sky appears blue during daytime.")
-	assert.Contains(t, repo.updateCalls[0].Content, "The sky looks blue in daylight hours.")
-
-	// memB's importance (5) is higher than memA's (3), so survivor should get 5
-	assert.Equal(t, 5, repo.updateCalls[0].Importance, "should take the higher importance")
-
-	// memB should be soft-deleted
-	require.Len(t, repo.deleteCalls, 1, "should delete the merged-away memory")
-	assert.Equal(t, "mem-b", repo.deleteCalls[0].ID)
-	assert.Equal(t, "tenant-1", repo.deleteCalls[0].TenantID)
-}
-
-func TestConsolidator_MergeNearDuplicates_DoesNotMergeLowSimilarity(t *testing.T) {
-	memA := makeConsolidatorMemory("mem-a", "tenant-1", "The sky appears blue during daytime.", 3, time.Now().Add(-24*time.Hour))
-	memB := makeConsolidatorMemory("mem-b", "tenant-1", "Quantum entanglement is a physical phenomenon.", 5, time.Now().Add(-12*time.Hour))
-
-	repo := &mockConsolidatorRepo{
-		searchFunc: func(ctx context.Context, filter *types.MemoryFilter) ([]*types.MemorySearchResult, int64, error) {
-			return []*types.MemorySearchResult{
-				{Memory: memA, Score: 0.5},
-				{Memory: memB, Score: 0.5},
-			}, 2, nil
-		},
-	}
-
-	// Return orthogonal vectors — cosine similarity = 0
-	embedder := &mockConsolidatorEmbedder{
-		embedFunc: func(ctx context.Context, text string) ([]float32, error) {
-			// Use content-based deterministic vectors to ensure low similarity
-			if text == "The sky appears blue during daytime." {
-				return []float32{1.0, 0.0, 0.0}, nil
-			}
-			return []float32{0.0, 1.0, 0.0}, nil
-		},
-	}
-	c := newTestConsolidator(repo, embedder)
-
-	err := c.mergeNearDuplicates(context.Background(), testScope)
-	require.NoError(t, err)
-
-	// No updates or deletes when similarity is below threshold
-	assert.Empty(t, repo.updateCalls, "low-similarity memories should not be merged")
-	assert.Empty(t, repo.deleteCalls, "no delete should occur for low similarity")
-}
-
-func TestConsolidator_MergeNearDuplicates_KeepsFullContentUnderCap(t *testing.T) {
-	longContentA := strings.Repeat("kết nối ", 190) // 1520 runes, multi-byte
-	longContentB := strings.Repeat("pool đầy ", 190)
-
-	memA := makeConsolidatorMemory("mem-a", "tenant-1", longContentA, 3, time.Now().Add(-24*time.Hour))
-	memB := makeConsolidatorMemory("mem-b", "tenant-1", longContentB, 3, time.Now().Add(-12*time.Hour))
-
-	repo := &mockConsolidatorRepo{
-		searchFunc: func(ctx context.Context, filter *types.MemoryFilter) ([]*types.MemorySearchResult, int64, error) {
-			return []*types.MemorySearchResult{
-				{Memory: memA, Score: 0.5},
-				{Memory: memB, Score: 0.5},
-			}, 2, nil
-		},
-	}
-
-	embedder := &mockConsolidatorEmbedder{
-		embedFunc: func(ctx context.Context, text string) ([]float32, error) {
-			return []float32{1.0, 0.0, 0.0}, nil
-		},
-	}
-	c := newTestConsolidator(repo, embedder)
-
-	err := c.mergeNearDuplicates(context.Background(), testScope)
-	require.NoError(t, err)
-
-	require.Len(t, repo.updateCalls, 1)
-	merged := repo.updateCalls[0].Content
-	assert.True(t, utf8.ValidString(merged), "merged content must stay valid UTF-8")
-	assert.Equal(t, longContentA+"\n---\n"+longContentB, merged, "nothing may be truncated")
-}
-
-func TestConsolidator_MergeNearDuplicates_SkipsWhenOverCap(t *testing.T) {
-	memA := makeConsolidatorMemory("mem-a", "tenant-1", strings.Repeat("a", 6000), 3, time.Now().Add(-24*time.Hour))
-	memB := makeConsolidatorMemory("mem-b", "tenant-1", strings.Repeat("b", 6000), 3, time.Now().Add(-12*time.Hour))
-	repo := &mockConsolidatorRepo{
-		searchFunc: func(ctx context.Context, filter *types.MemoryFilter) ([]*types.MemorySearchResult, int64, error) {
-			return []*types.MemorySearchResult{{Memory: memA}, {Memory: memB}}, 2, nil
-		},
-	}
-	embedder := &mockConsolidatorEmbedder{
-		embedFunc: func(ctx context.Context, text string) ([]float32, error) { return []float32{1, 0, 0}, nil },
-	}
-	c := newTestConsolidator(repo, embedder)
-
-	require.NoError(t, c.mergeNearDuplicates(context.Background(), testScope))
-	assert.Empty(t, repo.updateCalls, "a merge over the cap must be skipped, not truncated")
-	assert.Empty(t, repo.deleteCalls)
-}
-
-func TestConsolidator_MergeNearDuplicates_SkipsAlreadyMerged(t *testing.T) {
-	memA := makeConsolidatorMemory("mem-a", "tenant-1", "Memory A content", 3, time.Now().Add(-24*time.Hour))
-	memB := makeConsolidatorMemory("mem-b", "tenant-1", "Memory B content", 5, time.Now().Add(-12*time.Hour))
-	memC := makeConsolidatorMemory("mem-c", "tenant-1", "Memory C content", 7, time.Now().Add(-6*time.Hour))
-
-	repo := &mockConsolidatorRepo{
-		searchFunc: func(ctx context.Context, filter *types.MemoryFilter) ([]*types.MemorySearchResult, int64, error) {
-			// Return memA and memB with original Importance values (not modified by prior run)
-			return []*types.MemorySearchResult{
-				{Memory: memA, Score: 0.5},
-				{Memory: memB, Score: 0.5},
-				{Memory: memC, Score: 0.5},
-			}, 3, nil
-		},
-	}
-
-	// All three have the same vector (high similarity)
-	embedder := &mockConsolidatorEmbedder{
-		embedFunc: func(ctx context.Context, text string) ([]float32, error) {
-			return []float32{1.0, 0.0, 0.0}, nil
-		},
-	}
-	c := newTestConsolidator(repo, embedder)
-
-	err := c.mergeNearDuplicates(context.Background(), testScope)
-	require.NoError(t, err)
-
-	// mem-a merges mem-b and mem-c into itself. Both merge ops call Update.
-	// First: mem-a + mem-b → update mem-a
-	// Second: mem-a + mem-c → update mem-a again
-	require.Len(t, repo.updateCalls, 2, "mem-a should be updated twice (merge b, then merge c)")
-	for _, call := range repo.updateCalls {
-		assert.Equal(t, "mem-a", call.ID, "all updates should be on mem-a")
-	}
-
-	// mem-b and mem-c should be deleted
-	require.Len(t, repo.deleteCalls, 2, "mem-b and mem-c should be deleted")
-	deleteIDs := make(map[string]bool)
-	for _, dc := range repo.deleteCalls {
-		deleteIDs[dc.ID] = true
-	}
-	assert.True(t, deleteIDs["mem-b"], "mem-b should be deleted")
-	assert.True(t, deleteIDs["mem-c"], "mem-c should be deleted")
-}
-
-func TestConsolidator_MergeNearDuplicates_EmptyResults(t *testing.T) {
-	repo := &mockConsolidatorRepo{
-		searchFunc: func(ctx context.Context, filter *types.MemoryFilter) ([]*types.MemorySearchResult, int64, error) {
-			return nil, 0, nil
-		},
-	}
-	embedder := &mockConsolidatorEmbedder{}
-	c := newTestConsolidator(repo, embedder)
-
-	err := c.mergeNearDuplicates(context.Background(), testScope)
-	require.NoError(t, err)
-	assert.Empty(t, repo.updateCalls)
-	assert.Empty(t, repo.deleteCalls)
-}
-
-func TestConsolidator_MergeNearDuplicates_SingleMemory(t *testing.T) {
-	mem := makeConsolidatorMemory("mem-a", "tenant-1", "only one memory", 3, time.Now().Add(-24*time.Hour))
-
-	repo := &mockConsolidatorRepo{
-		searchFunc: func(ctx context.Context, filter *types.MemoryFilter) ([]*types.MemorySearchResult, int64, error) {
-			return []*types.MemorySearchResult{
-				{Memory: mem, Score: 0.5},
-			}, 1, nil
-		},
-	}
-	embedder := &mockConsolidatorEmbedder{}
-	c := newTestConsolidator(repo, embedder)
-
-	err := c.mergeNearDuplicates(context.Background(), testScope)
-	require.NoError(t, err)
-	assert.Empty(t, repo.updateCalls, "no merge with a single memory")
-	assert.Empty(t, repo.deleteCalls)
-}
-
-func TestConsolidator_MergeNearDuplicates_SkipsNilMemory(t *testing.T) {
-	repo := &mockConsolidatorRepo{
-		searchFunc: func(ctx context.Context, filter *types.MemoryFilter) ([]*types.MemorySearchResult, int64, error) {
-			return []*types.MemorySearchResult{
-				{Memory: nil, Score: 1.0},
-				{Memory: nil, Score: 1.0},
-			}, 2, nil
-		},
-	}
-	embedder := &mockConsolidatorEmbedder{}
-	c := newTestConsolidator(repo, embedder)
-
-	err := c.mergeNearDuplicates(context.Background(), testScope)
-	require.NoError(t, err)
-	assert.Empty(t, repo.updateCalls, "nil memories should be skipped")
-}
-
-func TestConsolidator_MergeNearDuplicates_EmbedErrorFallback(t *testing.T) {
-	memA := makeConsolidatorMemory("mem-a", "tenant-1", "content A", 3, time.Now().Add(-24*time.Hour))
-	memB := makeConsolidatorMemory("mem-b", "tenant-1", "content B", 5, time.Now().Add(-12*time.Hour))
-
-	repo := &mockConsolidatorRepo{
-		searchFunc: func(ctx context.Context, filter *types.MemoryFilter) ([]*types.MemorySearchResult, int64, error) {
-			return []*types.MemorySearchResult{
-				{Memory: memA, Score: 0.5},
-				{Memory: memB, Score: 0.5},
-			}, 2, nil
-		},
-	}
-
-	// Embedder returns an error — the memory should be skipped gracefully
-	callCount := 0
-	embedder := &mockConsolidatorEmbedder{
-		embedFunc: func(ctx context.Context, text string) ([]float32, error) {
-			callCount++
-			return nil, assert.AnError
-		},
-	}
-	c := newTestConsolidator(repo, embedder)
-
-	err := c.mergeNearDuplicates(context.Background(), testScope)
-	require.NoError(t, err)
-	assert.Equal(t, 2, callCount, "both memories should be embedded (and fail)")
-	assert.Empty(t, repo.updateCalls, "no merge should occur when embed fails")
-	assert.Empty(t, repo.deleteCalls)
-}
-
-func TestConsolidator_MergeNearDuplicates_DifferentTenantsNotMerged(t *testing.T) {
-	memA := makeConsolidatorMemory("mem-a", "tenant-1", "same content across tenants", 3, time.Now().Add(-24*time.Hour))
-	memB := makeConsolidatorMemory("mem-b", "tenant-2", "same content across tenants", 5, time.Now().Add(-12*time.Hour))
-
-	repo := &mockConsolidatorRepo{
-		searchFunc: func(ctx context.Context, filter *types.MemoryFilter) ([]*types.MemorySearchResult, int64, error) {
-			return []*types.MemorySearchResult{
-				{Memory: memA, Score: 0.5},
-				{Memory: memB, Score: 0.5},
-			}, 2, nil
-		},
-	}
-
-	embedder := &mockConsolidatorEmbedder{
-		embedFunc: func(ctx context.Context, text string) ([]float32, error) {
-			return []float32{1.0, 0.0, 0.0}, nil
-		},
-	}
-	c := newTestConsolidator(repo, embedder)
-
-	err := c.mergeNearDuplicates(context.Background(), testScope)
-	require.NoError(t, err)
-
-	// Different tenants — each group has only 1 memory, no merge occurs
-	assert.Empty(t, repo.updateCalls)
-	assert.Empty(t, repo.deleteCalls)
-}
-
-func TestConsolidator_MergeNearDuplicates_SearchError(t *testing.T) {
-	repo := &mockConsolidatorRepo{
-		searchFunc: func(ctx context.Context, filter *types.MemoryFilter) ([]*types.MemorySearchResult, int64, error) {
-			return nil, 0, assert.AnError
-		},
-	}
-	embedder := &mockConsolidatorEmbedder{}
-	c := newTestConsolidator(repo, embedder)
-
-	err := c.mergeNearDuplicates(context.Background(), testScope)
-	require.Error(t, err, "should propagate search error")
-}
-
-// ---------------------------------------------------------------------------
-// Test: Context cancellation / graceful shutdown
-// ---------------------------------------------------------------------------
-
-func TestConsolidator_Run_ContextCancellation(t *testing.T) {
-	repo := &mockConsolidatorRepo{
-		searchFunc: func(ctx context.Context, filter *types.MemoryFilter) ([]*types.MemorySearchResult, int64, error) {
-			return nil, 0, nil
-		},
-	}
-	embedder := &mockConsolidatorEmbedder{}
-	c := newTestConsolidator(repo, embedder)
-
-	ctx, cancel := context.WithCancel(context.Background())
-
-	done := make(chan struct{})
-	go func() {
-		c.Run(ctx)
-		close(done)
-	}()
-
-	// Give the goroutine time to start, run the initial cycle, and enter the loop
-	time.Sleep(50 * time.Millisecond)
-
-	// Cancel the context
-	cancel()
-
-	select {
-	case <-done:
-		// Run returned cleanly — success
-	case <-time.After(2 * time.Second):
-		t.Fatal("Run did not return within 2 seconds after context cancellation")
-	}
-
-	// Initial cycle ran once (ComputeHubScores was called)
-	assert.Equal(t, 1, repo.computeHubScoresCalls,
-		"one consolidation cycle should have run before cancellation")
-}
-
-func TestConsolidator_Run_ContextPreCancelled(t *testing.T) {
-	repo := &mockConsolidatorRepo{
-		searchFunc: func(ctx context.Context, filter *types.MemoryFilter) ([]*types.MemorySearchResult, int64, error) {
-			return nil, 0, nil
-		},
-	}
-	embedder := &mockConsolidatorEmbedder{}
-	c := newTestConsolidator(repo, embedder)
-
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel() // Cancel immediately
-
-	done := make(chan struct{})
-	go func() {
-		c.Run(ctx)
-		close(done)
-	}()
-
-	select {
-	case <-done:
-		// Run returned immediately
-	case <-time.After(2 * time.Second):
-		t.Fatal("Run did not return within 2 seconds after pre-cancelled context")
-	}
-
-	// Initial cycle should NOT run when context is already cancelled
-	// (because consolidateAll is called BEFORE the select, and ctx.Done()
-	// won't fire until the select is entered, but the initial consolidateAll
-	// should check ctx.Err()... looking at the code, consolidateAll calls repo
-	// methods which receive the cancelled context — they should return early)
-	// Actually, the code calls consolidateAll(ctx) BEFORE the select loop.
-	// With a cancelled context, the repo methods should detect it.
-	// The key assertion is that Run returns without blocking.
-}
-
-func TestConsolidator_consolidateAll_CancelledContext(t *testing.T) {
-	// Verify that consolidateAll handles a context that's already cancelled
-	// without panicking
-	repo := &mockConsolidatorRepo{}
-	embedder := &mockConsolidatorEmbedder{}
-	c := newTestConsolidator(repo, embedder)
-
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-
-	// Should not panic — individual methods may or may not check ctx.Err()
-	c.consolidateAll(ctx)
-}
-
-// ---------------------------------------------------------------------------
-// Test: Panic recovery (edge cases and defensive coding)
-// ---------------------------------------------------------------------------
-
-func TestConsolidator_consolidateAll_UpdatePanic(t *testing.T) {
-	// If the repo Update panics, the whole consolidateAll should be resilient.
-	// Since the code doesn't have an explicit recover, we just verify
-	// that edge cases are handled gracefully by testing each step isolation.
-	oneYearAgo := time.Now().AddDate(-1, -1, 0)
-	mem := makeConsolidatorMemory("mem-1", "tenant-1", "content", 5, oneYearAgo)
-
-	repo := &mockConsolidatorRepo{
-		searchFunc: func(ctx context.Context, filter *types.MemoryFilter) ([]*types.MemorySearchResult, int64, error) {
-			return []*types.MemorySearchResult{
-				{Memory: mem, Score: 1.0},
-			}, 1, nil
-		},
-		updateFunc: func(ctx context.Context, m *types.AgentMemory) error {
-			return assert.AnError
-		},
-	}
-	embedder := &mockConsolidatorEmbedder{}
-	c := newTestConsolidator(repo, embedder)
-
-	// decayOldMemories should handle update errors gracefully (logs them, continues)
-	err := c.decayOldMemories(context.Background(), testScope)
-	require.NoError(t, err, "should not error when individual update fails")
-}
-
-func TestConsolidator_mergeNearDuplicates_DeleteErrorContinues(t *testing.T) {
-	memA := makeConsolidatorMemory("mem-a", "tenant-1", "content A", 3, time.Now().Add(-24*time.Hour))
-	memB := makeConsolidatorMemory("mem-b", "tenant-1", "content B", 5, time.Now().Add(-12*time.Hour))
-
-	repo := &mockConsolidatorRepo{
-		searchFunc: func(ctx context.Context, filter *types.MemoryFilter) ([]*types.MemorySearchResult, int64, error) {
-			return []*types.MemorySearchResult{
-				{Memory: memA, Score: 0.5},
-				{Memory: memB, Score: 0.5},
-			}, 2, nil
-		},
-		deleteFunc: func(ctx context.Context, tenantID, id string) error {
-			return assert.AnError
-		},
-	}
-
-	embedder := &mockConsolidatorEmbedder{
-		embedFunc: func(ctx context.Context, text string) ([]float32, error) {
-			return []float32{1.0, 0.0, 0.0}, nil
-		},
-	}
-	c := newTestConsolidator(repo, embedder)
-
-	// Even if Delete fails, the merge itself should still proceed
-	err := c.mergeNearDuplicates(context.Background(), testScope)
-	require.NoError(t, err, "should not error when delete fails")
-
-	// Update should still happen
-	require.Len(t, repo.updateCalls, 1, "merge update should occur despite delete error")
-}
-
-// ---------------------------------------------------------------------------
-// Test: Full consolidateAll cycle
-// ---------------------------------------------------------------------------
-
-func TestConsolidator_consolidateAll_FullCycle(t *testing.T) {
-	oneYearAgo := time.Now().AddDate(-1, -1, 0)
-	recently := time.Now().AddDate(0, -1, 0)
-
-	oldMem := makeConsolidatorMemory("mem-old", "tenant-1", "old content here", 5, oneYearAgo)
-	newMem := makeConsolidatorMemory("mem-new", "tenant-1", "different content here", 3, recently)
-	dupMem := makeConsolidatorMemory("mem-dup", "tenant-1", "old content here", 7, oneYearAgo.Add(-24*time.Hour))
-
-	repo := &mockConsolidatorRepo{
-		searchFunc: func(ctx context.Context, filter *types.MemoryFilter) ([]*types.MemorySearchResult, int64, error) {
-			return []*types.MemorySearchResult{
-				{Memory: oldMem, Score: 0.5},
-				{Memory: newMem, Score: 0.5},
-				{Memory: dupMem, Score: 0.5},
-			}, 3, nil
-		},
-	}
-
-	// oldMem and dupMem share the same content → same vector → high similarity
-	// newMem has different content → different vector → low similarity
-	embedder := &mockConsolidatorEmbedder{
-		embedFunc: func(ctx context.Context, text string) ([]float32, error) {
-			if text == "old content here" {
-				return []float32{1.0, 0.0, 0.0}, nil
-			}
-			return []float32{0.0, 1.0, 0.0}, nil
-		},
-	}
-	c := newTestConsolidator(repo, embedder)
-
-	c.consolidateAll(context.Background())
-
-	// 1. ComputeHubScores was called
-	assert.Equal(t, 1, repo.computeHubScoresCalls)
-
-	// 2. Both oldMem (Importance=5) and dupMem (Importance=7) were decayed:
-	//    5*0.9=4.5→4, 7*0.9=6.3→6
-	// 3. oldMem and dupMem were merged (same content → high cosine similarity)
-	//    oldMem (Importance=4) and dupMem (Importance=6) → survivor gets max(4,6)=6
-	// 4. newMem was not merged (different content → low cosine similarity)
-
-	// Total update calls: 2 (decay) + 1 (merge update on mem-old) = 3
-	require.Len(t, repo.updateCalls, 3, "should have 2 decay updates + 1 merge update")
-
-	// Check at least one update has Importance=4 (decayed value from oldMem)
-	decayFound := false
-	mergeFound := false
-	for _, call := range repo.updateCalls {
-		if call.ID == "mem-old" && call.Importance == 4 {
-			decayFound = true
+func searchReturning(mems ...*types.AgentMemory) func(context.Context, *types.MemoryFilter) ([]*types.MemorySearchResult, int64, error) {
+	return func(context.Context, *types.MemoryFilter) ([]*types.MemorySearchResult, int64, error) {
+		out := make([]*types.MemorySearchResult, len(mems))
+		for i, m := range mems {
+			out[i] = &types.MemorySearchResult{Memory: m}
 		}
-		if call.ID == "mem-old" && call.Importance == 6 {
-			mergeFound = true
-		}
+		return out, int64(len(out)), nil
 	}
-	assert.True(t, decayFound, "oldMem should be decayed to importance 4")
-	assert.True(t, mergeFound, "oldMem should be merged with dupMem and take importance 6")
-
-	// dupMem should be deleted (merged away)
-	require.Len(t, repo.deleteCalls, 1, "dupMem should be deleted after merge")
-	assert.Equal(t, "mem-dup", repo.deleteCalls[0].ID)
 }
 
-// ---------------------------------------------------------------------------
-// Test: Scope isolation
-// ---------------------------------------------------------------------------
+func TestConsolidator_DecaysOnlyLongUnusedUnprotectedMemories(t *testing.T) {
+	year := 400 * 24 * time.Hour
+	recentRead := time.Now().Add(-24 * time.Hour)
+	repo := &mockConsolidatorRepo{searchFunc: searchReturning(
+		memAged("old", types.VerdictNone, 3, year, nil),
+		memAged("recent", types.VerdictNone, 3, 30*24*time.Hour, nil),
+		memAged("old-but-read", types.VerdictNone, 3, year, &recentRead),
+		memAged("decision", types.VerdictDecision, 3, year, nil),
+		memAged("floor", types.VerdictNone, 0, year, nil),
+		memAged("negative", types.VerdictNone, -2, year, nil),
+	)}
+	c := newTestConsolidator(repo)
 
-func TestConsolidator_RunsPerScopeWithScopedFilters(t *testing.T) {
+	n, err := c.decayOldMemories(context.Background(), testScope)
+
+	require.NoError(t, err)
+	assert.Equal(t, 1, n)
+	require.Len(t, repo.fieldUpdates, 1)
+	assert.Equal(t, "old", repo.fieldUpdates[0].id)
+	assert.Equal(t, map[string]interface{}{"importance": 2}, repo.fieldUpdates[0].fields, "one step, not a percentage")
+	require.NotNil(t, repo.fieldUpdates[0].expected, "optimistic lock: a concurrent edit wins")
+}
+
+func TestConsolidator_DecayConflictIsSkipped(t *testing.T) {
+	repo := &mockConsolidatorRepo{updateErr: assert.AnError, searchFunc: searchReturning(memAged("old", types.VerdictNone, 3, 400*24*time.Hour, nil))}
+	n, err := newTestConsolidator(repo).decayOldMemories(context.Background(), testScope)
+	require.NoError(t, err)
+	assert.Zero(t, n)
+}
+
+func TestConsolidator_RunsPerScopeHubScoresOncePerTenant(t *testing.T) {
 	var mu sync.Mutex
 	var filters []types.MemoryFilter
-	var hubTenants []string
 	repo := &mockConsolidatorRepo{
 		scopes: []Scope{{TenantID: "1", KbID: "kb-a"}, {TenantID: "1", KbID: "kb-b"}, {TenantID: "2", KbID: "kb-c"}, {TenantID: "", KbID: "orphan"}},
-		searchFunc: func(ctx context.Context, filter *types.MemoryFilter) ([]*types.MemorySearchResult, int64, error) {
+		searchFunc: func(ctx context.Context, f *types.MemoryFilter) ([]*types.MemorySearchResult, int64, error) {
 			mu.Lock()
-			filters = append(filters, *filter)
+			filters = append(filters, *f)
 			mu.Unlock()
 			return nil, 0, nil
 		},
-		computeHubScores: func(ctx context.Context, tenantID string) error {
-			hubTenants = append(hubTenants, tenantID)
-			return nil
-		},
 	}
-	c := newTestConsolidator(repo, &mockConsolidatorEmbedder{})
 
-	c.consolidateAll(context.Background())
+	newTestConsolidator(repo).consolidateAll(context.Background())
 
-	assert.Equal(t, []string{"1", "2"}, hubTenants, "hub scores once per tenant, never for an empty tenant")
+	assert.Equal(t, []string{"1", "2"}, repo.hubTenants, "never for an empty tenant")
+	require.Len(t, filters, 3)
 	for _, f := range filters {
-		assert.NotEmpty(t, f.TenantID, "no unscoped search")
-		assert.NotEmpty(t, f.KbID, "no cross-KB search")
+		assert.NotEmpty(t, f.TenantID)
+		assert.NotEmpty(t, f.KbID)
 	}
-	assert.Len(t, filters, 6, "decay + merge search for each of the 3 real scopes")
 }
 
-func TestConsolidator_NeverMergesAcrossKnowledgeBases(t *testing.T) {
-	memA := makeConsolidatorMemory("mem-a", "tenant-1", "identical content", 3, time.Now())
-	memA.KbID = "kb-1"
-	memB := makeConsolidatorMemory("mem-b", "tenant-1", "identical content", 3, time.Now())
-	memB.KbID = "kb-2"
-	repo := &mockConsolidatorRepo{
-		searchFunc: func(ctx context.Context, filter *types.MemoryFilter) ([]*types.MemorySearchResult, int64, error) {
-			// A misbehaving repository returning rows outside the scope.
-			return []*types.MemorySearchResult{{Memory: memA}, {Memory: memB}}, 2, nil
-		},
-	}
-	embedder := &mockConsolidatorEmbedder{
-		embedFunc: func(ctx context.Context, text string) ([]float32, error) { return []float32{1, 0, 0}, nil },
-	}
-	c := newTestConsolidator(repo, embedder)
+func TestConsolidator_NeverMergesOrDeletes(t *testing.T) {
+	a := memAged("a", types.VerdictNone, 3, time.Hour, nil)
+	b := memAged("b", types.VerdictNone, 3, time.Hour, nil)
+	b.Content, a.Content = "same", "same"
+	repo := &mockConsolidatorRepo{searchFunc: searchReturning(a, b)}
 
-	require.NoError(t, c.mergeNearDuplicates(context.Background(), Scope{TenantID: "tenant-1", KbID: "kb-1"}))
+	newTestConsolidator(repo).consolidateAll(context.Background())
+
 	assert.Empty(t, repo.updateCalls)
 	assert.Empty(t, repo.deleteCalls)
 }
@@ -940,10 +314,21 @@ type noScopeConsolidatorRepo struct{ interfaces.MemoryRepositoryV2 }
 
 func TestConsolidator_WithoutScopeListerDoesNothing(t *testing.T) {
 	inner := &mockConsolidatorRepo{}
-	c := NewConsolidator(noScopeConsolidatorRepo{inner}, &mockConsolidatorEmbedder{})
-
-	c.consolidateAll(context.Background())
-
+	NewConsolidator(noScopeConsolidatorRepo{inner}, nil).consolidateAll(context.Background())
 	assert.Zero(t, inner.computeHubScoresCalls)
-	assert.Empty(t, inner.updateCalls)
+}
+
+func TestConsolidator_RunStopsOnCancel(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		newTestConsolidator(&mockConsolidatorRepo{}).Run(ctx)
+		close(done)
+	}()
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("consolidator did not stop")
+	}
 }

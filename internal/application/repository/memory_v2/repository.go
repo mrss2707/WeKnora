@@ -211,7 +211,7 @@ func (r *MemoryRepository) TryDreamerLock(ctx context.Context, tenantID string, 
 		var state types.DreamerState
 		result := tx.
 			Clauses(clause.Locking{Strength: "UPDATE"}).
-			Where("tenant_id = ?", tenantID).
+			Where("tenant_id = ? AND kb_id = ''", tenantID).
 			First(&state)
 
 		if errors.Is(result.Error, gorm.ErrRecordNotFound) {
@@ -254,11 +254,13 @@ func (r *MemoryRepository) TryDreamerLock(ctx context.Context, tenantID string, 
 	return acquired, err
 }
 
-// UnlockDreamer releases the dreamer lock for a tenant.
+// UnlockDreamer releases the tenant-wide dreamer lock. The dreamer itself
+// locks per knowledge base (TryScopeLock); this pair is kept for the
+// MemoryRepositoryV2 contract.
 func (r *MemoryRepository) UnlockDreamer(ctx context.Context, tenantID string) error {
 	return r.db.WithContext(ctx).
 		Model(&types.DreamerState{}).
-		Where("tenant_id = ?", tenantID).
+		Where("tenant_id = ? AND kb_id = ''", tenantID).
 		Updates(map[string]interface{}{
 			"locked_by":    "",
 			"locked_until": nil,

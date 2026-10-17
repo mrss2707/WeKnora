@@ -28,14 +28,14 @@ func TestMemoryV2Config_PartialYAMLKeepsDefaults(t *testing.T) {
 	cfg := decodeMemoryV2YAML(t, `
 memory_v2:
   max_search_results: 7
-  worker_mutations: true
+  worker_mutations: false
   dreamer:
     interval: 2h
   semantic_dedup:
     near_threshold: 0.9
 `)
 	m := cfg.MemoryV2
-	if m.MaxSearchResults != 7 || !m.WorkerMutations || m.Dreamer.Interval != "2h" || m.SemanticDedup.NearThreshold != 0.9 {
+	if m.MaxSearchResults != 7 || m.WorkerMutations || m.Dreamer.Interval != "2h" || m.SemanticDedup.NearThreshold != 0.9 {
 		t.Fatalf("snake_case keys not applied: %+v", m)
 	}
 	if !m.Enabled || m.MinScoreThreshold != 0.4 || m.Dreamer.MaxActions != 5 || !m.Dreamer.Enabled || m.SemanticDedup.ExactThreshold != 0.97 {
@@ -45,29 +45,32 @@ memory_v2:
 
 func TestMemoryV2Config_NoBlockUsesDefaults(t *testing.T) {
 	cfg := decodeMemoryV2YAML(t, "server:\n  port: 8080\n")
-	if cfg.MemoryV2 == nil || !cfg.MemoryV2.Enabled || cfg.MemoryV2.MaxSearchResults != 20 || cfg.MemoryV2.WorkerMutations {
+	if cfg.MemoryV2 == nil || !cfg.MemoryV2.Enabled || cfg.MemoryV2.MaxSearchResults != 20 || !cfg.MemoryV2.WorkerMutations || !cfg.MemoryV2.Dreamer.Enabled {
 		t.Fatalf("defaults not applied: %+v", cfg.MemoryV2)
 	}
 }
 
 func TestApplyMemoryV2Defaults_EnvOverrides(t *testing.T) {
 	tests := []struct {
-		enabled, mutations   string
-		wantEnabled, wantMut bool
+		enabled, mutations, dreamer       string
+		wantEnabled, wantMut, wantDreamer bool
 	}{
-		{"", "", true, false},
-		{"false", "", false, false},
-		{"0", "true", false, true},
-		{"garbage", "1", true, true},
-		{"true", "off", true, false},
+		{"", "", "", true, true, true},
+		{"false", "", "", false, true, true},
+		{"0", "false", "", false, false, true},
+		{"garbage", "1", "off", true, true, false},
+		{"true", "off", "yes", true, false, true},
 	}
 	for _, tt := range tests {
 		t.Setenv("MEMORY_V2_ENABLED", tt.enabled)
 		t.Setenv("MEMORY_V2_WORKER_MUTATIONS", tt.mutations)
+		t.Setenv("MEMORY_V2_DREAMER_ENABLED", tt.dreamer)
 		var cfg Config
 		applyMemoryV2Defaults(&cfg)
-		if cfg.MemoryV2.Enabled != tt.wantEnabled || cfg.MemoryV2.WorkerMutations != tt.wantMut {
-			t.Fatalf("env enabled=%q mutations=%q: got enabled=%v mutations=%v", tt.enabled, tt.mutations, cfg.MemoryV2.Enabled, cfg.MemoryV2.WorkerMutations)
+		m := cfg.MemoryV2
+		if m.Enabled != tt.wantEnabled || m.WorkerMutations != tt.wantMut || m.Dreamer.Enabled != tt.wantDreamer {
+			t.Fatalf("env enabled=%q mutations=%q dreamer=%q: got enabled=%v mutations=%v dreamer=%v",
+				tt.enabled, tt.mutations, tt.dreamer, m.Enabled, m.WorkerMutations, m.Dreamer.Enabled)
 		}
 	}
 }

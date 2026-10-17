@@ -15,7 +15,7 @@ import (
 
 // memoryColumns is the projection every search returns (no embedding).
 const memoryColumns = "id, tenant_id, kb_id, user_id, content, memory_type, importance, tier, verdict, " +
-	"hub_score, access_count, session_id, tags, last_accessed_at, created_at, updated_at"
+	"hub_score, access_count, session_id, tags, last_accessed_at, expires_at, created_at, updated_at"
 
 // scoredRow is the scan target for ranked searches.
 type scoredRow struct {

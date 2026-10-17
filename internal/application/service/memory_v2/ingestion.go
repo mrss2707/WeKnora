@@ -135,7 +135,7 @@ func (s *MemoryServiceV2Impl) SaveMemory(ctx context.Context, memory *types.Agen
 	// Step 10: Enqueue for batch entity extraction. The extractor rewrites
 	// tags, so it only runs when mutating workers are armed (an unarmed
 	// extractor would also buffer forever).
-	if s.entityExtractor != nil && s.config.WorkerMutations {
+	if s.entityExtractor != nil && s.config.WorkerMutations && s.config.EntityExtractorEnabled {
 		s.entityExtractor.Enqueue(memory)
 	}
 

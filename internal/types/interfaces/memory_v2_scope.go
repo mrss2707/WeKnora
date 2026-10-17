@@ -2,6 +2,7 @@ package interfaces
 
 import (
 	"context"
+	"time"
 
 	"github.com/Tencent/WeKnora/internal/types"
 )
@@ -43,4 +44,21 @@ type MemoryV2EmbeddingReader interface {
 // a knowledge base's automatic relations.
 type MemoryV2Relinker interface {
 	RelinkKnowledgeBase(ctx context.Context, tenantID, kbID string) (*types.MemoryRelinkResult, error)
+}
+
+// MemoryV2ScopeLock is an optional capability of MemoryRepositoryV2 that
+// coordinates the dreamer per (tenant, knowledge base) across replicas.
+type MemoryV2ScopeLock interface {
+	TryScopeLock(ctx context.Context, tenantID, kbID, workerID string, ttl time.Duration) (bool, *types.DreamerState, error)
+	HeartbeatScopeLock(ctx context.Context, tenantID, kbID, workerID string, ttl time.Duration) (bool, error)
+	ReleaseScopeLock(ctx context.Context, tenantID, kbID, workerID string, ran bool, stats map[string]interface{}) error
+	ScopeChangedSince(ctx context.Context, tenantID, kbID string, t *time.Time) (bool, error)
+	LeastRecentlyDreamed(ctx context.Context, tenantID, kbID string, limit int) ([]*types.AgentMemory, error)
+	MarkDreamed(ctx context.Context, tenantID string, ids []string, at time.Time) error
+}
+
+// MemoryV2PairSimilarity is an optional capability of MemoryRepositoryV2 that
+// compares two memories' stored vectors (cosine similarity).
+type MemoryV2PairSimilarity interface {
+	PairSimilarity(ctx context.Context, tenantID, a, b string) (float64, error)
 }

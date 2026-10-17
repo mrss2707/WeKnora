@@ -18,8 +18,9 @@ func newMemoryV2ConfigBase() *types.MemoryV2Config {
 // applyMemoryV2Defaults initializes the Memory V2 config and applies env
 // overrides:
 //   - MEMORY_V2_ENABLED=false|0 disables the module (default on).
-//   - MEMORY_V2_WORKER_MUTATIONS=true|1 / false|0 arms or disarms the
-//     background workers that modify stored memories (default off).
+//   - MEMORY_V2_WORKER_MUTATIONS=false|0 is the kill switch for every
+//     background worker that modifies stored memories (default on).
+//   - MEMORY_V2_DREAMER_ENABLED=false|0 turns the dreamer alone off.
 func applyMemoryV2Defaults(cfg *Config) {
 	if cfg.MemoryV2 == nil {
 		cfg.MemoryV2 = newMemoryV2ConfigBase()
@@ -29,6 +30,9 @@ func applyMemoryV2Defaults(cfg *Config) {
 	}
 	if v := envFlag("MEMORY_V2_WORKER_MUTATIONS"); v != nil {
 		cfg.MemoryV2.WorkerMutations = *v
+	}
+	if v := envFlag("MEMORY_V2_DREAMER_ENABLED"); v != nil {
+		cfg.MemoryV2.Dreamer.Enabled = *v
 	}
 }
 

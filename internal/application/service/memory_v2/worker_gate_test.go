@@ -13,7 +13,6 @@ import (
 func newGateTestService(repo *serviceLifecycleRepoFake, mutations bool) *MemoryServiceV2Impl {
 	cfg := types.DefaultMemoryV2Config()
 	cfg.WorkerMutations = mutations
-	cfg.CacheWarmer.Enabled = false
 	return NewMemoryServiceV2(repo, &serviceLifecycleModelServiceFake{
 		models:    memoryLifecycleModels(),
 		embedder:  &mockEmbedder{},
@@ -21,9 +20,11 @@ func newGateTestService(repo *serviceLifecycleRepoFake, mutations bool) *MemoryS
 	}, cfg, []string{"tenant-1"})
 }
 
-func TestWorkerGate_DefaultIsDisarmed(t *testing.T) {
-	assert.False(t, types.DefaultMemoryV2Config().WorkerMutations,
-		"mutating workers must stay disarmed until they are scoped and audited")
+func TestWorkerGate_DefaultIsArmedWithSafeWorkers(t *testing.T) {
+	cfg := types.DefaultMemoryV2Config()
+	assert.True(t, cfg.WorkerMutations, "scoped, audited workers run by default; the flag is a kill switch")
+	assert.True(t, cfg.Dreamer.Enabled, "the dreamer is on by default")
+	assert.False(t, cfg.EntityExtractorEnabled, "the entity extractor stays opt-in")
 }
 
 func TestWorkerGate_DisarmedStartsNoMutatingWorker(t *testing.T) {

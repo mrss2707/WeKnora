@@ -228,3 +228,9 @@ func (s *MemoryServiceV2Impl) UndoMerge(ctx context.Context, tenantID, kbID, sur
 	}
 	return restored, nil
 }
+
+// MergeInto folds losers into survivor through the audited merge transaction
+// (the dreamer's merge path). Implements workers.DreamApplier.
+func (s *MemoryServiceV2Impl) MergeInto(ctx context.Context, survivor *types.AgentMemory, losers []*types.AgentMemory) (*types.AgentMemory, error) {
+	return s.mergeMemories(ctx, survivor, losers, nil)
+}

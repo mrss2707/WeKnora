@@ -176,7 +176,6 @@ type MemoryServiceV2Impl struct {
 	dreamer         *workers.DreamerWorker
 	pruner          *workers.Pruner
 	healthChecker   *workers.HealthChecker
-	cacheWarmer     *workers.CacheWarmer
 }
 
 // NewMemoryServiceV2 creates a new MemoryServiceV2Impl. Models are resolved
@@ -289,22 +288,27 @@ func (s *MemoryServiceV2Impl) chatFor(ctx context.Context, tenantID, kbID string
 
 // initWorkers constructs every worker exactly once. Workers resolve models
 // per scope at run time, so construction needs no model, tenant or request.
+// Workers that change memories go through the service (validation, merge
+// transaction, audit) rather than writing to the repository directly.
 func (s *MemoryServiceV2Impl) initWorkers() {
 	s.initOnce.Do(func() {
 		s.workerMu.Lock()
 		defer s.workerMu.Unlock()
 		src := modelSource{s}
 		s.entityExtractor = workers.NewEntityExtractor(s.repo, nil).WithResolver(src)
-		s.autoLinker = workers.NewAutoLinker(s.repo, nil).WithResolver(src)
-		s.consolidator = workers.NewConsolidator(s.repo, nil).WithResolver(src)
-		s.dreamer = workers.NewDreamerWorker(s.repo, nil, s.dreamerConfig(), s.tenantIDs).WithResolver(src)
-		s.cacheWarmer = workers.NewCacheWarmer(s.repo, s.embedder, s.config.CacheWarmer)
+		s.autoLinker = workers.NewAutoLinker(s.repo, s.embedder).WithResolver(src)
+		s.consolidator = workers.NewConsolidator(s.repo, nil)
+		s.dreamer = workers.NewDreamerWorker(s.repo, s.chat, s.dreamerConfig(), nil).WithResolver(src).WithApplier(s)
+		if s.pruner == nil {
+			s.pruner = workers.NewPruner(s.repo)
+		}
+		s.pruner = s.pruner.WithDeleter(s)
 	})
 }
 
 // StartWorkers constructs the workers and launches the background loops with
-// the server-lifetime ctx (never a request ctx). Loops that modify stored
-// memories run only when memory_v2.worker_mutations is armed.
+// the server-lifetime ctx (never a request ctx). Each worker that changes
+// memories has its own flag; memory_v2.worker_mutations=false stops them all.
 func (s *MemoryServiceV2Impl) StartWorkers(ctx context.Context) {
 	if reason := s.notReadyReason(); reason != "" {
 		logger.Warnf(ctx, "[MemoryV2] StartWorkers skipped: %s", reason)
@@ -313,20 +317,22 @@ func (s *MemoryServiceV2Impl) StartWorkers(ctx context.Context) {
 	s.initWorkers()
 	s.workerOnce.Do(func() {
 		ctx, s.cancel = context.WithCancel(ctx)
+		started := []string{"health"}
+		start := func(name string, on bool, fn func(context.Context)) {
+			if !on || !s.config.WorkerMutations {
+				return
+			}
+			s.wg.Add(1)
+			go runWorker(ctx, &s.wg, fn)
+			started = append(started, name)
+		}
 		s.wg.Add(1)
 		go runWorker(ctx, &s.wg, s.healthChecker.Run)
-		if s.config.WorkerMutations {
-			s.wg.Add(4)
-			go runWorker(ctx, &s.wg, s.pruner.Run)
-			go runWorker(ctx, &s.wg, s.entityExtractor.Run)
-			go runWorker(ctx, &s.wg, s.consolidator.Run)
-			go runWorker(ctx, &s.wg, s.dreamer.Run)
-		}
-		if s.config.CacheWarmer.Enabled && s.embedder != nil {
-			s.wg.Add(1)
-			go runWorker(ctx, &s.wg, s.cacheWarmer.Run)
-		}
-		logger.Infof(ctx, "[MemoryV2] Workers started (health checker; mutating workers armed=%v)", s.config.WorkerMutations)
+		start("dreamer", s.config.Dreamer.Enabled, s.dreamer.Run)
+		start("pruner", s.config.PrunerEnabled, s.pruner.Run)
+		start("consolidator", s.config.ConsolidatorEnabled, s.consolidator.Run)
+		start("entity-extractor", s.config.EntityExtractorEnabled, s.entityExtractor.Run)
+		logger.Infof(ctx, "[MemoryV2] Workers started: %v (worker_mutations=%v)", started, s.config.WorkerMutations)
 	})
 }
 
@@ -338,8 +344,8 @@ func (s *MemoryServiceV2Impl) Cleanup() {
 	s.wg.Wait()
 }
 
-// dreamerConfig returns the dreamer settings, forcing dry-run while worker
-// mutations are disarmed so a manual pass only proposes actions.
+// dreamerConfig returns the dreamer settings, forcing dry-run when the
+// worker kill switch is off so a manual pass only proposes actions.
 func (s *MemoryServiceV2Impl) dreamerConfig() types.DreamerConfig {
 	cfg := s.config.Dreamer
 	if !s.config.WorkerMutations {

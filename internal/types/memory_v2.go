@@ -128,10 +128,14 @@ func (MemoryRelation) TableName() string {
 	return "memory_relations"
 }
 
-// DreamerState tracks the dreamer worker lock for a tenant.
+// DreamerState tracks the dreamer lock and run history of one (tenant,
+// knowledge base) scope; kb_id ” is the tenant-wide row of older builds.
 type DreamerState struct {
 	ID          string     `gorm:"column:id;type:varchar(36);primaryKey;default:uuid_generate_v4()" json:"id"`
-	TenantID    string     `gorm:"column:tenant_id;type:varchar(36);not null;uniqueIndex:idx_ds_tenant" json:"tenant_id"`
+	TenantID    string     `gorm:"column:tenant_id;type:varchar(36);not null" json:"tenant_id"`
+	KbID        string     `gorm:"column:kb_id;type:varchar(36);not null;default:''" json:"kb_id"`
+	HeartbeatAt *time.Time `gorm:"column:heartbeat_at" json:"heartbeat_at,omitempty"`
+	Runs        int        `gorm:"column:runs;default:0" json:"runs"`
 	LastRunAt   *time.Time `gorm:"column:last_run_at" json:"last_run_at,omitempty"`
 	LockedBy    string     `gorm:"column:locked_by;type:varchar(64);default:''" json:"locked_by"`
 	LockedUntil *time.Time `gorm:"column:locked_until" json:"locked_until,omitempty"`
@@ -257,11 +261,27 @@ type TokenBudgetInfo struct {
 // DreamerConfig configures the dreamer worker.
 type DreamerConfig struct {
 	Enabled     bool   `json:"enabled" yaml:"enabled"`
-	Interval    string `json:"interval" yaml:"interval"` // default: "1h"
+	Interval    string `json:"interval" yaml:"interval"` // default: "6h"
 	ModelID     string `json:"model_id" yaml:"model_id"`
 	MaxActions  int    `json:"max_actions" yaml:"max_actions"`   // default: 5
-	TokenBudget int    `json:"token_budget" yaml:"token_budget"` // default: 4000
+	TokenBudget int    `json:"token_budget" yaml:"token_budget"` // max completion tokens per pass, default: 2000
 	DryRun      bool   `json:"dry_run" yaml:"dry_run"`
+	// BatchSize is how many memories one pass reviews (default 30).
+	BatchSize int `json:"batch_size" yaml:"batch_size"`
+	// MinConfidence drops proposals the model is less sure of (default 0.8).
+	MinConfidence float64 `json:"min_confidence" yaml:"min_confidence"`
+	// MergeLiveAfterRuns keeps merges as proposals for the first N passes of
+	// a knowledge base, then applies them (default 3; 0 = never apply).
+	MergeLiveAfterRuns int `json:"merge_live_after_runs" yaml:"merge_live_after_runs"`
+	// MergeMinCosine is the server-verified similarity a merge needs (0.93).
+	MergeMinCosine float64 `json:"merge_min_cosine" yaml:"merge_min_cosine"`
+	// AllowRemove lets the dreamer soft-delete memories (default false).
+	AllowRemove bool `json:"allow_remove" yaml:"allow_remove"`
+	// DailyTokenBudget caps estimated tokens per tenant per day (0 = none).
+	DailyTokenBudget int `json:"daily_token_budget" yaml:"daily_token_budget"`
+	// MaxChangeRatio aborts a pass proposing changes to more than this share
+	// of its batch (circuit breaker, default 0.34).
+	MaxChangeRatio float64 `json:"max_change_ratio" yaml:"max_change_ratio"`
 }
 
 // DreamAction is a single action proposed by the dreamer.
@@ -287,7 +307,8 @@ type DreamResult struct {
 // Cache warmer
 // ---------------------------------------------------------------------------
 
-// CacheWarmerConfig configures the cache warmer worker.
+// CacheWarmerConfig is deprecated: the cache warmer was removed (it embedded
+// memory contents and discarded the vectors). Kept so existing configs load.
 type CacheWarmerConfig struct {
 	Enabled         bool   `json:"enabled" yaml:"enabled"`
 	TopQueriesN     int    `json:"top_queries_n" yaml:"top_queries_n"`       // default: 100
@@ -358,12 +379,19 @@ type MemoryV2Config struct {
 	HNSWM              int     `json:"hnsw_m" yaml:"hnsw_m"`                             // default: 16
 	HNSWEfConstruction int     `json:"hnsw_ef_construction" yaml:"hnsw_ef_construction"` // default: 200
 	HNSWEfSearch       int     `json:"hnsw_ef_search" yaml:"hnsw_ef_search"`             // default: 100
-	// WorkerMutations arms the background workers that modify or delete
-	// stored memories (scheduled dreamer, consolidator, pruner, entity
-	// extractor). Off by default: until those workers are scoped per knowledge
-	// base and audited they stay down, and a manually triggered dream pass only
-	// proposes actions (dry run). Env override: MEMORY_V2_WORKER_MUTATIONS.
+	// WorkerMutations is the kill switch for every background worker that
+	// modifies or deletes stored memories (dreamer, consolidator decay,
+	// pruner, entity extractor). Default true; each worker also has its own
+	// flag. Env override: MEMORY_V2_WORKER_MUTATIONS=false stops them all.
 	WorkerMutations bool `json:"worker_mutations" yaml:"worker_mutations"`
+	// PrunerEnabled removes explicitly expired memories and never-read tier-3
+	// memories after 30 days (default true).
+	PrunerEnabled bool `json:"pruner_enabled" yaml:"pruner_enabled"`
+	// ConsolidatorEnabled refreshes hub scores and decays the importance of
+	// memories unused for a year (default true).
+	ConsolidatorEnabled bool `json:"consolidator_enabled" yaml:"consolidator_enabled"`
+	// EntityExtractorEnabled adds LLM-extracted entity tags (default false).
+	EntityExtractorEnabled bool `json:"entity_extractor_enabled" yaml:"entity_extractor_enabled"`
 }
 
 // DefaultMemoryV2Config returns a config with sensible defaults.
@@ -391,10 +419,16 @@ func DefaultMemoryV2Config() MemoryV2Config {
 			MaxPerMemory:      300,
 		},
 		Dreamer: DreamerConfig{
-			Enabled:     true,
-			Interval:    "1h",
-			MaxActions:  5,
-			TokenBudget: 4000,
+			Enabled:            true,
+			Interval:           "6h",
+			MaxActions:         5,
+			TokenBudget:        2000,
+			BatchSize:          30,
+			MinConfidence:      0.8,
+			MergeLiveAfterRuns: 3,
+			MergeMinCosine:     0.93,
+			DailyTokenBudget:   200000,
+			MaxChangeRatio:     0.34,
 		},
 		CacheWarmer: CacheWarmerConfig{
 			Enabled:         false,
@@ -407,12 +441,15 @@ func DefaultMemoryV2Config() MemoryV2Config {
 			ContradictionThreshold: 0.85,
 			NearDuplicateThreshold: 0.90,
 		},
-		MinScoreThreshold:  0.4,
-		MinCosine:          0.45,
-		RelativeScoreFloor: 0.25,
-		HNSWM:              16,
-		HNSWEfConstruction: 200,
-		HNSWEfSearch:       100,
+		MinScoreThreshold:   0.4,
+		WorkerMutations:     true,
+		PrunerEnabled:       true,
+		ConsolidatorEnabled: true,
+		MinCosine:           0.45,
+		RelativeScoreFloor:  0.25,
+		HNSWM:               16,
+		HNSWEfConstruction:  200,
+		HNSWEfSearch:        100,
 	}
 }
 

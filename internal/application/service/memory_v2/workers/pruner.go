@@ -2,6 +2,7 @@ package workers
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/logger"
@@ -9,45 +10,58 @@ import (
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 )
 
-// Pruner removes expired memories based on tier policies.
+// Pruning policy. Only memories that expired explicitly, or low-value edge
+// memories nobody ever read, are removed; everything else is kept forever.
+const (
+	edgeTierMaxAge     = 30 * 24 * time.Hour // tier-3 memories unread this long are pruned
+	hardDeleteAfter    = 30 * 24 * time.Hour // soft-deleted rows kept this long for undo
+	pruneScanBatchSize = 1000
+)
+
+// PruneDeleter deletes through the service so every prune is audited.
+type PruneDeleter interface {
+	DeleteMemory(ctx context.Context, tenantID, id string) error
+}
+
+// Pruner removes memories that are explicitly expired or are unused tier-3
+// ("edge") memories, and purges soft-deleted rows after a retention window.
+// Never pruned: protected verdicts (decision/fixed), tiers 0-2, memories
+// tagged critical/permanent, and anything that has ever been read.
 type Pruner struct {
-	repo interfaces.MemoryRepositoryV2
+	repo    interfaces.MemoryRepositoryV2
+	deleter PruneDeleter
+	now     func() time.Time
 }
 
 // NewPruner creates a new Pruner.
 func NewPruner(repo interfaces.MemoryRepositoryV2) *Pruner {
-	return &Pruner{repo: repo}
+	return &Pruner{repo: repo, now: time.Now}
+}
+
+// WithDeleter routes prunes through the service (audited).
+func (p *Pruner) WithDeleter(d PruneDeleter) *Pruner {
+	p.deleter = d
+	return p
 }
 
 // Run starts the pruner worker loop. Runs daily at 3:00 AM.
 func (p *Pruner) Run(ctx context.Context) {
 	for {
-		// Calculate time until next 3:00 AM
 		now := time.Now()
 		next := time.Date(now.Year(), now.Month(), now.Day(), 3, 0, 0, 0, now.Location())
 		if now.After(next) {
 			next = next.AddDate(0, 0, 1)
 		}
-		delay := next.Sub(now)
-
 		select {
 		case <-ctx.Done():
 			return
-		case <-time.After(delay):
+		case <-time.After(next.Sub(now)):
 			p.pruneAll(ctx)
-
-			// Wait 24h for next run
-			select {
-			case <-ctx.Done():
-				return
-			case <-time.After(24 * time.Hour):
-			}
 		}
 	}
 }
 
-// pruneAll runs all pruning operations, one (tenant, knowledge base) scope at
-// a time. Nothing runs when scopes cannot be enumerated.
+// pruneAll prunes every scope, then purges old soft-deleted rows per tenant.
 func (p *Pruner) pruneAll(ctx context.Context) {
 	ctx = context.WithValue(ctx, types.ActorKey{}, "system")
 	scopes, err := listScopes(ctx, p.repo)
@@ -55,9 +69,8 @@ func (p *Pruner) pruneAll(ctx context.Context) {
 		logger.Errorf(ctx, "pruner: list scopes failed: %v", err)
 		return
 	}
-	logger.Infof(ctx, "pruner: starting pruning cycle over %d scope(s)", len(scopes))
-
 	tenants := map[string]bool{}
+	pruned := 0
 	for _, sc := range scopes {
 		if ctx.Err() != nil {
 			return
@@ -66,113 +79,74 @@ func (p *Pruner) pruneAll(ctx context.Context) {
 			continue
 		}
 		tenants[sc.TenantID] = true
-		// Step 1: Soft-delete expired memories
-		p.softDeleteExpired(ctx, sc)
+		pruned += p.softDeleteExpired(ctx, sc)
 	}
-	// Step 2: Hard-delete eligible soft-deleted memories, per tenant
 	for tenantID := range tenants {
 		p.hardDeleteSoftDeleted(ctx, tenantID)
 	}
-
-	logger.Infof(ctx, "pruner: pruning cycle complete")
+	logger.Infof(ctx, "pruner: cycle complete over %d scope(s), %d memories pruned", len(scopes), pruned)
 }
 
-// softDeleteExpired soft-deletes memories that have expired based on their tier.
-// - Tier-3 (Edge): Delete immediately past TTL (7 days)
-// - Tier-2 (Standard): Delete if expired AND not accessed >30 days
-// - Tier-1 (Core): Delete if expired AND not accessed >30 days
-// - Tier-0 (Critical): NEVER delete
-// - Tagged "critical" or "permanent": NEVER delete
-func (p *Pruner) softDeleteExpired(ctx context.Context, sc Scope) {
-	filter := &types.MemoryFilter{
-		TenantID: sc.TenantID,
-		KbID:     sc.KbID,
-		Limit:    1000,
+// prunable reports whether policy allows removing m now.
+func (p *Pruner) prunable(m *types.AgentMemory, now time.Time) bool {
+	if m == nil || m.Verdict.IsProtected() || hasProtectedTag(m.Tags) {
+		return false
 	}
-	results, _, err := p.repo.Search(ctx, filter)
+	if m.ExpiresAt != nil {
+		// An explicit expiry date is authoritative either way.
+		return m.ExpiresAt.Before(now)
+	}
+	return m.Tier >= 3 && m.AccessCount == 0 && m.Importance <= 0 &&
+		now.Sub(m.CreatedAt) > edgeTierMaxAge && now.Sub(m.UpdatedAt) > edgeTierMaxAge
+}
+
+// softDeleteExpired prunes one scope; returns the number removed.
+func (p *Pruner) softDeleteExpired(ctx context.Context, sc Scope) int {
+	results, _, err := p.repo.Search(ctx, &types.MemoryFilter{TenantID: sc.TenantID, KbID: sc.KbID, Limit: pruneScanBatchSize})
 	if err != nil {
 		logger.Errorf(ctx, "pruner: search failed: %v", err)
-		return
+		return 0
 	}
-
-	now := time.Now()
+	now := p.now()
+	n := 0
 	for _, r := range results {
-		if r.Memory == nil {
+		if !p.prunable(r.Memory, now) {
 			continue
 		}
-		mem := r.Memory
-
-		// NEVER delete tier-0
-		if mem.Tier == 0 {
+		var err error
+		if p.deleter != nil {
+			err = p.deleter.DeleteMemory(ctx, sc.TenantID, r.Memory.ID)
+		} else {
+			err = p.repo.Delete(ctx, sc.TenantID, r.Memory.ID)
+		}
+		if err != nil {
+			logger.Errorf(ctx, "pruner: soft-delete failed for %s: %v", r.Memory.ID, err)
 			continue
 		}
-
-		// NEVER delete critical/permanent tagged memories
-		if hasProtectedTag(mem.Tags) {
-			continue
-		}
-
-		var shouldDelete bool
-
-		switch mem.Tier {
-		case 3: // Edge: 7 days TTL
-			if now.After(mem.CreatedAt.Add(7 * 24 * time.Hour)) {
-				shouldDelete = true
-			}
-		case 2: // Standard: 30 days TTL + 30 days inactivity
-			ttlExpired := now.After(mem.CreatedAt.Add(30 * 24 * time.Hour))
-			inactive := int(now.Sub(mem.UpdatedAt).Hours()/24) > 30
-			if ttlExpired && inactive {
-				shouldDelete = true
-			}
-		case 1: // Core: 90 days TTL + 30 days inactivity
-			ttlExpired := now.After(mem.CreatedAt.Add(90 * 24 * time.Hour))
-			inactive := int(now.Sub(mem.UpdatedAt).Hours()/24) > 30
-			if ttlExpired && inactive {
-				shouldDelete = true
-			}
-		}
-
-		if shouldDelete {
-			if err := p.repo.Delete(ctx, mem.TenantID, mem.ID); err != nil {
-				logger.Errorf(ctx, "pruner: soft-delete failed for %s: %v", mem.ID, err)
-			}
-		}
+		n++
 	}
+	return n
 }
 
-// hardDeleteSoftDeleted permanently deletes tier-3 soft-deleted memories
-// that have been deleted for >14 days with access_count=0.
+// hardDeleteSoftDeleted purges soft-deleted, never-read memories of a tenant
+// after the retention window.
 func (p *Pruner) hardDeleteSoftDeleted(ctx context.Context, tenantID string) {
-	count, err := p.repo.HardDeleteExpired(ctx, tenantID, time.Now().Add(-14*24*time.Hour))
+	count, err := p.repo.HardDeleteExpired(ctx, tenantID, p.now().Add(-hardDeleteAfter))
 	if err != nil {
 		logger.Errorf(ctx, "pruner: hard-delete failed: %v", err)
 		return
 	}
 	if count > 0 {
-		logger.Infof(ctx, "pruner: hard-deleted %d expired memories", count)
+		logger.Infof(ctx, "pruner: hard-deleted %d memories of tenant %s", count, tenantID)
 	}
 }
 
 // hasProtectedTag checks if tags contain "critical" or "permanent".
 func hasProtectedTag(tags []string) bool {
 	for _, tag := range tags {
-		lower := toLower(tag)
-		if lower == "critical" || lower == "permanent" {
+		if t := strings.ToLower(strings.TrimSpace(tag)); t == "critical" || t == "permanent" {
 			return true
 		}
 	}
 	return false
-}
-
-func toLower(s string) string {
-	b := make([]byte, len(s))
-	for i := 0; i < len(s); i++ {
-		c := s[i]
-		if c >= 'A' && c <= 'Z' {
-			c += 32
-		}
-		b[i] = c
-	}
-	return string(b)
 }

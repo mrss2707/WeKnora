@@ -5,6 +5,7 @@ package memory_v2
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -152,6 +153,40 @@ func (r *mockIntegrationRepo) UnlockDreamer(ctx context.Context, tenantID string
 	return nil
 }
 
+func (r *mockIntegrationRepo) TryScopeLock(ctx context.Context, tenantID, kbID, workerID string, ttl time.Duration) (bool, *types.DreamerState, error) {
+	return true, &types.DreamerState{TenantID: tenantID, KbID: kbID}, nil
+}
+
+func (r *mockIntegrationRepo) HeartbeatScopeLock(context.Context, string, string, string, time.Duration) (bool, error) {
+	return true, nil
+}
+
+func (r *mockIntegrationRepo) ReleaseScopeLock(context.Context, string, string, string, bool, map[string]interface{}) error {
+	return nil
+}
+
+func (r *mockIntegrationRepo) ScopeChangedSince(context.Context, string, string, *time.Time) (bool, error) {
+	return true, nil
+}
+
+func (r *mockIntegrationRepo) LeastRecentlyDreamed(ctx context.Context, tenantID, kbID string, limit int) ([]*types.AgentMemory, error) {
+	var out []*types.AgentMemory
+	for _, m := range r.memories {
+		if m.TenantID == tenantID && (kbID == "" || m.KbID == kbID) {
+			out = append(out, m)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	if limit > 0 && len(out) > limit {
+		out = out[:limit]
+	}
+	return out, nil
+}
+
+func (r *mockIntegrationRepo) MarkDreamed(context.Context, string, []string, time.Time) error {
+	return nil
+}
+
 func (r *mockIntegrationRepo) ComputeHubScores(ctx context.Context, tenantID string) error {
 	return nil
 }
@@ -229,7 +264,6 @@ func newIntegrationService(repo interfaces.MemoryRepositoryV2) *MemoryServiceV2I
 	svc.dreamer = workers.NewDreamerWorker(repo, nil, config.Dreamer, nil)
 	svc.pruner = workers.NewPruner(repo)
 	svc.healthChecker = workers.NewHealthChecker(repo)
-	svc.cacheWarmer = workers.NewCacheWarmer(repo, &mockEmbedder{}, config.CacheWarmer)
 
 	return svc
 }
@@ -360,42 +394,26 @@ func TestMemoryV2Integration_DreamerDryRun(t *testing.T) {
 	repo := newMockIntegrationRepo()
 	ctx := context.Background()
 
-	// Save a memory for the dreamer to act upon.
-	// Set ID explicitly so the mock response can reference it.
-	memory := &types.AgentMemory{
-		ID:         "dreamer-target-1",
-		TenantID:   "tenant-dreamer-1",
-		Content:    "The team decided to adopt Kubernetes for container orchestration across all environments.",
-		MemoryType: "decision",
-		Verdict:    types.VerdictNone,
-		Importance: 4,
+	// Two memories for the dreamer to review; the model refers to them by
+	// their 1-based position in the batch (sorted by id in this mock).
+	for _, m := range []*types.AgentMemory{
+		{ID: "dreamer-target-1", TenantID: "tenant-dreamer-1", KbID: "kb-1", MemoryType: "fact", Verdict: types.VerdictNone, Importance: 4,
+			Content: "Deploying on Fridays broke the release pipeline twice because the on-call rotation was empty."},
+		{ID: "dreamer-target-2", TenantID: "tenant-dreamer-1", KbID: "kb-1", MemoryType: "decision", Verdict: types.VerdictNone, Importance: 4,
+			Content: "The team decided to adopt Kubernetes for container orchestration across all environments."},
+	} {
+		require.NoError(t, repo.Create(ctx, m))
 	}
-	err := repo.Create(ctx, memory)
-	require.NoError(t, err)
 
-	// Create a service with dry-run enabled
 	config := types.DefaultMemoryV2Config()
 	config.Dreamer.DryRun = true
 	config.Dreamer.Enabled = true
 	config.Dreamer.MaxActions = 5
 
-	// Build a mock LLM response that proposes actions
 	mockResponse := `{
 		"actions": [
-			{
-				"type": "update_verdict",
-				"target_id": "dreamer-target-1",
-				"new_verdict": "fixed",
-				"reason": "This is a confirmed decision",
-				"confidence": 0.95
-			},
-			{
-				"type": "adjust_importance",
-				"target_id": "dreamer-target-1",
-				"delta": 2,
-				"reason": "Important architectural decision",
-				"confidence": 0.85
-			}
+			{"type": "update_verdict", "index": 1, "new_verdict": "gotcha", "reason": "A pitfall", "confidence": 0.95},
+			{"type": "adjust_importance", "index": 2, "delta": 1, "reason": "Architectural decision", "confidence": 0.9}
 		]
 	}`
 
@@ -405,27 +423,26 @@ func TestMemoryV2Integration_DreamerDryRun(t *testing.T) {
 		config:      config,
 		tokenBudget: NewTokenBudgetManager(),
 	}
+	svc.initOnce.Do(func() {}) // keep the hand-built dreamer below
+	svc.dreamer = workers.NewDreamerWorker(repo, &mockIntegrationChat{response: mockResponse}, config.Dreamer, nil).WithApplier(svc)
 
-	// Wire up the dreamer with a mock chat
-	svc.dreamer = workers.NewDreamerWorker(repo, &mockIntegrationChat{response: mockResponse}, config.Dreamer, nil)
-
-	// Execute the dreamer pass via ConsolidateDream
-	result, err := svc.ConsolidateDream(ctx, "tenant-dreamer-1")
+	result, err := svc.ConsolidateDreamScope(ctx, "tenant-dreamer-1", "kb-1")
 	require.NoError(t, err, "ConsolidateDream should succeed")
 	require.NotNil(t, result, "DreamResult should not be nil")
 
-	// In dry-run mode, actions are proposed and counted as applied but NOT actually persisted
+	// Dry-run reports the proposals but applies nothing.
 	assert.Equal(t, 2, result.ActionsProposed, "both actions should be proposed")
-	assert.Equal(t, 2, result.ActionsApplied, "both actions should be counted as applied in dry-run mode")
+	assert.Equal(t, 0, result.ActionsApplied, "dry-run applies nothing")
+	require.Len(t, result.Actions, 2)
+	assert.Equal(t, "dreamer-target-1", result.Actions[0].TargetID)
+	assert.Equal(t, "dreamer-target-2", result.Actions[1].TargetID)
 
-	// Verify actions were NOT actually applied to the stored memory
-	stored, err := repo.GetByID(ctx, "tenant-dreamer-1", "dreamer-target-1")
-	require.NoError(t, err)
-	require.NotNil(t, stored)
-
-	// The memory should still have its original verdict and importance since dry-run skips apply
-	assert.Equal(t, types.VerdictNone, stored.Verdict, "verdict should not change in dry-run mode")
-	assert.Equal(t, 4, stored.Importance, "importance should not be adjusted in dry-run mode")
+	for _, id := range []string{"dreamer-target-1", "dreamer-target-2"} {
+		stored, err := repo.GetByID(ctx, "tenant-dreamer-1", id)
+		require.NoError(t, err)
+		assert.Equal(t, types.VerdictNone, stored.Verdict, "verdict should not change in dry-run mode")
+		assert.Equal(t, 4, stored.Importance, "importance should not be adjusted in dry-run mode")
+	}
 }
 
 // ---------------------------------------------------------------------------

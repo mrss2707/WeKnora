@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"math"
 
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
@@ -65,4 +66,21 @@ func (r *MemoryRepository) ListWithEmbeddings(ctx context.Context, tenantID, kbI
 		Where("tenant_id = ? AND kb_id = ? AND deleted_at IS NULL", tenantID, kbID).
 		Order("created_at, id").Limit(limit).Offset(offset).Find(&out).Error
 	return out, err
+}
+
+var _ interfaces.MemoryV2PairSimilarity = (*MemoryRepository)(nil)
+
+// PairSimilarity returns the cosine similarity of two live memories' stored
+// vectors (0 when either is missing).
+func (r *MemoryRepository) PairSimilarity(ctx context.Context, tenantID, a, b string) (float64, error) {
+	var sim *float64
+	err := r.db.WithContext(ctx).Raw(`SELECT 1 - (x.embedding <=> y.embedding)
+FROM agent_memories x, agent_memories y
+WHERE x.tenant_id = ? AND y.tenant_id = ? AND x.id = ? AND y.id = ?
+  AND x.deleted_at IS NULL AND y.deleted_at IS NULL
+  AND x.embedding IS NOT NULL AND y.embedding IS NOT NULL`, tenantID, tenantID, a, b).Scan(&sim).Error
+	if err != nil || sim == nil || math.IsNaN(*sim) {
+		return 0, err
+	}
+	return *sim, nil
 }

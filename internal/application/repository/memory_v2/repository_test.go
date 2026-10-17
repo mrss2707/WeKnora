@@ -46,13 +46,17 @@ CREATE TABLE IF NOT EXISTS agent_memories (
 const dreamerStateTestDDL = `
 CREATE TABLE IF NOT EXISTS dreamer_state (
     id VARCHAR(36) PRIMARY KEY,
-    tenant_id VARCHAR(36) NOT NULL UNIQUE,
+    tenant_id VARCHAR(36) NOT NULL,
+    kb_id VARCHAR(36) NOT NULL DEFAULT '',
     last_run_at DATETIME,
     locked_by VARCHAR(64) NOT NULL DEFAULT '',
     locked_until DATETIME,
+    heartbeat_at DATETIME,
+    runs INTEGER NOT NULL DEFAULT 0,
     stats TEXT DEFAULT '{}',
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (tenant_id, kb_id)
 );
 `
 

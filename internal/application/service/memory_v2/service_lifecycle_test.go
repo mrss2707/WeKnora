@@ -130,6 +130,36 @@ func (r *serviceLifecycleRepoFake) UnlockDreamer(ctx context.Context, tenantID s
 	return nil
 }
 
+func (r *serviceLifecycleRepoFake) TryScopeLock(ctx context.Context, tenantID, kbID, workerID string, ttl time.Duration) (bool, *types.DreamerState, error) {
+	r.mu.Lock()
+	r.tryLockCalls = append(r.tryLockCalls, tenantID+"/"+kbID)
+	r.mu.Unlock()
+	return true, &types.DreamerState{TenantID: tenantID, KbID: kbID}, nil
+}
+
+func (r *serviceLifecycleRepoFake) HeartbeatScopeLock(context.Context, string, string, string, time.Duration) (bool, error) {
+	return true, nil
+}
+
+func (r *serviceLifecycleRepoFake) ReleaseScopeLock(ctx context.Context, tenantID, kbID, workerID string, ran bool, stats map[string]interface{}) error {
+	r.mu.Lock()
+	r.unlockCalls = append(r.unlockCalls, tenantID+"/"+kbID)
+	r.mu.Unlock()
+	return nil
+}
+
+func (r *serviceLifecycleRepoFake) ScopeChangedSince(context.Context, string, string, *time.Time) (bool, error) {
+	return true, nil
+}
+
+func (r *serviceLifecycleRepoFake) LeastRecentlyDreamed(context.Context, string, string, int) ([]*types.AgentMemory, error) {
+	return nil, nil
+}
+
+func (r *serviceLifecycleRepoFake) MarkDreamed(context.Context, string, []string, time.Time) error {
+	return nil
+}
+
 func (r *serviceLifecycleRepoFake) ComputeHubScores(ctx context.Context, tenantID string) error {
 	r.mu.Lock()
 	r.hubScoreCalls++
@@ -331,7 +361,7 @@ func TestInitWorkers_ConstructsAllWorkersWithoutAnyModel(t *testing.T) {
 	assert.NotNil(t, svc.autoLinker)
 	assert.NotNil(t, svc.consolidator)
 	assert.NotNil(t, svc.dreamer)
-	assert.NotNil(t, svc.cacheWarmer)
+	assert.NotNil(t, svc.pruner)
 }
 
 func TestInitWorkers_ConcurrentCallsBuildOnce(t *testing.T) {
@@ -359,7 +389,6 @@ func TestStartWorkers_UsesServerContextNotRequest(t *testing.T) {
 	repo := &serviceLifecycleRepoFake{scopes: []types.MemoryScope{{TenantID: "1", KbID: "kb-1"}}}
 	cfg := types.DefaultMemoryV2Config()
 	cfg.WorkerMutations = true
-	cfg.CacheWarmer.Enabled = false
 	svc := NewMemoryServiceV2(repo, &serviceLifecycleModelServiceFake{}, cfg, nil)
 
 	serverCtx, stop := context.WithCancel(context.Background())
@@ -475,12 +504,13 @@ func TestServiceLifecycleRepoFake_RecordsDreamerLockCalls(t *testing.T) {
 	repo := &serviceLifecycleRepoFake{}
 	worker := workers.NewDreamerWorker(repo, &mockChat{}, types.DreamerConfig{Enabled: true}, []string{"tenant-1"})
 
-	worker.RunPass(context.Background(), "tenant-1")
+	_, err := worker.RunScopePass(context.Background(), "tenant-1", "kb-1")
+	require.NoError(t, err)
 
 	repo.mu.Lock()
 	defer repo.mu.Unlock()
-	assert.Equal(t, []string{"tenant-1"}, repo.tryLockCalls)
-	assert.Equal(t, []string{"tenant-1"}, repo.unlockCalls)
+	assert.Equal(t, []string{"tenant-1/kb-1"}, repo.tryLockCalls)
+	assert.Equal(t, []string{"tenant-1/kb-1"}, repo.unlockCalls)
 }
 
 func TestServiceLifecycleModelServiceFake_ListError(t *testing.T) {
