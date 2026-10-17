@@ -1,15 +1,15 @@
 <template>
-  <div class="memory-health">
+  <div class="memory-health" data-testid="memory-health-tab">
     <!-- Loading skeleton -->
     <div v-if="memoryStore.healthLoading || memoryStore.statsLoading" class="loading-container">
-      <t-loading :text="$t('memory.health.loading') || 'Loading health report...'" size="large" />
+      <t-loading :text="$t('memory.health.loading')" size="large" />
     </div>
 
     <!-- Empty state (no data) -->
     <div v-else-if="!healthReport" class="empty-state">
       <t-icon name="info-circle" size="48px" class="empty-icon" />
-      <span class="empty-title">{{ $t('memory.health.emptyTitle') || 'Health Report Unavailable' }}</span>
-      <span class="empty-desc">{{ $t('memory.health.emptyDesc') || 'No health data available for this knowledge base. Run a health check to generate a report.' }}</span>
+      <span class="empty-title">{{ $t('memory.health.emptyTitle') }}</span>
+      <span class="empty-desc">{{ $t('memory.health.emptyDesc') }}</span>
     </div>
 
     <!-- Content -->
@@ -18,23 +18,23 @@
       <div class="metric-cards">
         <div class="metric-card">
           <div class="metric-value">{{ totalMemories }}</div>
-          <div class="metric-label">{{ $t('memory.health.totalMemories') || 'Total Memories' }}</div>
+          <div class="metric-label">{{ $t('memory.health.totalMemories') }}</div>
         </div>
         <div class="metric-card card-fixed">
           <div class="metric-value">{{ fixedCount }}</div>
-          <div class="metric-label">{{ $t('memory.health.fixed') || 'Fixed' }}</div>
+          <div class="metric-label">{{ $t('memory.health.fixed') }}</div>
         </div>
         <div class="metric-card card-refuted">
           <div class="metric-value">{{ refutedCount }}</div>
-          <div class="metric-label">{{ $t('memory.health.refuted') || 'Refuted' }}</div>
+          <div class="metric-label">{{ $t('memory.health.refuted') }}</div>
         </div>
         <div class="metric-card card-orphan">
           <div class="metric-value">{{ orphansCount }}</div>
-          <div class="metric-label">{{ $t('memory.health.orphans') || 'Orphans' }}</div>
+          <div class="metric-label">{{ $t('memory.health.orphans') }}</div>
         </div>
         <div class="metric-card card-stale">
           <div class="metric-value">{{ staleCount }}</div>
-          <div class="metric-label">{{ $t('memory.health.stale') || 'Stale' }}</div>
+          <div class="metric-label">{{ $t('memory.health.stale') }}</div>
         </div>
       </div>
 
@@ -42,8 +42,8 @@
       <div class="charts-row">
         <!-- Distribution by memory type -->
         <div class="health-section chart-section">
-          <h3 class="section-title">{{ $t('memory.health.distByType') || 'Distribution by Type' }}</h3>
-          <div v-if="typeItems.length === 0" class="chart-empty">{{ $t('memory.health.noData') || 'No data' }}</div>
+          <h3 class="section-title">{{ $t('memory.health.distByType') }}</h3>
+          <div v-if="typeItems.length === 0" class="chart-empty">{{ $t('memory.health.noData') }}</div>
           <div v-else class="bar-chart">
             <div v-for="item in typeItems" :key="item.type" class="bar-row">
               <span class="bar-label">{{ typeLabel(item.type) }}</span>
@@ -60,8 +60,8 @@
 
         <!-- Issues by severity -->
         <div class="health-section chart-section">
-          <h3 class="section-title">{{ $t('memory.health.issuesBySeverity') || 'Issues by Severity' }}</h3>
-          <div v-if="severityItems.length === 0" class="chart-empty">{{ $t('memory.health.noIssues') || 'No issues' }}</div>
+          <h3 class="section-title">{{ $t('memory.health.issuesBySeverity') }}</h3>
+          <div v-if="severityItems.length === 0" class="chart-empty">{{ $t('memory.health.noIssues') }}</div>
           <div v-else class="bar-chart">
             <div v-for="item in severityItems" :key="item.severity" class="bar-row">
               <span class="bar-label">{{ severityLabel(item.severity) }}</span>
@@ -80,19 +80,19 @@
       <!-- Issue list grouped by severity -->
       <div class="health-section issue-section">
         <h3 class="section-title">
-          {{ $t('memory.health.issues') || 'Issues' }}
+          {{ $t('memory.health.issues') }}
           <span class="issue-total">({{ totalIssues }})</span>
         </h3>
 
         <div v-if="totalIssues === 0" class="chart-empty">
-          {{ $t('memory.health.noIssues') || 'No issues found' }}
+          {{ $t('memory.health.noIssues') }}
         </div>
 
         <!-- Critical group -->
         <div v-if="criticalIssues.length > 0" class="issue-group">
           <div class="issue-group-header severity-critical">
             <span class="issue-group-badge" />
-            <span class="issue-group-label">Critical ({{ criticalIssues.length }})</span>
+            <span class="issue-group-label">{{ $t('memory.health.severityGroups.critical') }} ({{ criticalIssues.length }})</span>
           </div>
           <div
             v-for="issue in criticalIssues"
@@ -103,8 +103,9 @@
               <span class="issue-type-tag type-critical">{{ severityLabel(issue.severity) }}</span>
               <span class="issue-description">{{ issue.description }}</span>
             </div>
+            <div v-if="issue.suggestion" class="issue-row issue-suggestion">{{ issue.suggestion }}</div>
             <div class="issue-row issue-meta">
-              <span class="issue-rule-label">{{ issue.type }}</span>
+              <span class="issue-rule-label">{{ issueTypeLabel(issue.type) }}</span>
               <div class="issue-actions">
                 <t-button
                   v-if="issue.memory_id"
@@ -112,10 +113,7 @@
                   variant="outline"
                   @click="handleViewMemory(issue)"
                 >
-                  {{ $t('memory.health.viewMemory') || 'View' }}
-                </t-button>
-                <t-button size="small" variant="outline" @click="handleSuggestion(issue)">
-                  {{ $t('memory.health.applySuggestion') || 'Apply Fix' }}
+                  {{ $t('memory.health.viewMemory') }}
                 </t-button>
               </div>
             </div>
@@ -126,7 +124,7 @@
         <div v-if="warningIssues.length > 0" class="issue-group">
           <div class="issue-group-header severity-warning">
             <span class="issue-group-badge" />
-            <span class="issue-group-label">Warning ({{ warningIssues.length }})</span>
+            <span class="issue-group-label">{{ $t('memory.health.severityGroups.warning') }} ({{ warningIssues.length }})</span>
           </div>
           <div
             v-for="issue in warningIssues"
@@ -137,8 +135,9 @@
               <span class="issue-type-tag type-warning">{{ severityLabel(issue.severity) }}</span>
               <span class="issue-description">{{ issue.description }}</span>
             </div>
+            <div v-if="issue.suggestion" class="issue-row issue-suggestion">{{ issue.suggestion }}</div>
             <div class="issue-row issue-meta">
-              <span class="issue-rule-label">{{ issue.type }}</span>
+              <span class="issue-rule-label">{{ issueTypeLabel(issue.type) }}</span>
               <div class="issue-actions">
                 <t-button
                   v-if="issue.memory_id"
@@ -146,10 +145,7 @@
                   variant="outline"
                   @click="handleViewMemory(issue)"
                 >
-                  {{ $t('memory.health.viewMemory') || 'View' }}
-                </t-button>
-                <t-button size="small" variant="outline" @click="handleSuggestion(issue)">
-                  {{ $t('memory.health.applySuggestion') || 'Apply Fix' }}
+                  {{ $t('memory.health.viewMemory') }}
                 </t-button>
               </div>
             </div>
@@ -160,7 +156,7 @@
         <div v-if="infoIssues.length > 0" class="issue-group">
           <div class="issue-group-header severity-info">
             <span class="issue-group-badge" />
-            <span class="issue-group-label">Info ({{ infoIssues.length }})</span>
+            <span class="issue-group-label">{{ $t('memory.health.severityGroups.info') }} ({{ infoIssues.length }})</span>
           </div>
           <div
             v-for="issue in infoIssues"
@@ -171,8 +167,9 @@
               <span class="issue-type-tag type-info">{{ severityLabel(issue.severity) }}</span>
               <span class="issue-description">{{ issue.description }}</span>
             </div>
+            <div v-if="issue.suggestion" class="issue-row issue-suggestion">{{ issue.suggestion }}</div>
             <div class="issue-row issue-meta">
-              <span class="issue-rule-label">{{ issue.type }}</span>
+              <span class="issue-rule-label">{{ issueTypeLabel(issue.type) }}</span>
               <div class="issue-actions">
                 <t-button
                   v-if="issue.memory_id"
@@ -180,10 +177,7 @@
                   variant="outline"
                   @click="handleViewMemory(issue)"
                 >
-                  {{ $t('memory.health.viewMemory') || 'View' }}
-                </t-button>
-                <t-button size="small" variant="outline" @click="handleSuggestion(issue)">
-                  {{ $t('memory.health.applySuggestion') || 'Apply Fix' }}
+                  {{ $t('memory.health.viewMemory') }}
                 </t-button>
               </div>
             </div>
@@ -194,7 +188,7 @@
       <!-- Last checked timestamp -->
       <div v-if="healthReport" class="health-footer">
         <span class="checked-at">
-          {{ $t('memory.health.lastChecked') || 'Last checked' }}: {{ formatDate(healthReport.checked_at) }}
+          {{ $t('memory.health.lastChecked') }}: {{ formatDate(healthReport.checked_at) }}
         </span>
       </div>
     </template>
@@ -202,9 +196,11 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch } from 'vue'
+import { computed, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { useMemoryStore } from '@/stores/memory'
 import type { HealthReport, MemoryHealthIssue, MemoryStats } from '@/api/memory/index'
+import { useMemoryLabels } from './useMemoryLabels'
 
 const props = defineProps<{
   kbId: string
@@ -215,6 +211,7 @@ const emit = defineEmits<{
   'view-memory': [memoryId: string]
 }>()
 
+const { t } = useI18n()
 const memoryStore = useMemoryStore()
 
 // -----------------------------------------------------------------------
@@ -253,14 +250,14 @@ const refutedCount = computed(() => {
 const orphansCount = computed(() => {
   if (!healthReport.value?.issues) return 0
   return healthReport.value.issues.filter(
-    (i) => i.type === 'orphan' || i.type === 'orphans'
+    (i) => i.type === 'orphan'
   ).length
 })
 
 const staleCount = computed(() => {
   if (!healthReport.value?.issues) return 0
   return healthReport.value.issues.filter(
-    (i) => i.type.includes('stale')
+    (i) => i.type === 'stale'
   ).length
 })
 
@@ -292,17 +289,7 @@ const typeItems = computed(() => {
   }))
 })
 
-function typeLabel(type: string): string {
-  const labels: Record<string, string> = {
-    episodic: 'Episodic',
-    semantic: 'Semantic',
-    procedural: 'Procedural',
-    decision: 'Decision',
-    preference: 'Preference',
-    fact: 'Fact',
-  }
-  return labels[type] || type
-}
+const { typeLabel } = useMemoryLabels()
 
 // -----------------------------------------------------------------------
 // Distribution by severity
@@ -327,8 +314,10 @@ const severityItems = computed(() => {
   }))
 })
 
+const SEVERITIES = ['critical', 'high', 'medium', 'low']
+
 function severityLabel(severity: string): string {
-  return severity.charAt(0).toUpperCase() + severity.slice(1)
+  return SEVERITIES.includes(severity) ? t(`memory.health.severities.${severity}`) : severity
 }
 
 // -----------------------------------------------------------------------
@@ -371,10 +360,19 @@ function handleViewMemory(issue: MemoryHealthIssue) {
   }
 }
 
-function handleSuggestion(issue: MemoryHealthIssue) {
-  // Placeholder: in a full implementation, this would apply the issue.suggestion
-  // e.g., update verdict, delete orphan, etc.
-  console.log('Apply suggestion:', issue.suggestion)
+const ISSUE_TYPES = [
+  'contradiction',
+  'duplication',
+  'embedding_dimension_mismatch',
+  'graph_fragmentation',
+  'orphan',
+  'semantic',
+  'stale',
+  'verdict_consistency',
+]
+
+function issueTypeLabel(type: string): string {
+  return ISSUE_TYPES.includes(type) ? t(`memory.health.issueTypes.${type}`) : type
 }
 
 // -----------------------------------------------------------------------
@@ -429,13 +427,13 @@ function formatDate(dateStr: string): string {
 }
 
 .empty-title {
-  font-size: 16px;
+  font-size: var(--app-text-xl);
   font-weight: 500;
   color: var(--td-text-color-primary);
 }
 
 .empty-desc {
-  font-size: 13px;
+  font-size: var(--app-text-md);
   color: var(--td-text-color-placeholder);
   text-align: center;
   max-width: 360px;
@@ -460,7 +458,7 @@ function formatDate(dateStr: string): string {
   padding: 16px 12px;
   background: var(--td-bg-color-container);
   border: 1px solid var(--td-component-stroke);
-  border-radius: 8px;
+  border-radius: var(--app-radius-md);
   text-align: center;
 }
 
@@ -472,7 +470,7 @@ function formatDate(dateStr: string): string {
 }
 
 .metric-label {
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   color: var(--td-text-color-placeholder);
   white-space: nowrap;
 }
@@ -507,13 +505,13 @@ function formatDate(dateStr: string): string {
 .health-section {
   background: var(--td-bg-color-container);
   border: 1px solid var(--td-component-stroke);
-  border-radius: 8px;
+  border-radius: var(--app-radius-md);
   padding: 16px;
 }
 
 .section-title {
   margin: 0 0 12px;
-  font-size: 14px;
+  font-size: var(--app-text-base);
   font-weight: 600;
   color: var(--td-text-color-primary);
 }
@@ -561,7 +559,7 @@ function formatDate(dateStr: string): string {
 .bar-label {
   width: 80px;
   flex-shrink: 0;
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   color: var(--td-text-color-secondary);
   text-align: right;
   overflow: hidden;
@@ -573,21 +571,21 @@ function formatDate(dateStr: string): string {
   flex: 1;
   height: 16px;
   background: var(--td-bg-color-secondarycontainer);
-  border-radius: 8px;
+  border-radius: var(--app-radius-md);
   overflow: hidden;
 }
 
 .bar-fill {
   height: 100%;
-  border-radius: 8px;
-  transition: width 0.3s ease;
+  border-radius: var(--app-radius-md);
+  transition: width var(--app-motion-slow) ease;
   min-width: 2px;
 }
 
 .bar-count {
   width: 36px;
   flex-shrink: 0;
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   font-weight: 500;
   color: var(--td-text-color-primary);
   text-align: right;
@@ -596,7 +594,7 @@ function formatDate(dateStr: string): string {
 .chart-empty {
   padding: 24px 0;
   text-align: center;
-  font-size: 13px;
+  font-size: var(--app-text-md);
   color: var(--td-text-color-placeholder);
 }
 
@@ -609,7 +607,7 @@ function formatDate(dateStr: string): string {
 
 .issue-group {
   border: 1px solid var(--td-component-stroke);
-  border-radius: 6px;
+  border-radius: var(--app-radius-sm);
   margin-bottom: 8px;
   overflow: hidden;
 }
@@ -619,7 +617,7 @@ function formatDate(dateStr: string): string {
   align-items: center;
   gap: 8px;
   padding: 8px 12px;
-  font-size: 13px;
+  font-size: var(--app-text-md);
   font-weight: 600;
 }
 
@@ -674,9 +672,14 @@ function formatDate(dateStr: string): string {
 
 .issue-description {
   flex: 1;
-  font-size: 13px;
+  font-size: var(--app-text-md);
   color: var(--td-text-color-primary);
   line-height: 1.4;
+}
+
+.issue-suggestion {
+  font-size: var(--app-text-sm);
+  color: var(--td-text-color-secondary);
 }
 
 .issue-meta {
@@ -686,7 +689,7 @@ function formatDate(dateStr: string): string {
 }
 
 .issue-rule-label {
-  font-size: 11px;
+  font-size: var(--app-text-xs);
   color: var(--td-text-color-placeholder);
   font-family: monospace;
 }
@@ -700,7 +703,7 @@ function formatDate(dateStr: string): string {
 .issue-type-tag {
   display: inline-block;
   padding: 1px 6px;
-  font-size: 10px;
+  font-size: var(--app-text-2xs);
   font-weight: 500;
   border-radius: 3px;
   flex-shrink: 0;
@@ -757,7 +760,12 @@ function formatDate(dateStr: string): string {
 }
 
 .checked-at {
-  font-size: 11px;
+  font-size: var(--app-text-xs);
   color: var(--td-text-color-placeholder);
+}
+
+.issue-suggestion {
+  font-size: var(--app-text-sm);
+  color: var(--td-text-color-secondary);
 }
 </style>

@@ -5,7 +5,11 @@ import {
   getMemoryGraphOverview,
   getMemoryStats,
   getHealthReport,
+  getDreamStatus,
+  getMemoryHistory,
   triggerDream,
+  undoMemoryMerge,
+  relinkMemories,
   updateMemory,
   deleteMemory,
   createMemory,
@@ -13,182 +17,223 @@ import {
 } from '@/api/memory/index'
 import type {
   AgentMemory,
-  MemoryListParams,
   MemoryVerdict,
   GraphData,
   MemoryStats,
   HealthReport,
   DreamResult,
-  TimelineEvent,
-  TimelineEventType,
-  SaveMemoryResult,
+  DreamStatus,
+  MemoryAuditEntry,
+  UpdateMemoryRequest,
 } from '@/api/memory/index'
+import {
+  buildListQuery,
+  nextFilter,
+  unwrapListItems,
+  summarizeBulk,
+  type BulkOutcome,
+  type MemoryFilterState,
+} from './memoryState'
 
-export interface MemoryFilterState {
-  type: string
-  verdict: string
-  tier: number | undefined
-  keyword: string
-  page: number
-  pageSize: number
-}
+export type { MemoryFilterState, BulkOutcome } from './memoryState'
+
+export type MemorySubTab = 'browse' | 'graph' | 'health' | 'history' | 'dream' | 'mcpconfig'
 
 export const useMemoryStore = defineStore('memory', {
   state: () => ({
-    /** Flat list of memories for the current KB. */
+    /** Knowledge base the cached data belongs to. */
+    kbId: '',
+
+    /** Current page of memories (filtered and paged by the server). */
     memories: [] as AgentMemory[],
 
-    /** Active filter / pagination state. */
     filter: {
       type: '',
       verdict: '',
       tier: undefined as number | undefined,
       keyword: '',
+      mineOnly: false,
       page: 1,
       pageSize: 20,
     } as MemoryFilterState,
 
-    /** Server-side pagination metadata. */
-    pagination: {
-      total: 0,
-      page: 1,
-      pageSize: 20,
-    },
+    pagination: { total: 0, page: 1, pageSize: 20 },
 
-    /** Current display mode. */
     viewMode: 'table' as 'grid' | 'table',
-
-    /** Active sub-tab within the Memory tab. */
-    activeSubTab: 'browse' as 'browse' | 'graph' | 'health' | 'history' | 'mcpconfig',
-
-    /** IDs selected for bulk operations. */
+    activeSubTab: 'browse' as MemorySubTab,
     selectedIds: [] as string[],
 
-    /** Graph data (cached when loaded). */
     graphData: null as GraphData | null,
-
-    /** Health report (cached when loaded). */
     healthReport: null as HealthReport | null,
-
-    /** Memory statistics (cached when loaded). */
     stats: null as MemoryStats | null,
 
-    /** Dream result from the last run. */
+    dreamStatus: null as DreamStatus | null,
     lastDreamResult: null as DreamResult | null,
+    /** Whether lastDreamResult was a preview (nothing applied). */
+    lastDreamPreview: false,
 
-    /** Loading indicator. */
     loading: false,
-
-    /** Graph loading indicator. */
     graphLoading: false,
-
-    /** Health loading indicator. */
     healthLoading: false,
-
-    /** Stats loading indicator. */
     statsLoading: false,
-
-    /** Dreamer loading indicator. */
     dreamerLoading: false,
 
-    /** History/activity timeline events. */
-    historyEvents: [] as TimelineEvent[],
-
-    /** History loading indicator. */
+    /** Audit trail of the knowledge base (server-paged). */
+    historyEntries: [] as MemoryAuditEntry[],
     historyLoading: false,
-
-    /** History event type filter (empty = all). */
-    historyFilterType: '' as '' | TimelineEventType,
-
-    /** History pagination state (client-side). */
-    historyPagination: {
-      page: 1,
-      pageSize: 20,
-      total: 0,
-    },
+    historyAction: '' as string,
+    historyPagination: { page: 1, pageSize: 20, total: 0 },
   }),
 
   getters: {
-    /** Memories filtered by the current `filter` state (client-side keyword filter on top of server results). */
-    filteredMemories(state): AgentMemory[] {
-      let result = state.memories
-
-      if (state.filter.keyword) {
-        const kw = state.filter.keyword.toLowerCase()
-        result = result.filter(
-          (m) =>
-            m.content.toLowerCase().includes(kw) ||
-            m.memory_type.toLowerCase().includes(kw)
-        )
-      }
-      if (state.filter.type) {
-        result = result.filter((m) => m.memory_type === state.filter.type)
-      }
-      if (state.filter.verdict) {
-        result = result.filter((m) => m.verdict === state.filter.verdict)
-      }
-      if (state.filter.tier !== undefined && state.filter.tier !== null) {
-        result = result.filter((m) => m.tier === state.filter.tier)
-      }
-
-      return result
-    },
-
-    /** Memories matching the currently selected IDs. */
     selectedMemories(state): AgentMemory[] {
       return state.memories.filter((m) => state.selectedIds.includes(m.id))
     },
-
-    /** Whether any memories are selected. */
     hasSelection(state): boolean {
       return state.selectedIds.length > 0
+    },
+    hasMoreHistory(state): boolean {
+      return state.historyEntries.length < state.historyPagination.total
     },
   },
 
   actions: {
+    /** Drops cached data when switching knowledge bases. */
+    useKnowledgeBase(kbId: string) {
+      if (this.kbId === kbId) return
+      this.kbId = kbId
+      this.memories = []
+      this.selectedIds = []
+      this.graphData = null
+      this.healthReport = null
+      this.stats = null
+      this.dreamStatus = null
+      this.lastDreamResult = null
+      this.historyEntries = []
+      this.filter = nextFilter(this.filter, { type: '', verdict: '', tier: undefined, keyword: '', mineOnly: false })
+    },
+
     // -----------------------------------------------------------------------
-    // Data fetching
+    // Browse
     // -----------------------------------------------------------------------
 
     async loadMemories(kbId: string) {
+      this.useKnowledgeBase(kbId)
       this.loading = true
       try {
-        const params: MemoryListParams = {
-          kb_id: kbId,
-          page: this.filter.page,
-          page_size: this.filter.pageSize,
-        }
-        if (this.filter.type) params.type = this.filter.type
-        if (this.filter.verdict) params.verdict = this.filter.verdict
-        if (this.filter.tier !== undefined) params.tier = this.filter.tier
-        if (this.filter.keyword) params.keyword = this.filter.keyword
-
-        const resp = await listMemories(params)
-        const items = resp.data?.items ?? []
-        this.memories = items.map((item: any) => item.memory ? { ...item.memory, score: item.score, stale_days: item.stale_days, is_stale: item.is_stale } : item) as AgentMemory[]
+        const resp = await listMemories(buildListQuery(kbId, this.filter))
+        this.memories = unwrapListItems<AgentMemory>(resp.data?.items ?? [])
         this.pagination.total = resp.data?.total ?? 0
         this.pagination.page = resp.data?.page ?? this.filter.page
         this.pagination.pageSize = resp.data?.page_size ?? this.filter.pageSize
+        const visible = new Set(this.memories.map((m) => m.id))
+        this.selectedIds = this.selectedIds.filter((id) => visible.has(id))
       } finally {
         this.loading = false
       }
     },
 
+    /** Changes filters or paging and reloads the page from the server. */
+    async setFilter(partial: Partial<MemoryFilterState>) {
+      this.filter = nextFilter(this.filter, partial)
+      if (this.kbId) await this.loadMemories(this.kbId)
+    },
+
+    async createMemory(kbId: string, content: string, opts: { sessionId?: string } = {}) {
+      const result = await createMemory({ kb_id: kbId, content, session_id: opts.sessionId })
+      await this.loadMemories(kbId)
+      this.stats = null
+      return result.data
+    },
+
     /**
-     * Load the graph: the knowledge base overview, or — with a memory id — the
-     * neighbourhood of that memory `depth` hops deep. Independent of the Browse list.
+     * Patches one memory. `expected_updated_at` is always sent, so a change
+     * made by someone else meanwhile is rejected with 409 instead of lost.
+     */
+    async patchMemory(memory: AgentMemory, patch: UpdateMemoryRequest): Promise<AgentMemory> {
+      const resp = await updateMemory(memory.id, { expected_updated_at: memory.updated_at, ...patch })
+      const updated = resp.data
+      this.replaceMemory(updated)
+      return updated
+    },
+
+    replaceMemory(updated: AgentMemory) {
+      const idx = this.memories.findIndex((m) => m.id === updated.id)
+      if (idx !== -1) this.memories[idx] = { ...this.memories[idx], ...updated }
+    },
+
+    async deleteMemory(id: string) {
+      await deleteMemory(id)
+      this.memories = this.memories.filter((m) => m.id !== id)
+      this.selectedIds = this.selectedIds.filter((s) => s !== id)
+      this.pagination.total = Math.max(0, this.pagination.total - 1)
+      this.stats = null
+    },
+
+    // -----------------------------------------------------------------------
+    // Bulk operations (each memory is locked on the version shown)
+    // -----------------------------------------------------------------------
+
+    async bulkPatch(build: (m: AgentMemory) => UpdateMemoryRequest | null): Promise<BulkOutcome> {
+      const targets = this.selectedMemories
+        .map((m) => ({ m, patch: build(m) }))
+        .filter((t): t is { m: AgentMemory; patch: UpdateMemoryRequest } => t.patch !== null)
+      const results = await Promise.allSettled(
+        targets.map(({ m, patch }) => updateMemory(m.id, { expected_updated_at: m.updated_at, ...patch })),
+      )
+      results.forEach((r) => {
+        if (r.status === 'fulfilled' && r.value?.data) this.replaceMemory(r.value.data)
+      })
+      const failed = new Set(targets.filter((_, i) => results[i].status === 'rejected').map(({ m }) => m.id))
+      this.selectedIds = this.selectedIds.filter((id) => failed.has(id))
+      return summarizeBulk(results)
+    },
+
+    bulkChangeVerdict(verdict: MemoryVerdict) {
+      return this.bulkPatch(() => ({ verdict }))
+    },
+
+    bulkChangeImportance(delta: number) {
+      return this.bulkPatch((m) => {
+        const importance = clampImportance(m.importance + delta)
+        return importance === m.importance ? null : { importance }
+      })
+    },
+
+    async bulkDelete(): Promise<BulkOutcome> {
+      const ids = [...this.selectedIds]
+      const results = await Promise.allSettled(ids.map((id) => deleteMemory(id)))
+      const ok = new Set(ids.filter((_, i) => results[i].status === 'fulfilled'))
+      this.memories = this.memories.filter((m) => !ok.has(m.id))
+      this.pagination.total = Math.max(0, this.pagination.total - ok.size)
+      this.selectedIds = ids.filter((id) => !ok.has(id))
+      this.stats = null
+      return summarizeBulk(results)
+    },
+
+    // -----------------------------------------------------------------------
+    // Graph, health, stats
+    // -----------------------------------------------------------------------
+
+    /**
+     * Loads the knowledge base overview, or — with a memory id — that memory's
+     * neighbourhood `depth` hops deep.
      */
     async loadGraph(kbId: string, memoryId?: string, depth = 1) {
       if (!kbId && !memoryId) return
       this.graphLoading = true
       try {
-        const resp = memoryId
-          ? await getMemoryGraph(memoryId, { depth })
-          : await getMemoryGraphOverview(kbId)
+        const resp = memoryId ? await getMemoryGraph(memoryId, { depth }) : await getMemoryGraphOverview(kbId)
         this.graphData = resp.data ?? null
       } finally {
         this.graphLoading = false
       }
+    },
+
+    async relink(kbId: string) {
+      const resp = await relinkMemories(kbId)
+      this.graphData = null
+      return resp.data
     },
 
     async loadHealth(kbId: string) {
@@ -211,230 +256,84 @@ export const useMemoryStore = defineStore('memory', {
       }
     },
 
-    async runDreamer(kbId: string) {
+    // -----------------------------------------------------------------------
+    // Dreamer
+    // -----------------------------------------------------------------------
+
+    async loadDreamStatus(kbId: string) {
+      const resp = await getDreamStatus(kbId)
+      this.dreamStatus = resp.data ?? null
+    },
+
+    /** Runs a dream pass; `preview` returns proposals without applying anything. */
+    async runDreamer(kbId: string, preview = false) {
       this.dreamerLoading = true
       try {
-        const resp = await triggerDream({ kb_id: kbId })
+        const resp = await triggerDream({ kb_id: kbId, dry_run: preview })
         this.lastDreamResult = resp.data ?? null
+        this.lastDreamPreview = preview
+        if (!preview) {
+          await Promise.allSettled([this.loadDreamStatus(kbId), this.loadMemories(kbId)])
+        }
       } finally {
         this.dreamerLoading = false
       }
     },
 
-    async createMemory(kbId: string, content: string, opts: { sessionId?: string } = {}) {
-      const result = await createMemory({
-        kb_id: kbId,
-        content,
-        session_id: opts.sessionId,
-      })
-      // Reload the memory list to reflect the new memory.
-      await this.loadMemories(kbId)
-      return result.data
+    async undoMerge(memoryId: string) {
+      const resp = await undoMemoryMerge(memoryId)
+      if (this.kbId) await this.loadMemories(this.kbId)
+      return resp.data
     },
 
     // -----------------------------------------------------------------------
-    // History / Timeline
+    // History (audit trail)
     // -----------------------------------------------------------------------
 
-    /** Generate timeline events from memories, health report, and dreamer results. */
-    async loadHistory(kbId: string) {
+    async loadHistory(kbId: string, more = false) {
       this.historyLoading = true
       try {
-        // Ensure source data is loaded
-        if (this.memories.length === 0) {
-          await this.loadMemories(kbId)
-        }
-        if (!this.healthReport) {
-          await this.loadHealth(kbId)
-        }
-
-        const events: TimelineEvent[] = []
-
-        // 1. Created events from each memory
-        for (const mem of this.memories) {
-          const preview = mem.content.length > 80 ? mem.content.slice(0, 77) + '...' : mem.content
-          events.push({
-            id: `created-${mem.id}`,
-            type: 'created',
-            timestamp: mem.created_at,
-            description: `Memory created`,
-            memory_id: mem.id,
-            memory_content_preview: preview,
-          })
-
-          // 2. Updated event if updated_at differs from created_at
-          if (mem.updated_at !== mem.created_at) {
-            events.push({
-              id: `updated-${mem.id}-${mem.updated_at}`,
-              type: 'updated',
-              timestamp: mem.updated_at,
-              description: `Memory updated`,
-              memory_id: mem.id,
-              memory_content_preview: preview,
-            })
-          }
-        }
-
-        // 3. Health check events
-        if (this.healthReport?.checked_at) {
-          const total = this.healthReport.total_issues ?? 0
-          events.push({
-            id: 'health-check',
-            type: 'health_check',
-            timestamp: this.healthReport.checked_at,
-            description: `Health check completed — ${total} issue${total !== 1 ? 's' : ''} found`,
-            metadata: { total_issues: total },
-          })
-        }
-
-        // 4. Dreamer action events from last dream result
-        if (this.lastDreamResult?.actions) {
-          for (const action of this.lastDreamResult.actions) {
-            const desc = `Dreamer: ${action.reason}`
-            events.push({
-              id: `dreamer-${action.target_id}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-              type: 'dreamer_action',
-              timestamp: new Date().toISOString(),
-              description: desc.length > 120 ? desc.slice(0, 117) + '...' : desc,
-              memory_id: action.target_id,
-              metadata: {
-                action_type: action.type,
-                confidence: action.confidence,
-              },
-            })
-          }
-        }
-
-        // 5. Verdict-changed events from dreamer actions that change verdict
-        if (this.lastDreamResult?.actions) {
-          for (const action of this.lastDreamResult.actions) {
-            if (action.new_verdict) {
-              events.push({
-                id: `verdict-${action.target_id}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-                type: 'verdict_changed',
-                timestamp: new Date().toISOString(),
-                description: `Verdict changed to "${action.new_verdict}"`,
-                memory_id: action.target_id,
-                metadata: {
-                  old_verdict: action.new_verdict,
-                  new_verdict: action.new_verdict,
-                },
-              })
-            }
-          }
-        }
-
-        // Sort descending by timestamp
-        events.sort((a, b) => Date.parse(b.timestamp) - Date.parse(a.timestamp))
-
-        this.historyEvents = events
-        this.historyPagination.total = events.length
-        this.historyPagination.page = 1
+        const page = more ? this.historyPagination.page + 1 : 1
+        const resp = await getMemoryHistory({
+          kb_id: kbId,
+          action: this.historyAction || undefined,
+          page,
+          page_size: this.historyPagination.pageSize,
+        })
+        const items = resp.data?.items ?? []
+        this.historyEntries = more ? [...this.historyEntries, ...items] : items
+        this.historyPagination.page = page
+        this.historyPagination.total = resp.data?.total ?? 0
       } finally {
         this.historyLoading = false
       }
     },
 
-    /** Set the history event type filter and reset pagination. */
-    setHistoryFilter(type: '' | TimelineEvent['type']) {
-      this.historyFilterType = type
-      this.historyPagination.page = 1
-    },
-
-    /** Load the next page of history events. */
-    loadMoreHistory() {
-      const maxPage = Math.ceil(this.historyPagination.total / this.historyPagination.pageSize)
-      if (this.historyPagination.page < maxPage) {
-        this.historyPagination.page++
-      }
+    async setHistoryAction(kbId: string, action: string) {
+      this.historyAction = action
+      await this.loadHistory(kbId)
     },
 
     // -----------------------------------------------------------------------
-    // View mode / sub-tab
+    // View state
     // -----------------------------------------------------------------------
 
     toggleViewMode() {
       this.viewMode = this.viewMode === 'grid' ? 'table' : 'grid'
     },
 
-    setSubTab(tab: 'browse' | 'graph' | 'health' | 'history' | 'mcpconfig') {
+    setSubTab(tab: MemorySubTab) {
       this.activeSubTab = tab
     },
 
-    // -----------------------------------------------------------------------
-    // Filters
-    // -----------------------------------------------------------------------
-
-    setFilter(partial: Partial<MemoryFilterState>) {
-      // Reset to page 1 whenever any filter changes (except page/pageSize).
-      if (!('page' in partial) && !('pageSize' in partial)) {
-        partial.page = 1
-      }
-      Object.assign(this.filter, partial)
-    },
-
-    // -----------------------------------------------------------------------
-    // Bulk operations
-    // -----------------------------------------------------------------------
-
-    async bulkChangeVerdict(verdict: MemoryVerdict) {
-      const ids = [...this.selectedIds]
-      const results = await Promise.allSettled(ids.map((id) => updateMemory(id, { verdict })))
-      const ok = new Set(ids.filter((_, i) => results[i].status === 'fulfilled'))
-      this.memories.forEach((m) => {
-        if (ok.has(m.id)) m.verdict = verdict
-      })
-      this.selectedIds = ids.filter((id) => !ok.has(id))
-      return { succeeded: ok.size, failed: ids.length - ok.size }
-    },
-
-    async bulkChangeImportance(delta: number) {
-      const ids = [...this.selectedIds]
-      const targets = new Map<string, number>()
-      for (const id of ids) {
-        const mem = this.memories.find((m) => m.id === id)
-        if (mem) targets.set(id, clampImportance(mem.importance + delta))
-      }
-      const entries = [...targets.entries()]
-      const results = await Promise.allSettled(
-        entries.map(([id, importance]) => updateMemory(id, { importance }))
-      )
-      const ok = new Set(entries.filter((_, i) => results[i].status === 'fulfilled').map(([id]) => id))
-      this.memories.forEach((m) => {
-        if (ok.has(m.id)) m.importance = targets.get(m.id)!
-      })
-      this.selectedIds = ids.filter((id) => !ok.has(id))
-      return { succeeded: ok.size, failed: ids.length - ok.size }
-    },
-
-    async bulkDelete() {
-      const ids = [...this.selectedIds]
-      const results = await Promise.allSettled(ids.map((id) => deleteMemory(id)))
-      const ok = new Set(ids.filter((_, i) => results[i].status === 'fulfilled'))
-      this.memories = this.memories.filter((m) => !ok.has(m.id))
-      this.selectedIds = ids.filter((id) => !ok.has(id))
-      return { succeeded: ok.size, failed: ids.length - ok.size }
-    },
-
-    // -----------------------------------------------------------------------
-    // Selection
-    // -----------------------------------------------------------------------
-
     toggleSelectAll() {
-      if (this.selectedIds.length === this.memories.length) {
-        this.selectedIds = []
-      } else {
-        this.selectedIds = this.memories.map((m) => m.id)
-      }
+      this.selectedIds = this.selectedIds.length === this.memories.length ? [] : this.memories.map((m) => m.id)
     },
 
     toggleSelect(id: string) {
       const idx = this.selectedIds.indexOf(id)
-      if (idx === -1) {
-        this.selectedIds.push(id)
-      } else {
-        this.selectedIds.splice(idx, 1)
-      }
+      if (idx === -1) this.selectedIds.push(id)
+      else this.selectedIds.splice(idx, 1)
     },
   },
 })

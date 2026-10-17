@@ -62,3 +62,9 @@ type MemoryV2ScopeLock interface {
 type MemoryV2PairSimilarity interface {
 	PairSimilarity(ctx context.Context, tenantID, a, b string) (float64, error)
 }
+
+// MemoryV2DreamStateReader is an optional capability of MemoryRepositoryV2
+// that reads the dreamer state of one (tenant, knowledge base) scope.
+type MemoryV2DreamStateReader interface {
+	DreamState(ctx context.Context, tenantID, kbID string) (*types.DreamerState, error)
+}

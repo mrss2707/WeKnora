@@ -50,6 +50,19 @@ type MemoryV2ScopedDreamer interface {
 	ConsolidateDreamScope(ctx context.Context, tenantID, kbID string) (*types.DreamResult, error)
 }
 
+// MemoryV2DreamPreviewer is an optional capability of MemoryServiceV2 that
+// returns a knowledge base's dreamer proposals without applying or recording
+// anything.
+type MemoryV2DreamPreviewer interface {
+	PreviewDreamScope(ctx context.Context, tenantID, kbID string) (*types.DreamResult, error)
+}
+
+// MemoryV2DreamStatusReader is an optional capability of MemoryServiceV2 that
+// reports a knowledge base's dreamer settings and last run.
+type MemoryV2DreamStatusReader interface {
+	DreamStatus(ctx context.Context, tenantID, kbID string) (*types.DreamStatus, error)
+}
+
 // MemoryV2Deleter is an optional capability of MemoryServiceV2 that deletes a
 // memory (and its relations) with an audit record.
 type MemoryV2Deleter interface {

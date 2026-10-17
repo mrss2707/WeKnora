@@ -7,6 +7,7 @@
     destroy-on-close
     :footer="false"
     :close-btn="true"
+    data-testid="memory-drawer"
     @close="handleClose"
   >
     <!-- Loading state -->
@@ -16,25 +17,41 @@
 
     <!-- Content -->
     <template v-else-if="localMemory">
+      <div v-if="canEdit" class="drawer-actions">
+        <t-button
+          v-if="canManage && hasMergeHistory"
+          size="small"
+          variant="outline"
+          data-testid="memory-undo-merge"
+          @click="handleUndoMerge"
+        >
+          <template #icon><t-icon name="rollback" /></template>
+          {{ $t('memory.drawer.undoMerge') }}
+        </t-button>
+        <t-button
+          size="small"
+          variant="outline"
+          theme="danger"
+          data-testid="memory-delete"
+          @click="handleDelete"
+        >
+          <template #icon><t-icon name="delete" /></template>
+          {{ $t('memory.drawer.delete') }}
+        </t-button>
+      </div>
+
       <!-- Verdict selector -->
       <div class="drawer-section">
         <label class="drawer-section-label">{{ $t('memory.drawer.verdict') }}</label>
-        <t-tooltip
-          :content="$t('memory.drawer.verdictProtected')"
-          :disabled="!isProtectedVerdict"
-        >
+        <t-tooltip :content="$t('memory.drawer.verdictProtectedHint')" :disabled="!isProtectedVerdict">
           <t-select
             :value="localMemory.verdict"
-            :disabled="isProtectedVerdict"
+            :disabled="!canEdit || saving"
             class="drawer-verdict-select"
+            data-testid="memory-verdict"
             @change="handleVerdictChange"
           >
-            <t-option
-              v-for="v in MEMORY_VERDICTS"
-              :key="v"
-              :value="v"
-              :label="$t(`memory.verdicts.${v}`)"
-            />
+            <t-option v-for="v in MEMORY_VERDICTS" :key="v" :value="v" :label="$t(`memory.verdicts.${v}`)" />
           </t-select>
         </t-tooltip>
       </div>
@@ -44,39 +61,68 @@
         <label class="drawer-section-label">{{ $t('memory.drawer.tier') }}</label>
         <t-select
           :value="localMemory.tier"
+          :disabled="!canEdit || saving"
           class="drawer-tier-select"
+          data-testid="memory-tier"
           @change="handleTierChange"
         >
-          <t-option
-            v-for="t in 4"
-            :key="t - 1"
-            :value="t - 1"
-            :label="$t(`memory.tiers.${t - 1}`)"
-          />
+          <t-option v-for="n in 4" :key="n - 1" :value="n - 1" :label="$t(`memory.tiers.${n - 1}`)" />
         </t-select>
       </div>
 
       <!-- Importance stars -->
       <div class="drawer-section">
         <label class="drawer-section-label">{{ $t('memory.drawer.importance') }}</label>
-        <div class="drawer-importance">
+        <div class="drawer-importance" data-testid="memory-importance">
           <t-icon
             v-for="i in MEMORY_IMPORTANCE_MAX"
             :key="i"
             :name="i <= localMemory.importance ? 'star-filled' : 'star'"
-            :class="['star-icon', { filled: i <= localMemory.importance }]"
+            :class="['star-icon', 'importance-star', { filled: i <= localMemory.importance }]"
+            :data-testid="`memory-importance-${i}`"
             size="18px"
-            class="importance-star"
             @click="handleImportanceClick(i)"
           />
           <span class="importance-value">{{ localMemory.importance }}/{{ MEMORY_IMPORTANCE_MAX }}</span>
         </div>
       </div>
 
-      <!-- Full content -->
+      <!-- Content (editable) -->
       <div class="drawer-section">
-        <label class="drawer-section-label">{{ $t('memory.drawer.content') }}</label>
-        <div class="drawer-content-text">{{ localMemory.content }}</div>
+        <label class="drawer-section-label">
+          {{ $t('memory.drawer.content') }}
+          <t-link
+            v-if="canEdit && !editingContent"
+            theme="primary"
+            size="small"
+            data-testid="memory-edit-content"
+            @click="startEditContent"
+          >
+            {{ $t('memory.drawer.editContent') }}
+          </t-link>
+        </label>
+        <template v-if="editingContent">
+          <t-textarea
+            v-model="contentDraft"
+            :autosize="{ minRows: 4, maxRows: 16 }"
+            :maxlength="MEMORY_CONTENT_MAX"
+            data-testid="memory-content-editor"
+          />
+          <div class="content-editor-actions">
+            <t-button size="small" variant="outline" @click="editingContent = false">{{ $t('common.cancel') }}</t-button>
+            <t-button
+              size="small"
+              theme="primary"
+              :loading="saving"
+              :disabled="!contentDraftValid"
+              data-testid="memory-save-content"
+              @click="saveContent"
+            >
+              {{ $t('common.save') }}
+            </t-button>
+          </div>
+        </template>
+        <div v-else class="drawer-content-text" data-testid="memory-content">{{ localMemory.content }}</div>
       </div>
 
       <!-- Metadata grid -->
@@ -85,7 +131,7 @@
         <div class="metadata-grid">
           <div class="metadata-item">
             <span class="metadata-key">{{ $t('memory.drawer.type') }}</span>
-            <span class="metadata-value">{{ $t(`memory.types.${localMemory.memory_type}`) }}</span>
+            <span class="metadata-value">{{ typeLabel(localMemory.memory_type) }}</span>
           </div>
           <div class="metadata-item">
             <span class="metadata-key">{{ $t('memory.drawer.created') }}</span>
@@ -106,14 +152,14 @@
         </div>
       </div>
 
-      <!-- Tags with add/remove -->
+      <!-- Tags -->
       <div class="drawer-section">
         <label class="drawer-section-label">{{ $t('memory.drawer.tags') }}</label>
-        <div class="tags-container">
+        <div class="tags-container" data-testid="memory-tags">
           <t-tag
-            v-for="(tag, idx) in localMemory.tags"
-            :key="idx"
-            closable
+            v-for="(tag, idx) in localMemory.tags || []"
+            :key="tag"
+            :closable="canEdit"
             size="small"
             variant="light"
             class="memory-tag"
@@ -121,44 +167,47 @@
           >
             {{ tag }}
           </t-tag>
-
-          <div v-if="showTagInput" class="tag-input-wrapper">
-            <t-input
-              ref="tagInputRef"
-              v-model="newTag"
+          <template v-if="canEdit">
+            <div v-if="showTagInput" class="tag-input-wrapper">
+              <t-input
+                v-model="newTag"
+                size="small"
+                class="tag-input-field"
+                :placeholder="$t('memory.drawer.addTag')"
+                data-testid="memory-tag-input"
+                @blur="handleAddTag"
+                @enter="handleAddTag"
+              />
+            </div>
+            <t-button
+              v-else
               size="small"
-              class="tag-input-field"
-              :placeholder="$t('memory.drawer.addTag')"
-              @blur="handleAddTag"
-              @keyup.enter="handleAddTag"
-            />
-          </div>
-          <t-button
-            v-else
-            size="small"
-            variant="outline"
-            class="add-tag-btn"
-            @click="showAddTagInput"
-          >
-            {{ $t('memory.drawer.addTag') }}
-          </t-button>
+              variant="outline"
+              class="add-tag-btn"
+              data-testid="memory-add-tag"
+              @click="showAddTagInput"
+            >
+              {{ $t('memory.drawer.addTag') }}
+            </t-button>
+          </template>
         </div>
       </div>
 
-      <!-- Relations list -->
+      <!-- Relations (one hop, from the graph API) -->
       <div class="drawer-section">
         <label class="drawer-section-label">{{ $t('memory.drawer.relations') }}</label>
-        <div v-if="relations.length > 0" class="relations-list">
-          <div v-for="rel in relations" :key="rel.id" class="relation-item">
+        <div v-if="relations.length > 0" class="relations-list" data-testid="memory-relations">
+          <div
+            v-for="rel in relations"
+            :key="rel.key"
+            class="relation-item clickable"
+            @click="$emit('view-memory', rel.otherId)"
+          >
             <div class="relation-info">
-              <span class="relation-type">{{ rel.relation_type }}</span>
-              <span class="relation-target-id">{{ rel.to_uuid }}</span>
+              <span class="relation-type">{{ relationLabel(rel.type) }}</span>
+              <span class="relation-target-id">{{ rel.label }}</span>
             </div>
-            <t-link
-              theme="primary"
-              size="small"
-              @click="$emit('view-in-graph', rel)"
-            >
+            <t-link theme="primary" size="small" @click.stop="$emit('view-in-graph', localMemory.id)">
               {{ $t('memory.drawer.viewInGraph') }}
             </t-link>
           </div>
@@ -166,52 +215,27 @@
         <span v-else class="drawer-empty-text">{{ $t('memory.drawer.noRelations') }}</span>
       </div>
 
-      <!-- Lint issues list -->
-      <div class="drawer-section">
-        <label class="drawer-section-label">{{ $t('memory.drawer.lintIssues') }}</label>
-        <div v-if="lintIssues.length > 0" class="lint-list">
-          <div
-            v-for="(issue, idx) in lintIssues"
-            :key="idx"
-            :class="['lint-item', `lint-severity-${issue.severity}`]"
-          >
-            <t-icon
-              :name="lintSeverityIcon(issue.severity)"
-              size="16px"
-              class="lint-icon"
-            />
-            <div class="lint-content">
-              <span class="lint-rule">{{ issue.rule }}</span>
-              <span class="lint-message">{{ issue.message }}</span>
-            </div>
-          </div>
-        </div>
-        <span v-else class="drawer-empty-text">{{ $t('memory.drawer.noLintIssues') }}</span>
-      </div>
-
-      <!-- History timeline -->
+      <!-- History (audit trail) -->
       <div class="drawer-section">
         <label class="drawer-section-label">{{ $t('memory.drawer.history') }}</label>
-        <div v-if="historyTimeline.length > 0" class="history-timeline">
-          <div
-            v-for="event in historyTimeline"
-            :key="event.id"
-            class="history-event"
-          >
-            <div class="history-event-dot" :class="`history-dot-${event.type}`" />
+        <div v-if="history.length > 0" class="history-timeline" data-testid="memory-history">
+          <div v-for="entry in history" :key="entry.id" class="history-event">
+            <div class="history-event-dot" :class="`history-dot-${entry.action}`" />
             <div class="history-event-body">
               <div class="history-event-header">
-                <span class="history-event-type">{{ historyEventLabel(event.type) }}</span>
-                <span class="history-event-time">{{ formatRelativeTime(event.timestamp) }}</span>
+                <span class="history-event-type">{{ auditActionLabel(entry.action) }}</span>
+                <span class="history-event-time">{{ formatRelativeTime(entry.created_at) }}</span>
               </div>
-              <div class="history-event-desc">{{ event.description }}</div>
+              <div class="history-event-desc">{{ describeAuditChange(entry) }}</div>
+              <div class="history-event-actor">{{ actorLabel(entry) }}</div>
             </div>
           </div>
         </div>
         <span v-else class="drawer-empty-text">{{ $t('memory.drawer.noHistory') }}</span>
       </div>
     </template>
-    <div v-else class="drawer-empty-placeholder" style="padding: 40px; text-align: center; color: var(--td-text-color-secondary);">
+
+    <div v-else class="drawer-empty-placeholder">
       <t-empty :description="$t('memory.browse.empty')" />
     </div>
   </t-drawer>
@@ -220,31 +244,47 @@
 <script setup lang="ts">
 import { computed, ref, watch, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
-import type { AgentMemory, MemoryRelation, MemoryLintIssue, MemoryVerdict, TimelineEvent, UpdateMemoryRequest } from '@/api/memory/index'
-import { MEMORY_VERDICTS, isVerdictProtected, MEMORY_IMPORTANCE_MAX, clampImportance } from '@/api/memory/index'
-import { getMemory, updateMemory } from '@/api/memory/index'
-import { MessagePlugin } from 'tdesign-vue-next'
+import { DialogPlugin, MessagePlugin } from 'tdesign-vue-next'
+import type { AgentMemory, MemoryAuditEntry, MemoryVerdict, UpdateMemoryRequest } from '@/api/memory/index'
+import {
+  MEMORY_VERDICTS,
+  MEMORY_IMPORTANCE_MAX,
+  MEMORY_CONTENT_MAX,
+  MEMORY_CONTENT_MIN,
+  isVerdictProtected,
+  clampImportance,
+  getMemory,
+  getMemoryGraph,
+  getMemoryHistory,
+} from '@/api/memory/index'
+import { useMemoryStore } from '@/stores/memory'
+import { isConflict } from '@/stores/memoryState'
+import { useMemoryLabels } from './useMemoryLabels'
 
-const props = defineProps<{
-  visible: boolean
-  memory: AgentMemory | null
-  relations?: MemoryRelation[]
-  lintIssues?: MemoryLintIssue[]
-  historyEvents?: TimelineEvent[]
-}>()
+const props = withDefaults(
+  defineProps<{
+    visible: boolean
+    memory: AgentMemory | null
+    canEdit?: boolean
+    canManage?: boolean
+  }>(),
+  { canEdit: false, canManage: false },
+)
 
 const emit = defineEmits<{
   'update:visible': [visible: boolean]
   close: []
   update: [memory: AgentMemory]
-  'view-in-graph': [relation: MemoryRelation]
+  deleted: [memoryId: string]
+  'view-in-graph': [memoryId: string]
+  'view-memory': [memoryId: string]
 }>()
 
 const { t } = useI18n()
+const memoryStore = useMemoryStore()
+const { typeLabel, relationLabel, auditActionLabel, actorLabel, describeAuditChange, formatDate, formatRelativeTime } =
+  useMemoryLabels()
 
-// -----------------------------------------------------------------------
-// Visibility (v-model)
-// -----------------------------------------------------------------------
 const drawerVisible = computed({
   get: () => props.visible,
   set: (val) => {
@@ -257,167 +297,162 @@ const drawerVisible = computed({
 // Local state
 // -----------------------------------------------------------------------
 const loading = ref(false)
+const saving = ref(false)
 const localMemory = ref<AgentMemory | null>(null)
-const relations = ref<MemoryRelation[]>(props.relations || [])
-const lintIssues = ref<MemoryLintIssue[]>(props.lintIssues || [])
-const historyTimeline = ref<TimelineEvent[]>(props.historyEvents || [])
+const history = ref<MemoryAuditEntry[]>([])
+const relations = ref<{ key: string; type: string; otherId: string; label: string }[]>([])
 
-// Tag input
 const showTagInput = ref(false)
 const newTag = ref('')
-const tagInputRef = ref<InstanceType<typeof import('tdesign-vue-next')['Input']> | null>(null)
 
-// -----------------------------------------------------------------------
-// Drawer header
-// -----------------------------------------------------------------------
+const editingContent = ref(false)
+const contentDraft = ref('')
+const contentDraftValid = computed(() => {
+  const n = [...contentDraft.value.trim()].length
+  return n >= MEMORY_CONTENT_MIN && n <= MEMORY_CONTENT_MAX && contentDraft.value.trim() !== localMemory.value?.content
+})
+
 const drawerTitle = computed(() => {
   if (!localMemory.value) return t('memory.drawer.title')
   const verdictLabel = t(`memory.verdicts.${localMemory.value.verdict || 'none'}`)
-  const preview = localMemory.value.content.length > 60
-    ? localMemory.value.content.slice(0, 57) + '...'
-    : localMemory.value.content
+  const content = localMemory.value.content
+  const preview = [...content].length > 60 ? [...content].slice(0, 57).join('') + '...' : content
   return `${verdictLabel}: ${preview}`
 })
 
-// -----------------------------------------------------------------------
-// Protected verdict check
-// -----------------------------------------------------------------------
-const isProtectedVerdict = computed(() => {
-  if (!localMemory.value) return false
-  return isVerdictProtected(localMemory.value.verdict)
-})
+const isProtectedVerdict = computed(() => !!localMemory.value && isVerdictProtected(localMemory.value.verdict))
+const hasMergeHistory = computed(() => history.value.some((e) => e.action === 'merged'))
 
 // -----------------------------------------------------------------------
-// Fetch full memory details on open
+// Loading
 // -----------------------------------------------------------------------
-async function loadMemoryDetails() {
-  if (!props.memory) return
-
-  if (!localMemory.value) {
-    localMemory.value = { ...props.memory }
-  }
-
+async function loadDetails(id: string) {
   loading.value = true
   try {
-    const resp = await getMemory(props.memory.id)
-    const memData = (resp as any)?.data?.data ?? (resp as any)?.data ?? resp
-    if (memData && typeof memData === 'object' && 'id' in memData) {
-      localMemory.value = { ...memData }
+    const [mem, hist, graph] = await Promise.allSettled([
+      getMemory(id),
+      getMemoryHistory({ memory_id: id, page_size: 20 }),
+      getMemoryGraph(id, { depth: 1, limit: 30 }),
+    ])
+    if (mem.status === 'fulfilled' && mem.value?.data?.id === id) localMemory.value = { ...mem.value.data }
+    history.value = hist.status === 'fulfilled' ? hist.value.data?.items ?? [] : []
+    if (graph.status === 'fulfilled' && graph.value.data) {
+      const labels = new Map(graph.value.data.nodes.map((n) => [n.id, n.label]))
+      relations.value = graph.value.data.edges
+        .filter((e) => e.source === id || e.target === id)
+        .map((e, i) => {
+          const otherId = e.source === id ? e.target : e.source
+          return { key: `${e.id || i}`, type: e.relation_type, otherId, label: labels.get(otherId) || otherId }
+        })
     } else {
-      localMemory.value = { ...props.memory }
-    }
-  } catch {
-    // Fallback to the prop data if API fails
-    if (!localMemory.value) {
-      localMemory.value = { ...props.memory }
+      relations.value = []
     }
   } finally {
     loading.value = false
   }
 }
 
-// -----------------------------------------------------------------------
-// Watchers for prop changes
-// -----------------------------------------------------------------------
 watch(
-  () => props.visible,
-  (val) => {
-    if (val && props.memory) {
+  () => [props.visible, props.memory?.id] as const,
+  ([visible]) => {
+    showTagInput.value = false
+    newTag.value = ''
+    editingContent.value = false
+    if (visible && props.memory) {
       localMemory.value = { ...props.memory }
-      relations.value = props.relations || []
-      lintIssues.value = props.lintIssues || []
-      historyTimeline.value = props.historyEvents || []
-      showTagInput.value = false
-      newTag.value = ''
-      loadMemoryDetails()
-    } else if (!val) {
+      loadDetails(props.memory.id)
+    } else if (!visible) {
       localMemory.value = null
-      showTagInput.value = false
-      newTag.value = ''
+      history.value = []
+      relations.value = []
     }
   },
-  { immediate: true }
-)
-
-watch(
-  () => props.memory,
-  (newMem) => {
-    if (newMem && props.visible) {
-      localMemory.value = { ...newMem }
-      loadMemoryDetails()
-    }
-  }
-)
-
-watch(
-  () => props.relations,
-  (val) => {
-    if (val) relations.value = val
-  }
-)
-
-watch(
-  () => props.lintIssues,
-  (val) => {
-    if (val) lintIssues.value = val
-  }
-)
-
-watch(
-  () => props.historyEvents,
-  (val) => {
-    if (val) historyTimeline.value = val
-  }
+  { immediate: true },
 )
 
 // -----------------------------------------------------------------------
-// Persist patch to backend
+// Saving (optimistic lock on the version shown)
 // -----------------------------------------------------------------------
-async function persistMemoryPatch(patch: UpdateMemoryRequest) {
-  if (!localMemory.value) return
+async function persist(patch: UpdateMemoryRequest): Promise<boolean> {
+  if (!localMemory.value) return false
+  const before = { ...localMemory.value }
+  saving.value = true
   try {
-    const resp = await updateMemory(localMemory.value.id, patch)
-    const updated = (resp as any)?.data?.data ?? (resp as any)?.data ?? resp
-    if (updated && typeof updated === 'object' && 'id' in updated) {
-      localMemory.value = { ...localMemory.value, ...updated }
-    }
-    emitUpdate()
+    const updated = await memoryStore.patchMemory(before, patch)
+    localMemory.value = { ...before, ...updated }
+    emit('update', { ...localMemory.value })
+    const hist = await getMemoryHistory({ memory_id: before.id, page_size: 20 }).catch(() => null)
+    if (hist) history.value = hist.data?.items ?? []
+    return true
   } catch (err: any) {
-    MessagePlugin.error(err?.message || t('common.saveFailed') || 'Failed to update memory')
+    localMemory.value = before
+    if (isConflict(err)) {
+      promptReload(err?.message)
+    } else {
+      MessagePlugin.error(err?.message || t('memory.drawer.saveFailed'))
+    }
+    return false
+  } finally {
+    saving.value = false
   }
 }
 
-// -----------------------------------------------------------------------
-// Verdict change
-// -----------------------------------------------------------------------
-async function handleVerdictChange(verdict: MemoryVerdict) {
-  if (!localMemory.value) return
-  if (isVerdictProtected(localMemory.value.verdict)) {
-    MessagePlugin.warning(t('memory.drawer.verdictProtected'))
+function promptReload(message?: string) {
+  const dialog = DialogPlugin.confirm({
+    header: t('memory.drawer.conflictTitle'),
+    body: message ? `${t('memory.drawer.conflictBody')} (${message})` : t('memory.drawer.conflictBody'),
+    confirmBtn: t('memory.drawer.conflictReload'),
+    cancelBtn: t('common.cancel'),
+    onConfirm: async () => {
+      dialog.hide()
+      if (localMemory.value) await loadDetails(localMemory.value.id)
+    },
+    onClose: () => dialog.hide(),
+  })
+}
+
+function confirmThen(body: string, run: () => void, danger = false) {
+  const dialog = DialogPlugin.confirm({
+    header: t('memory.browse.confirmTitle'),
+    body,
+    theme: danger ? 'danger' : 'warning',
+    confirmBtn: { content: t('common.confirm'), theme: danger ? 'danger' : 'primary' },
+    cancelBtn: t('common.cancel'),
+    onConfirm: () => {
+      dialog.hide()
+      run()
+    },
+    onClose: () => dialog.hide(),
+  })
+}
+
+function handleVerdictChange(verdict: MemoryVerdict) {
+  if (!localMemory.value || verdict === localMemory.value.verdict) return
+  if (isProtectedVerdict.value) {
+    confirmThen(t('memory.drawer.confirmUnprotect'), () => persist({ verdict }))
     return
   }
-  localMemory.value.verdict = verdict
-  await persistMemoryPatch({ verdict })
+  persist({ verdict })
 }
 
-// -----------------------------------------------------------------------
-// Tier change
-// -----------------------------------------------------------------------
-async function handleTierChange(tier: number) {
-  if (!localMemory.value) return
-  localMemory.value.tier = tier
-  await persistMemoryPatch({ tier })
+function handleTierChange(tier: number) {
+  persist({ tier })
 }
 
-// -----------------------------------------------------------------------
-// Importance change
-// -----------------------------------------------------------------------
-async function handleImportanceClick(importance: number) {
-  if (!localMemory.value) return
-  // Clicking the current value toggles it off (set to 0), otherwise set to clicked value
-  const newImportance = clampImportance(localMemory.value.importance === importance ? 0 : importance)
-  localMemory.value.importance = newImportance
-  await persistMemoryPatch({ importance: newImportance })
+function handleImportanceClick(importance: number) {
+  if (!props.canEdit || !localMemory.value || saving.value) return
+  // Clicking the current value clears it to 0.
+  persist({ importance: clampImportance(localMemory.value.importance === importance ? 0 : importance) })
+}
+
+function startEditContent() {
+  contentDraft.value = localMemory.value?.content ?? ''
+  editingContent.value = true
+}
+
+async function saveContent() {
+  if (!contentDraftValid.value) return
+  if (await persist({ content: contentDraft.value.trim() })) editingContent.value = false
 }
 
 // -----------------------------------------------------------------------
@@ -426,7 +461,6 @@ async function handleImportanceClick(importance: number) {
 function showAddTagInput() {
   showTagInput.value = true
   nextTick(() => {
-    // Focus the input
     const inputEl = document.querySelector('.tag-input-field input') as HTMLInputElement | null
     inputEl?.focus()
   })
@@ -434,99 +468,62 @@ function showAddTagInput() {
 
 async function handleAddTag() {
   const tag = newTag.value.trim()
-  if (tag && localMemory.value) {
-    if (!localMemory.value.tags) {
-      localMemory.value.tags = []
-    }
-    if (!localMemory.value.tags.includes(tag)) {
-      localMemory.value.tags.push(tag)
-      await persistMemoryPatch({ tags: [...localMemory.value.tags] })
-    }
-  }
   showTagInput.value = false
   newTag.value = ''
+  if (!tag || !localMemory.value) return
+  const tags = localMemory.value.tags ?? []
+  if (tags.includes(tag)) return
+  await persist({ tags: [...tags, tag] })
 }
 
 async function handleRemoveTag(idx: number) {
-  if (!localMemory.value?.tags) return
-  localMemory.value.tags.splice(idx, 1)
-  await persistMemoryPatch({ tags: [...localMemory.value.tags] })
+  const tags = [...(localMemory.value?.tags ?? [])]
+  tags.splice(idx, 1)
+  await persist({ tags })
 }
 
 // -----------------------------------------------------------------------
-// Emit update
+// Delete / undo merge
 // -----------------------------------------------------------------------
-function emitUpdate() {
-  if (localMemory.value) {
-    emit('update', { ...localMemory.value })
-  }
+function handleDelete() {
+  const mem = localMemory.value
+  if (!mem) return
+  confirmThen(
+    t('memory.drawer.confirmDelete'),
+    async () => {
+      try {
+        await memoryStore.deleteMemory(mem.id)
+        MessagePlugin.success(t('memory.drawer.deleted'))
+        emit('deleted', mem.id)
+        handleClose()
+      } catch (err: any) {
+        MessagePlugin.error(err?.message || t('memory.drawer.saveFailed'))
+      }
+    },
+    true,
+  )
 }
 
-// -----------------------------------------------------------------------
-// Close
-// -----------------------------------------------------------------------
-function handleClose() {
-  showTagInput.value = false
-  newTag.value = ''
-  loading.value = false
-  emit('update:visible', false)
-  emit('close')
-}
-
-// -----------------------------------------------------------------------
-// Helpers
-// -----------------------------------------------------------------------
-function formatDate(dateStr: string): string {
-  const d = new Date(dateStr)
-  if (isNaN(d.getTime())) return ''
-  return d.toLocaleDateString(undefined, {
-    year: 'numeric',
-    month: 'short',
-    day: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
+function handleUndoMerge() {
+  const mem = localMemory.value
+  if (!mem) return
+  confirmThen(t('memory.drawer.confirmUndoMerge'), async () => {
+    try {
+      const restored = await memoryStore.undoMerge(mem.id)
+      MessagePlugin.success(t('memory.drawer.undoMergeDone'))
+      if (restored) emit('update', restored)
+      await loadDetails(mem.id)
+    } catch (err: any) {
+      MessagePlugin.error(err?.message || t('memory.drawer.saveFailed'))
+    }
   })
 }
 
-function formatRelativeTime(dateStr: string): string {
-  const now = Date.now()
-  const then = new Date(dateStr).getTime()
-  if (isNaN(then)) return ''
-  const diffMs = now - then
-  const diffSec = Math.floor(diffMs / 1000)
-  const diffMin = Math.floor(diffSec / 60)
-  const diffHour = Math.floor(diffMin / 60)
-  const diffDay = Math.floor(diffHour / 24)
-
-  if (diffSec < 60) return t('memory.time.justNow')
-  if (diffMin < 60) return t('memory.time.minutesAgo', { n: diffMin })
-  if (diffHour < 24) return t('memory.time.hoursAgo', { n: diffHour })
-  if (diffDay < 7) return t('memory.time.daysAgo', { n: diffDay })
-  return formatDate(dateStr)
-}
-
-function historyEventLabel(type: string): string {
-  const labels: Record<string, string> = {
-    created: 'created',
-    updated: 'updated',
-    deleted: 'deleted',
-    verdict_changed: 'verdictChanged',
-    dreamer_action: 'dreamer',
-    consolidation: 'consolidated',
-    pruner: 'pruned',
-    health_check: 'healthCheck',
-  }
-  const key = `memory.drawer.historyEvents.${labels[type] || type}`
-  return t(key)
-}
-
-function lintSeverityIcon(severity: string): string {
-  const icons: Record<string, string> = {
-    error: 'error-circle',
-    warning: 'warning-triangle',
-    info: 'info-circle',
-  }
-  return icons[severity] || 'info-circle'
+function handleClose() {
+  showTagInput.value = false
+  editingContent.value = false
+  emit('update:visible', false)
+  emit('close')
 }
 </script>
 
@@ -557,7 +554,7 @@ function lintSeverityIcon(severity: string): string {
 
 .drawer-section-label {
   display: block;
-  font-size: 13px;
+  font-size: var(--app-text-md);
   font-weight: 600;
   color: var(--td-text-color-primary);
   margin-bottom: 8px;
@@ -601,7 +598,7 @@ function lintSeverityIcon(severity: string): string {
 .importance-star {
   color: var(--td-text-color-disabled);
   cursor: pointer;
-  transition: color 0.15s, transform 0.15s;
+  transition: color var(--app-motion-fast), transform var(--app-motion-fast);
 
   &.filled {
     color: var(--td-warning-color);
@@ -614,7 +611,7 @@ function lintSeverityIcon(severity: string): string {
 
 .importance-value {
   margin-left: 10px;
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   color: var(--td-text-color-placeholder);
 }
 
@@ -622,13 +619,13 @@ function lintSeverityIcon(severity: string): string {
 // Content
 // -----------------------------------------------------------------------
 .drawer-content-text {
-  font-size: 13px;
+  font-size: var(--app-text-md);
   line-height: 1.6;
   color: var(--td-text-color-secondary);
   word-break: break-word;
   white-space: pre-wrap;
   background: var(--td-bg-color-secondarycontainer);
-  border-radius: 6px;
+  border-radius: var(--app-radius-sm);
   padding: 10px 12px;
   max-height: 300px;
   overflow-y: auto;
@@ -650,20 +647,20 @@ function lintSeverityIcon(severity: string): string {
 }
 
 .metadata-key {
-  font-size: 11px;
+  font-size: var(--app-text-xs);
   color: var(--td-text-color-placeholder);
   text-transform: uppercase;
   letter-spacing: 0.5px;
 }
 
 .metadata-value {
-  font-size: 13px;
+  font-size: var(--app-text-md);
   color: var(--td-text-color-primary);
 }
 
 .metadata-value-mono {
   font-family: monospace;
-  font-size: 12px;
+  font-size: var(--app-text-sm);
 }
 
 // -----------------------------------------------------------------------
@@ -692,7 +689,7 @@ function lintSeverityIcon(severity: string): string {
 }
 
 .add-tag-btn {
-  font-size: 12px;
+  font-size: var(--app-text-sm);
 }
 
 // -----------------------------------------------------------------------
@@ -711,7 +708,7 @@ function lintSeverityIcon(severity: string): string {
   gap: 8px;
   padding: 6px 8px;
   background: var(--td-bg-color-secondarycontainer);
-  border-radius: 4px;
+  border-radius: var(--app-radius-xs);
 }
 
 .relation-info {
@@ -722,13 +719,13 @@ function lintSeverityIcon(severity: string): string {
 }
 
 .relation-type {
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   font-weight: 500;
   color: var(--td-text-color-primary);
 }
 
 .relation-target-id {
-  font-size: 11px;
+  font-size: var(--app-text-xs);
   color: var(--td-text-color-placeholder);
   font-family: monospace;
   overflow: hidden;
@@ -751,7 +748,7 @@ function lintSeverityIcon(severity: string): string {
   gap: 8px;
   padding: 6px 8px;
   background: var(--td-bg-color-secondarycontainer);
-  border-radius: 4px;
+  border-radius: var(--app-radius-xs);
   border-left: 3px solid var(--td-info-color);
 
   &.lint-severity-error {
@@ -792,14 +789,14 @@ function lintSeverityIcon(severity: string): string {
 }
 
 .lint-rule {
-  font-size: 11px;
+  font-size: var(--app-text-xs);
   font-weight: 500;
   color: var(--td-text-color-primary);
   font-family: monospace;
 }
 
 .lint-message {
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   color: var(--td-text-color-secondary);
   line-height: 1.4;
 }
@@ -846,32 +843,32 @@ function lintSeverityIcon(severity: string): string {
     background: var(--td-success-color-light);
   }
 
-  &.history-dot-updated {
+  &.history-dot-patched {
     border-color: var(--td-brand-color);
     background: var(--td-brand-color-light);
   }
 
-  &.history-dot-verdict_changed {
+  &.history-dot-merged {
     border-color: var(--td-warning-color);
     background: var(--td-warning-color-light);
   }
 
-  &.history-dot-dreamer_action {
+  &.history-dot-merged_into {
     border-color: var(--td-info-color);
     background: var(--td-info-color-light);
   }
 
-  &.history-dot-consolidation {
+  &.history-dot-unmerged {
     border-color: var(--td-purple-color, #a855f7);
     background: color-mix(in srgb, var(--td-purple-color, #a855f7) 15%, transparent);
   }
 
-  &.history-dot-pruner {
+  &.history-dot-deleted {
     border-color: var(--td-error-color);
     background: var(--td-error-color-light);
   }
 
-  &.history-dot-health_check {
+  &.history-dot-reclaimed {
     border-color: var(--td-success-color);
     background: var(--td-success-color-light);
   }
@@ -889,19 +886,19 @@ function lintSeverityIcon(severity: string): string {
 }
 
 .history-event-type {
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   font-weight: 500;
   color: var(--td-text-color-primary);
 }
 
 .history-event-time {
-  font-size: 11px;
+  font-size: var(--app-text-xs);
   color: var(--td-text-color-placeholder);
   margin-left: auto;
 }
 
 .history-event-desc {
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   color: var(--td-text-color-secondary);
   line-height: 1.4;
   margin-top: 2px;
@@ -911,8 +908,37 @@ function lintSeverityIcon(severity: string): string {
 // Empty text
 // -----------------------------------------------------------------------
 .drawer-empty-text {
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   color: var(--td-text-color-placeholder);
   font-style: italic;
+}
+
+.drawer-empty-placeholder {
+  padding: 40px;
+  text-align: center;
+  color: var(--td-text-color-secondary);
+}
+
+.drawer-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  margin-bottom: 12px;
+}
+
+.content-editor-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  margin-top: 8px;
+}
+
+.relation-item.clickable {
+  cursor: pointer;
+}
+
+.history-event-actor {
+  font-size: var(--app-text-sm);
+  color: var(--td-text-color-placeholder);
 }
 </style>

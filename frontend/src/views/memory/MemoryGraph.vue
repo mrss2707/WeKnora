@@ -1,5 +1,5 @@
 <template>
-  <div class="memory-graph">
+  <div class="memory-graph" data-testid="memory-graph-tab">
     <!-- Toolbar -->
     <div class="graph-toolbar">
       <div class="toolbar-left">
@@ -16,6 +16,26 @@
         </t-radio-group>
       </div>
       <div class="toolbar-right">
+        <t-button
+          v-if="centerNodeId"
+          variant="text"
+          size="small"
+          data-testid="memory-graph-overview"
+          @click="showOverview"
+        >
+          <t-icon name="rollback" />
+          {{ t('memory.graph.backToOverview') }}
+        </t-button>
+        <t-button
+          v-if="centerNodeId"
+          variant="text"
+          size="small"
+          data-testid="memory-graph-open"
+          @click="emit('view-memory', centerNodeId)"
+        >
+          <t-icon name="browse" />
+          {{ t('memory.graph.openMemory') }}
+        </t-button>
         <t-button
           variant="text"
           size="small"
@@ -46,6 +66,7 @@
       <div
         v-else-if="!memoryStore.graphData || !graphData?.nodes?.length"
         class="empty-state"
+        data-testid="memory-graph-empty"
       >
         <t-icon name="chart-bubble" size="48px" class="empty-icon" />
         <span class="empty-title">{{ t('memory.graph.emptyTitle') }}</span>
@@ -59,6 +80,7 @@
         v-else
         ref="svgContainerRef"
         class="graph-svg-container"
+        data-testid="memory-graph-canvas"
         @contextmenu.prevent
       >
         <svg
@@ -115,6 +137,7 @@
                 v-for="(node, idx) in displayNodes"
                 :key="'node-' + idx"
                 :data-node-id="node.id"
+                :data-testid="`memory-graph-node-${node.id}`"
                 :class="['graph-node-group', { 'node-dragging': draggingNodeId === node.id }]"
                 :transform="`translate(${npx(node.x)},${npx(node.y)})`"
                 :style="{ cursor: 'pointer' }"
@@ -254,6 +277,12 @@ import type { GraphNode, GraphEdge, GraphData } from '@/api/memory/index'
 
 const props = defineProps<{
   kbId: string
+  /** Memory to centre on when the tab opens (e.g. "View in graph"). */
+  focusId?: string | null
+}>()
+
+const emit = defineEmits<{
+  'view-memory': [memoryId: string]
 }>()
 
 const { t } = useI18n()
@@ -406,15 +435,19 @@ const graphData = computed(() => memoryStore.graphData)
 // The tab opens on the knowledge base overview (its most connected
 // memories); clicking a memory loads its own neighbourhood from the server.
 watch(
-  () => props.kbId,
-  (id) => {
-    if (id) {
-      centerNodeId.value = null
-      memoryStore.loadGraph(id)
-    }
+  () => [props.kbId, props.focusId] as const,
+  ([id, focus]) => {
+    if (!id) return
+    centerNodeId.value = focus || null
+    memoryStore.loadGraph(id, focus || undefined, depth.value)
   },
   { immediate: true }
 )
+
+function showOverview() {
+  centerNodeId.value = null
+  memoryStore.loadGraph(props.kbId)
+}
 
 function reloadForDepth() {
   if (centerNodeId.value) {
@@ -887,7 +920,7 @@ onUnmounted(() => {
 }
 
 .toolbar-label {
-  font-size: 13px;
+  font-size: var(--app-text-md);
   color: var(--td-text-color-secondary);
   white-space: nowrap;
 }
@@ -907,7 +940,7 @@ onUnmounted(() => {
   position: relative;
   overflow: hidden;
   border: 1px solid var(--td-component-stroke);
-  border-radius: 8px;
+  border-radius: var(--app-radius-md);
   background: var(--td-bg-color-secondarycontainer);
 }
 
@@ -935,7 +968,7 @@ onUnmounted(() => {
 // Edges
 // -----------------------------------------------------------------------
 .graph-edge {
-  transition: opacity 0.2s;
+  transition: opacity var(--app-motion-base);
 }
 
 .edge-related_to {
@@ -956,7 +989,7 @@ onUnmounted(() => {
 // Nodes
 // -----------------------------------------------------------------------
 .graph-node-circle {
-  transition: stroke-width 0.15s, opacity 0.2s;
+  transition: stroke-width var(--app-motion-fast), opacity var(--app-motion-base);
 }
 
 .graph-node-group {
@@ -999,13 +1032,13 @@ onUnmounted(() => {
 }
 
 .empty-title {
-  font-size: 16px;
+  font-size: var(--app-text-xl);
   font-weight: 500;
   color: var(--td-text-color-primary);
 }
 
 .empty-desc {
-  font-size: 13px;
+  font-size: var(--app-text-md);
   color: var(--td-text-color-placeholder);
   text-align: center;
   max-width: 400px;
@@ -1023,9 +1056,9 @@ onUnmounted(() => {
   max-width: 220px;
   background: var(--td-bg-color-container);
   border: 1px solid var(--td-component-stroke);
-  border-radius: 8px;
+  border-radius: var(--app-radius-md);
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   z-index: 10;
 
   &.collapsed {
@@ -1042,7 +1075,7 @@ onUnmounted(() => {
   padding: 8px 12px;
   cursor: pointer;
   font-weight: 500;
-  font-size: 13px;
+  font-size: var(--app-text-md);
   color: var(--td-text-color-primary);
   user-select: none;
 
@@ -1065,7 +1098,7 @@ onUnmounted(() => {
 }
 
 .legend-section-title {
-  font-size: 11px;
+  font-size: var(--app-text-xs);
   font-weight: 600;
   color: var(--td-text-color-placeholder);
   margin-bottom: 2px;
@@ -1147,12 +1180,12 @@ onUnmounted(() => {
 }
 
 .legend-label {
-  font-size: 11px;
+  font-size: var(--app-text-xs);
   color: var(--td-text-color-secondary);
 }
 
 .legend-hint {
-  font-size: 10px;
+  font-size: var(--app-text-2xs);
   color: var(--td-text-color-placeholder);
   font-style: italic;
 }

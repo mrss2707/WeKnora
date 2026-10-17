@@ -129,6 +129,23 @@ func (d *DreamerWorker) RunPass(ctx context.Context, tenantID string) (*types.Dr
 // even when nothing changed since the last pass). An empty kbID runs every
 // knowledge base of the tenant.
 func (d *DreamerWorker) RunScopePass(ctx context.Context, tenantID, kbID string) (*types.DreamResult, error) {
+	return d.runScopes(ctx, tenantID, kbID, passOptions{force: true})
+}
+
+// PreviewScopePass asks the model for proposals and validates them like a
+// real pass, but applies nothing and records nothing: the run count, the last
+// run and the review marks stay as they were.
+func (d *DreamerWorker) PreviewScopePass(ctx context.Context, tenantID, kbID string) (*types.DreamResult, error) {
+	return d.runScopes(ctx, tenantID, kbID, passOptions{force: true, preview: true})
+}
+
+// passOptions tunes one pass: force skips the "changed since the last pass"
+// check (manual triggers); preview applies and records nothing.
+type passOptions struct {
+	force, preview bool
+}
+
+func (d *DreamerWorker) runScopes(ctx context.Context, tenantID, kbID string, opts passOptions) (*types.DreamResult, error) {
 	total := &types.DreamResult{Actions: []types.DreamAction{}}
 	if !d.config.Enabled || tenantID == "" {
 		return total, nil
@@ -147,7 +164,7 @@ func (d *DreamerWorker) RunScopePass(ctx context.Context, tenantID, kbID string)
 		}
 	}
 	for _, sc := range scopes {
-		res, err := d.executeScopePass(ctx, sc, true)
+		res, err := d.executeScopePass(ctx, sc, opts)
 		if err != nil {
 			return total, err
 		}
@@ -173,7 +190,7 @@ func (d *DreamerWorker) dreamPass(ctx context.Context) {
 		if sc.TenantID == "" {
 			continue
 		}
-		res, err := d.executeScopePass(ctx, sc, false)
+		res, err := d.executeScopePass(ctx, sc, passOptions{})
 		if err != nil {
 			logger.Errorf(ctx, "dreamer: pass failed for %s/%s: %v", sc.TenantID, sc.KbID, err)
 			continue
@@ -185,9 +202,8 @@ func (d *DreamerWorker) dreamPass(ctx context.Context) {
 	}
 }
 
-// executeScopePass runs one pass for one scope. force skips the "changed
-// since the last pass" check (manual triggers).
-func (d *DreamerWorker) executeScopePass(ctx context.Context, sc Scope, force bool) (*types.DreamResult, error) {
+// executeScopePass runs one pass for one scope.
+func (d *DreamerWorker) executeScopePass(ctx context.Context, sc Scope, opts passOptions) (*types.DreamResult, error) {
 	result := &types.DreamResult{Actions: []types.DreamAction{}}
 	lock, ok := d.repo.(interfaces.MemoryV2ScopeLock)
 	if !ok {
@@ -212,7 +228,7 @@ func (d *DreamerWorker) executeScopePass(ctx context.Context, sc Scope, force bo
 		}
 	}()
 
-	if !force {
+	if !opts.force {
 		changed, err := lock.ScopeChangedSince(ctx, sc.TenantID, sc.KbID, state.LastRunAt)
 		if err != nil || !changed {
 			return result, err
@@ -244,7 +260,7 @@ func (d *DreamerWorker) executeScopePass(ctx context.Context, sc Scope, force bo
 	if err != nil {
 		return result, fmt.Errorf("dreamer: LLM call failed: %w", err)
 	}
-	ran = true
+	ran = !opts.preview
 	result.TokenUsed = estimateTokens(prompt) + estimateTokens(resp.Content)
 	d.spend(sc.TenantID, result.TokenUsed)
 
@@ -253,6 +269,9 @@ func (d *DreamerWorker) executeScopePass(ctx context.Context, sc Scope, force bo
 		ids[i] = m.ID
 	}
 	defer func() {
+		if opts.preview {
+			return
+		}
 		if err := lock.MarkDreamed(context.WithoutCancel(ctx), sc.TenantID, ids, readAt); err != nil {
 			logger.Warnf(ctx, "dreamer: mark reviewed: %v", err)
 		}
@@ -275,7 +294,7 @@ func (d *DreamerWorker) executeScopePass(ctx context.Context, sc Scope, force bo
 
 	mergeLive := d.config.MergeLiveAfterRuns > 0 && state.Runs >= d.config.MergeLiveAfterRuns
 	for _, a := range actions {
-		dry := d.config.DryRun || d.applier == nil || (a.Type == "merge" && !mergeLive)
+		dry := opts.preview || d.config.DryRun || d.applier == nil || (a.Type == "merge" && !mergeLive)
 		if !dry {
 			if err := d.apply(ctx, sc, a, readAt); err != nil {
 				logger.Infof(ctx, "dreamer: skipped %s on %s: %v", a.Type, a.TargetID, err)

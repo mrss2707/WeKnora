@@ -5,10 +5,11 @@
       `verdict-${memory.verdict}`,
       { 'is-stale': isStale, 'is-selected': selected }
     ]"
+    :data-testid="`memory-card-${memory.id}`"
     @click="$emit('click', memory)"
   >
     <!-- Selection checkbox -->
-    <div class="card-checkbox" @click.stop="$emit('select', memory.id)">
+    <div v-if="selectable" class="card-checkbox" @click.stop="$emit('select', memory.id)">
       <t-checkbox :checked="selected" />
     </div>
 
@@ -84,10 +85,14 @@ import { computed } from 'vue'
 import type { AgentMemory } from '@/api/memory/index'
 import { MEMORY_IMPORTANCE_MAX } from '@/api/memory/index'
 
-const props = defineProps<{
-  memory: AgentMemory
-  selected: boolean
-}>()
+const props = withDefaults(
+  defineProps<{
+    memory: AgentMemory
+    selected: boolean
+    selectable?: boolean
+  }>(),
+  { selectable: true },
+)
 
 defineEmits<{
   select: [memoryId: string]
@@ -180,9 +185,9 @@ const tierTooltip = computed(() => {
   padding: 14px;
   background: var(--td-bg-color-container);
   border: 1px solid var(--td-component-stroke);
-  border-radius: 8px;
+  border-radius: var(--app-radius-md);
   cursor: pointer;
-  transition: border-color 0.2s, box-shadow 0.2s;
+  transition: border-color var(--app-motion-base), box-shadow var(--app-motion-base);
 
   &:hover {
     border-color: var(--td-brand-color);
@@ -219,20 +224,20 @@ const tierTooltip = computed(() => {
   justify-content: center;
   width: 28px;
   height: 28px;
-  border-radius: 6px;
+  border-radius: var(--app-radius-sm);
   background: var(--td-bg-color-secondarycontainer);
   color: var(--td-brand-color);
   flex-shrink: 0;
 }
 
 .card-date {
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   color: var(--td-text-color-placeholder);
   margin-left: auto;
 }
 
 .card-content {
-  font-size: 13px;
+  font-size: var(--app-text-md);
   line-height: 1.5;
   color: var(--td-text-color-secondary);
   display: -webkit-box;
@@ -281,10 +286,10 @@ const tierTooltip = computed(() => {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  font-size: 11px;
+  font-size: var(--app-text-xs);
   font-weight: 500;
   padding: 2px 7px;
-  border-radius: 12px;
+  border-radius: var(--app-radius-xl);
   line-height: 16px;
   white-space: nowrap;
 
@@ -322,15 +327,15 @@ const tierTooltip = computed(() => {
   display: inline-flex;
   align-items: center;
   gap: 3px;
-  font-size: 11px;
+  font-size: var(--app-text-xs);
   font-weight: 500;
   padding: 1px 6px;
-  border-radius: 4px;
+  border-radius: var(--app-radius-xs);
   line-height: 16px;
   background: transparent;
   white-space: nowrap;
   cursor: help;
-  transition: all 0.2s ease;
+  transition: all var(--app-motion-base) ease;
 
   &.tier-0 {
     border: 1px solid #d48806;
@@ -352,7 +357,7 @@ const tierTooltip = computed(() => {
 }
 
 .stale-badge {
-  font-size: 11px;
+  font-size: var(--app-text-xs);
   display: inline-flex;
   align-items: center;
   gap: 2px;

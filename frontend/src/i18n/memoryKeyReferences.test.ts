@@ -68,3 +68,41 @@ test('dynamic memory kind and origin labels exist in every locale', () => {
   }
   assert.deepEqual(failures, [], failures.join('\n'))
 })
+
+// Memory V2 labels built from server values (audit actions, actors, relation
+// and issue types, dreamer actions) are looked up dynamically too.
+test('dynamic Memory V2 labels exist in every locale', () => {
+  const dynamic = [
+    ...['created', 'patched', 'merged', 'merged_into', 'deleted', 'unmerged', 'dreamed', 'reclaimed'].map(
+      (a) => `memory.audit.actions.${a}`,
+    ),
+    ...['dreamer', 'pruner', 'consolidator', 'system', 'reconciler', 'user', 'userWithId', 'agent'].map(
+      (a) => `memory.audit.actors.${a}`,
+    ),
+    ...['content', 'verdict', 'importance', 'tier', 'memory_type', 'tags'].map((f) => `memory.audit.fields.${f}`),
+    ...['related_to', 'justifies', 'contradicts'].map((r) => `memory.relations.${r}`),
+    ...['update_verdict', 'adjust_importance', 'merge', 'remove'].map((a) => `memory.dream.actions.${a}`),
+    ...[
+      'contradiction',
+      'duplication',
+      'embedding_dimension_mismatch',
+      'graph_fragmentation',
+      'orphan',
+      'semantic',
+      'stale',
+      'verdict_consistency',
+    ].map((i) => `memory.health.issueTypes.${i}`),
+    ...['critical', 'high', 'medium', 'low'].map((s) => `memory.health.severities.${s}`),
+    ...['0', '1', '2', '3'].map((n) => `memory.tierHints.${n}`),
+    ...['episodic', 'semantic', 'procedural', 'decision', 'preference', 'fact'].map((k) => `memory.types.${k}`),
+    ...['none', 'fixed', 'refuted', 'decision', 'gotcha', 'wip'].map((v) => `memory.verdicts.${v}`),
+  ]
+  const failures: string[] = []
+  for (const [localeName, bundle] of Object.entries(LOCALE_BUNDLES) as Array<[LocaleName, unknown]>) {
+    const keys = collectLocaleKeys(bundle)
+    for (const key of dynamic) {
+      if (!keys.has(key)) failures.push(`${localeName}: missing ${key}`)
+    }
+  }
+  assert.deepEqual(failures, [], failures.join('\n'))
+})

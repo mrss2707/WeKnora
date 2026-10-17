@@ -30,6 +30,7 @@ var memoryV2RouteCases = []struct {
 	{http.MethodGet, "/api/v1/memories/graph", "/api/v1/memories/graph", types.TenantRoleViewer},
 	{http.MethodGet, "/api/v1/memories/graph/:id", "/api/v1/memories/graph/m1", types.TenantRoleViewer},
 	{http.MethodGet, "/api/v1/memories/history", "/api/v1/memories/history", types.TenantRoleViewer},
+	{http.MethodGet, "/api/v1/memories/dream", "/api/v1/memories/dream", types.TenantRoleViewer},
 	{http.MethodGet, "/api/v1/memories/:id", "/api/v1/memories/m1", types.TenantRoleViewer},
 	{http.MethodPost, "/api/v1/memories", "/api/v1/memories", types.TenantRoleContributor},
 	{http.MethodPut, "/api/v1/memories/:id", "/api/v1/memories/m1", types.TenantRoleContributor},

@@ -12,7 +12,23 @@ import (
 	"gorm.io/gorm/clause"
 )
 
-var _ interfaces.MemoryV2ScopeLock = (*MemoryRepository)(nil)
+var (
+	_ interfaces.MemoryV2ScopeLock        = (*MemoryRepository)(nil)
+	_ interfaces.MemoryV2DreamStateReader = (*MemoryRepository)(nil)
+)
+
+// DreamState returns the dreamer state of one scope; nil when it never ran.
+func (r *MemoryRepository) DreamState(ctx context.Context, tenantID, kbID string) (*types.DreamerState, error) {
+	var states []types.DreamerState
+	if err := r.db.WithContext(ctx).Where("tenant_id = ? AND kb_id = ?", tenantID, kbID).
+		Limit(1).Find(&states).Error; err != nil {
+		return nil, err
+	}
+	if len(states) == 0 {
+		return nil, nil
+	}
+	return &states[0], nil
+}
 
 // TryScopeLock acquires the dreamer lock of one (tenant, knowledge base)
 // scope for ttl. A lock whose holder stopped heartbeating past its expiry is

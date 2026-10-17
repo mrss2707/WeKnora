@@ -9,6 +9,8 @@
           :placeholder="$t('memory.browse.searchPlaceholder')"
           clearable
           class="search-input"
+          data-testid="memory-search"
+          @change="handleSearch"
           @enter="handleSearch"
           @clear="handleSearch"
         >
@@ -23,7 +25,8 @@
           :placeholder="$t('memory.browse.filterType')"
           clearable
           class="filter-select"
-          @change="(val: string) => memoryStore.setFilter({ type: val })"
+          data-testid="memory-filter-type"
+          @change="(val: string) => memoryStore.setFilter({ type: val || '' })"
         >
           <t-option key="episodic" value="episodic" :label="$t('memory.types.episodic')" />
           <t-option key="semantic" value="semantic" :label="$t('memory.types.semantic')" />
@@ -39,7 +42,8 @@
           :placeholder="$t('memory.browse.filterVerdict')"
           clearable
           class="filter-select"
-          @change="(val: string) => memoryStore.setFilter({ verdict: val })"
+          data-testid="memory-filter-verdict"
+          @change="(val: string) => memoryStore.setFilter({ verdict: val || '' })"
         >
           <t-option key="none" value="none" :label="$t('memory.verdicts.none')" />
           <t-option key="fixed" value="fixed" :label="$t('memory.verdicts.fixed')" />
@@ -55,16 +59,35 @@
           :placeholder="$t('memory.browse.filterTier')"
           clearable
           class="filter-select filter-select-narrow"
-          @change="(val: number | undefined) => memoryStore.setFilter({ tier: val })"
+          data-testid="memory-filter-tier"
+          @change="(val: number | undefined) => memoryStore.setFilter({ tier: val ?? undefined })"
         >
           <t-option key="0" :value="0" :label="$t('memory.tiers.0')" />
           <t-option key="1" :value="1" :label="$t('memory.tiers.1')" />
           <t-option key="2" :value="2" :label="$t('memory.tiers.2')" />
           <t-option key="3" :value="3" :label="$t('memory.tiers.3')" />
         </t-select>
+
+        <t-checkbox
+          :checked="memoryStore.filter.mineOnly"
+          data-testid="memory-filter-mine"
+          @change="(val: boolean) => memoryStore.setFilter({ mineOnly: val })"
+        >
+          {{ $t('memory.browse.mineOnly') }}
+        </t-checkbox>
       </div>
 
       <div class="toolbar-right">
+        <t-button
+          v-if="canEdit"
+          theme="primary"
+          size="small"
+          data-testid="memory-create-button"
+          @click="createVisible = true"
+        >
+          <template #icon><t-icon name="add" /></template>
+          {{ $t('memory.create.button') }}
+        </t-button>
         <!-- View mode toggle -->
         <t-button
           variant="text"
@@ -88,7 +111,7 @@
     </div>
 
     <!-- Bulk operations bar -->
-    <div v-if="memoryStore.hasSelection" class="bulk-bar">
+    <div v-if="canEdit && memoryStore.hasSelection" class="bulk-bar" data-testid="memory-bulk-bar">
       <span class="bulk-selected-count">
         {{ $t('memory.browse.selectedCount', { count: memoryStore.selectedIds.length }) }}
       </span>
@@ -96,6 +119,7 @@
       <t-select
         :placeholder="$t('memory.browse.bulkVerdict')"
         class="bulk-verdict-select"
+        data-testid="memory-bulk-verdict"
         @change="(val: string) => handleBulkVerdict(val)"
       >
         <t-option key="none" value="none" :label="$t('memory.verdicts.none')" />
@@ -109,6 +133,7 @@
       <t-button
         variant="outline"
         size="small"
+        data-testid="memory-bulk-importance-up"
         @click="handleBulkImportance(1)"
       >
         <t-icon name="arrow-up" />
@@ -118,6 +143,7 @@
       <t-button
         variant="outline"
         size="small"
+        data-testid="memory-bulk-importance-down"
         @click="handleBulkImportance(-1)"
       >
         <t-icon name="arrow-down" />
@@ -128,6 +154,7 @@
         variant="outline"
         theme="danger"
         size="small"
+        data-testid="memory-bulk-delete"
         @click="handleBulkDelete"
       >
         <t-icon name="delete" />
@@ -160,6 +187,7 @@
           :key="mem.id"
           :memory="mem"
           :selected="memoryStore.selectedIds.includes(mem.id)"
+          :selectable="canEdit"
           @select="(id: string) => memoryStore.toggleSelect(id)"
           @click="(mem: AgentMemory) => $emit('open-detail', mem)"
         />
@@ -176,12 +204,15 @@
         :hover="true"
         :pagination="null"
         class="memory-table"
+        data-testid="memory-table"
         @row-click="(row: { row: AgentMemory }) => $emit('open-detail', row.row)"
       >
         <!-- Selection column -->
         <template #selection="{ row }">
           <t-checkbox
+            v-if="canEdit"
             :checked="memoryStore.selectedIds.includes(row.id)"
+            :data-testid="`memory-select-${row.id}`"
             @click.stop
             @change="memoryStore.toggleSelect(row.id)"
           />
@@ -202,7 +233,7 @@
 
         <!-- Content column -->
         <template #content="{ row }">
-          <div class="table-content-cell" :title="row.content">
+          <div class="table-content-cell" :title="row.content" :data-testid="`memory-row-${row.id}`">
             {{ row.content.length > 100 ? row.content.slice(0, 97) + '...' : row.content }}
           </div>
         </template>
@@ -270,7 +301,7 @@
       </t-table>
 
       <!-- Empty state -->
-      <div v-if="displayMemories.length === 0 && !memoryStore.loading" class="empty-state">
+      <div v-if="displayMemories.length === 0 && !memoryStore.loading" class="empty-state" data-testid="memory-empty">
         <t-icon name="layers" size="48px" class="empty-icon" />
         <span class="empty-title">{{ $t('memory.browse.empty') }}</span>
         <span class="empty-desc">{{ $t('memory.browse.emptyDesc') }}</span>
@@ -286,10 +317,13 @@
         :page-size-options="[10, 20, 50, 100]"
         show-page-size
         show-jumper
+        data-testid="memory-pagination"
         @current-change="handlePageChange"
         @page-size-change="handlePageSizeChange"
       />
     </div>
+
+    <MemoryCreateDialog v-model:visible="createVisible" :kb-id="kbId" />
   </div>
 </template>
 
@@ -297,14 +331,21 @@
 import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useMemoryStore } from '@/stores/memory'
+import type { BulkOutcome } from '@/stores/memory'
 import type { AgentMemory, MemoryVerdict } from '@/api/memory/index'
 import { isVerdictProtected, MEMORY_IMPORTANCE_MAX } from '@/api/memory/index'
-import { MessagePlugin } from 'tdesign-vue-next'
+import { DialogPlugin, MessagePlugin } from 'tdesign-vue-next'
 import MemoryCard from './MemoryCard.vue'
+import MemoryCreateDialog from './MemoryCreateDialog.vue'
 
-const props = defineProps<{
-  kbId: string
-}>()
+const props = withDefaults(
+  defineProps<{
+    kbId: string
+    /** Contributor+ with edit rights on this knowledge base. */
+    canEdit?: boolean
+  }>(),
+  { canEdit: false },
+)
 
 defineEmits<{
   'open-detail': [memory: AgentMemory]
@@ -312,9 +353,10 @@ defineEmits<{
 
 const { t } = useI18n()
 const memoryStore = useMemoryStore()
+const createVisible = ref(false)
 
 // -----------------------------------------------------------------------
-// Search with debounce
+// Search (server-side keyword match), debounced
 // -----------------------------------------------------------------------
 const searchValue = ref(memoryStore.filter.keyword || '')
 let searchTimer: ReturnType<typeof setTimeout> | null = null
@@ -322,7 +364,9 @@ let searchTimer: ReturnType<typeof setTimeout> | null = null
 function handleSearch() {
   if (searchTimer) clearTimeout(searchTimer)
   searchTimer = setTimeout(() => {
-    memoryStore.setFilter({ keyword: searchValue.value })
+    if (searchValue.value.trim() !== memoryStore.filter.keyword) {
+      memoryStore.setFilter({ keyword: searchValue.value.trim() })
+    }
   }, 300)
 }
 
@@ -330,21 +374,16 @@ watch(
   () => props.kbId,
   (newKbId) => {
     if (newKbId) {
+      memoryStore.useKnowledgeBase(newKbId)
+      searchValue.value = memoryStore.filter.keyword
       memoryStore.loadMemories(newKbId)
     }
   },
   { immediate: true }
 )
 
-// -----------------------------------------------------------------------
-// Filtered / paginated memories
-// -----------------------------------------------------------------------
-const displayMemories = computed(() => {
-  const filtered = memoryStore.filteredMemories
-  const { page, pageSize } = memoryStore.pagination
-  const start = (page - 1) * pageSize
-  return filtered.slice(start, start + pageSize)
-})
+// The server returns exactly one filtered page.
+const displayMemories = computed(() => memoryStore.memories)
 
 // -----------------------------------------------------------------------
 // Table columns
@@ -402,18 +441,12 @@ function verdictIcon(verdict: string): string {
 }
 
 function tierTooltip(tier: number): string {
-  const map: Record<number, string> = {
-    0: 'Bậc 0 (Mỗi lượt): Luôn được đưa vào context của Agent trong mọi lượt trò chuyện',
-    1: 'Bậc 1 (Tình huống): Kích hoạt khi câu hỏi hoặc bối cảnh cuộc trò chuyện có liên quan',
-    2: 'Bậc 2 (Chủ đề thường gặp): Mối quan tâm dài hạn, chỉ kích hoạt khi chạm ngưỡng tần suất',
-    3: 'Bậc 3 (Theo dõi trước): Thu thập & đếm tần suất lặp lại trước, chưa kích hoạt trực tiếp',
-  }
-  return map[tier] || `Bậc ${tier}`
+  return tier >= 0 && tier <= 3 ? t(`memory.tierHints.${tier}`) : t('memory.browse.table.tier')
 }
 
-function isMemoryStale(memory: AgentMemory): boolean {
-  const days = staleDays(memory.updated_at)
-  return days > 90
+function isMemoryStale(memory: AgentMemory & { is_stale?: boolean }): boolean {
+  if (memory.is_stale !== undefined) return memory.is_stale
+  return staleDays(memory.updated_at) > 90
 }
 
 function staleDays(dateStr: string): number {
@@ -437,39 +470,62 @@ function handlePageChange(page: number) {
 }
 
 function handlePageSizeChange(pageSize: number) {
-  memoryStore.setFilter({ pageSize, page: 1 })
+  memoryStore.setFilter({ pageSize })
 }
 
 // -----------------------------------------------------------------------
 // Bulk operations
 // -----------------------------------------------------------------------
-async function handleBulkVerdict(verdict: string) {
+function confirm(body: string, onConfirm: () => Promise<void>, danger = false) {
+  const dialog = DialogPlugin.confirm({
+    header: t('memory.browse.confirmTitle'),
+    body,
+    theme: danger ? 'danger' : 'warning',
+    confirmBtn: { content: t('common.confirm'), theme: danger ? 'danger' : 'primary' },
+    cancelBtn: t('common.cancel'),
+    onConfirm: async () => {
+      dialog.hide()
+      await onConfirm()
+    },
+    onClose: () => dialog.hide(),
+  })
+}
+
+function handleBulkVerdict(verdict: string) {
   const v = verdict as MemoryVerdict
-  // Protected verdicts (decision/fixed) are left untouched by bulk changes.
-  const protectedIds = memoryStore.selectedMemories
-    .filter((m) => isVerdictProtected(m.verdict))
-    .map((m) => m.id)
-  if (protectedIds.length > 0) {
-    MessagePlugin.warning(t('memory.browse.bulkProtectedSkipped', { count: protectedIds.length }))
-    memoryStore.selectedIds = memoryStore.selectedIds.filter((id) => !protectedIds.includes(id))
+  const protectedCount = memoryStore.selectedMemories.filter((m) => isVerdictProtected(m.verdict)).length
+  const run = async () => reportBulkResult(await memoryStore.bulkChangeVerdict(v))
+  if (protectedCount > 0) {
+    confirm(t('memory.browse.confirmProtectedVerdict', { count: protectedCount }), run)
+    return
   }
-  if (memoryStore.selectedIds.length === 0) return
-  reportBulkResult(await memoryStore.bulkChangeVerdict(v))
+  run()
 }
 
 async function handleBulkImportance(delta: number) {
   reportBulkResult(await memoryStore.bulkChangeImportance(delta))
 }
 
-async function handleBulkDelete() {
-  reportBulkResult(await memoryStore.bulkDelete())
+function handleBulkDelete() {
+  const count = memoryStore.selectedIds.length
+  confirm(t('memory.browse.confirmBulkDelete', { count }), async () => {
+    reportBulkResult(await memoryStore.bulkDelete())
+  }, true)
 }
 
-function reportBulkResult(result: { succeeded: number; failed: number }) {
-  if (result.failed > 0) {
+function reportBulkResult(result: BulkOutcome) {
+  if (result.failed === 0) {
+    MessagePlugin.success(t('memory.browse.bulkDone', { count: result.succeeded }))
+    return
+  }
+  if (result.conflicts > 0) {
+    MessagePlugin.warning(t('memory.browse.bulkConflicts', { count: result.conflicts }))
+    if (memoryStore.kbId) memoryStore.loadMemories(memoryStore.kbId)
+  }
+  if (result.failed > result.conflicts) {
     MessagePlugin.error(
       t('memory.browse.bulkPartialFailure', {
-        failed: result.failed,
+        failed: result.failed - result.conflicts,
         total: result.succeeded + result.failed,
       })
     )
@@ -525,7 +581,7 @@ function reportBulkResult(result: { succeeded: number; failed: number }) {
 
 .view-toggle-btn {
   padding: 4px 6px;
-  border-radius: 4px;
+  border-radius: var(--app-radius-xs);
   color: var(--td-text-color-secondary);
 
   &.active {
@@ -548,12 +604,12 @@ function reportBulkResult(result: { succeeded: number; failed: number }) {
   padding: 8px 12px;
   background: var(--td-brand-color-light);
   border: 1px solid var(--td-brand-color);
-  border-radius: 6px;
+  border-radius: var(--app-radius-sm);
   flex-shrink: 0;
 }
 
 .bulk-selected-count {
-  font-size: 13px;
+  font-size: var(--app-text-md);
   font-weight: 500;
   color: var(--td-brand-color);
   white-space: nowrap;
@@ -598,11 +654,11 @@ function reportBulkResult(result: { succeeded: number; failed: number }) {
     display: inline-flex;
     align-items: center;
     gap: 6px;
-    font-size: 13px;
+    font-size: var(--app-text-md);
 
     .type-icon-glyph {
       flex-shrink: 0;
-      transition: transform 0.15s ease;
+      transition: transform var(--app-motion-fast) ease;
     }
 
     .type-name {
@@ -612,7 +668,7 @@ function reportBulkResult(result: { succeeded: number; failed: number }) {
   }
 
   .table-content-cell {
-    font-size: 12px;
+    font-size: var(--app-text-sm);
     color: var(--td-text-color-secondary);
     overflow: hidden;
     text-overflow: ellipsis;
@@ -626,13 +682,13 @@ function reportBulkResult(result: { succeeded: number; failed: number }) {
   }
 
   .table-tags-more {
-    font-size: 11px;
+    font-size: var(--app-text-xs);
     color: var(--td-text-color-placeholder);
     line-height: 20px;
   }
 
   .table-date {
-    font-size: 12px;
+    font-size: var(--app-text-sm);
     color: var(--td-text-color-placeholder);
   }
 
@@ -654,10 +710,10 @@ function reportBulkResult(result: { succeeded: number; failed: number }) {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  font-size: 11px;
+  font-size: var(--app-text-xs);
   font-weight: 500;
   padding: 2px 8px;
-  border-radius: 12px;
+  border-radius: var(--app-radius-xl);
   line-height: 18px;
   white-space: nowrap;
 
@@ -695,15 +751,15 @@ function reportBulkResult(result: { succeeded: number; failed: number }) {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  font-size: 11px;
+  font-size: var(--app-text-xs);
   font-weight: 500;
   padding: 1px 7px;
-  border-radius: 4px;
+  border-radius: var(--app-radius-xs);
   line-height: 18px;
   background: transparent;
   white-space: nowrap;
   cursor: help;
-  transition: all 0.2s ease;
+  transition: all var(--app-motion-base) ease;
 
   &.tier-0 {
     border: 1px solid #d48806;
@@ -743,13 +799,13 @@ function reportBulkResult(result: { succeeded: number; failed: number }) {
 }
 
 .empty-title {
-  font-size: 16px;
+  font-size: var(--app-text-xl);
   font-weight: 500;
   color: var(--td-text-color-primary);
 }
 
 .empty-desc {
-  font-size: 13px;
+  font-size: var(--app-text-md);
   color: var(--td-text-color-placeholder);
   text-align: center;
   max-width: 360px;

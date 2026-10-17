@@ -61,7 +61,8 @@ import MemoryHealth from '@/views/memory/MemoryHealth.vue'
 import MemoryHistory from '@/views/memory/MemoryHistory.vue'
 import MemoryMcpConfig from '@/views/memory/MemoryMcpConfig.vue'
 import MemoryDrawer from '@/views/memory/MemoryDrawer.vue'
-import type { AgentMemory } from '@/api/memory/index'
+import MemoryDream from '@/views/memory/MemoryDream.vue'
+import { useMemoryTabNavigation } from '@/views/memory/useMemoryTabNavigation'
 import ImageGallery from './gallery/ImageGallery.vue';
 import { getWikiStats } from '@/api/wiki';
 import {
@@ -100,24 +101,10 @@ const subTabs = computed(() => [
   { key: 'graph', icon: 'chart-bubble', label: t('memory.subtabGraph'), badge: undefined },
   { key: 'health', icon: 'info-circle', label: t('memory.subtabHealth'), badge: hasCriticalIssues.value ? 1 : undefined },
   { key: 'history', icon: 'time', label: t('memory.subtabHistory'), badge: undefined },
+  { key: 'dream', icon: 'lightbulb', label: t('memory.subtabDream'), badge: undefined },
   { key: 'mcpconfig', icon: 'setting', label: t('memory.subtabMcpConfig'), badge: undefined },
 ] as const)
-const memoryDrawerVisible = ref(false)
-const selectedMemory = ref<AgentMemory | null>(null)
-function openMemoryDrawer(memory: AgentMemory) {
-  selectedMemory.value = memory
-  memoryDrawerVisible.value = true
-}
-function closeMemoryDrawer() {
-  memoryDrawerVisible.value = false
-  selectedMemory.value = null
-}
-function handleMemoryUpdate(updated: AgentMemory) {
-  const idx = memoryStore.memories.findIndex((m) => m.id === updated.id)
-  if (idx !== -1) {
-    memoryStore.memories[idx] = { ...memoryStore.memories[idx], ...updated }
-  }
-}
+const { memoryDrawerVisible, selectedMemory, graphFocusId, openMemoryDrawer, openMemoryById, closeMemoryDrawer, handleMemoryUpdate, viewMemoryInGraph } = useMemoryTabNavigation()
 const kbId = computed(() => (route.params as any).kbId as string || '');
 const kbInfo = ref<any>(null);
 const uploadSourceRef = ref<InstanceType<typeof KbUploadSourceDropdown> | null>(null);
@@ -2384,17 +2371,22 @@ const handleKBEditorSuccess = (kbIdValue: string) => {
             </span>
           </div>
           <KeepAlive>
-            <MemoryBrowse  v-if="memoryStore.activeSubTab === 'browse'"  :kb-id="kbId" @open-detail="openMemoryDrawer" />
-            <MemoryGraph   v-if="memoryStore.activeSubTab === 'graph'"   :kb-id="kbId" />
-            <MemoryHealth  v-if="memoryStore.activeSubTab === 'health'"  :kb-id="kbId" @critical-issues-changed="hasCriticalIssues = $event" />
-            <MemoryHistory v-if="memoryStore.activeSubTab === 'history'" :kb-id="kbId" />
+            <MemoryBrowse  v-if="memoryStore.activeSubTab === 'browse'"  :kb-id="kbId" :can-edit="canMutateKnowledge" @open-detail="openMemoryDrawer" />
+            <MemoryGraph   v-if="memoryStore.activeSubTab === 'graph'"   :kb-id="kbId" :focus-id="graphFocusId" @view-memory="openMemoryById" />
+            <MemoryHealth  v-if="memoryStore.activeSubTab === 'health'"  :kb-id="kbId" @critical-issues-changed="hasCriticalIssues = $event" @view-memory="openMemoryById" />
+            <MemoryHistory v-if="memoryStore.activeSubTab === 'history'" :kb-id="kbId" @view-memory="openMemoryById" />
+            <MemoryDream   v-if="memoryStore.activeSubTab === 'dream'"   :kb-id="kbId" :can-manage="canManage" @view-memory="openMemoryById" />
             <MemoryMcpConfig v-if="memoryStore.activeSubTab === 'mcpconfig'" :kb-id="kbId" />
           </KeepAlive>
           <MemoryDrawer
             v-model:visible="memoryDrawerVisible"
             :memory="selectedMemory"
+            :can-edit="canMutateKnowledge"
+            :can-manage="canManage"
             @close="closeMemoryDrawer"
             @update="handleMemoryUpdate"
+            @view-memory="openMemoryById"
+            @view-in-graph="viewMemoryInGraph"
           />
         </div>
       </template>

@@ -303,6 +303,20 @@ type DreamResult struct {
 	TokenUsed       int           `json:"token_used"`
 }
 
+// DreamStatus describes the dreamer of one knowledge base for the UI.
+type DreamStatus struct {
+	Enabled       bool                   `json:"enabled"`
+	Scheduled     bool                   `json:"scheduled"` // background passes run (dreamer + worker kill switch on)
+	DryRun        bool                   `json:"dry_run"`
+	Interval      string                 `json:"interval"`
+	Runs          int                    `json:"runs"`
+	LastRunAt     *time.Time             `json:"last_run_at,omitempty"`
+	Running       bool                   `json:"running"`
+	MergeLive     bool                   `json:"merge_live"` // merge probation is over
+	MergeLiveRuns int                    `json:"merge_live_after_runs"`
+	LastStats     map[string]interface{} `json:"last_stats,omitempty"`
+}
+
 // ---------------------------------------------------------------------------
 // Cache warmer
 // ---------------------------------------------------------------------------

@@ -1,325 +1,176 @@
 <template>
-  <div class="memory-history">
-    <!-- Loading skeleton -->
-    <div v-if="memoryStore.historyLoading" class="loading-container">
-      <t-loading :text="$t('memory.history.loading') || 'Loading timeline...'" size="large" />
+  <div class="memory-history" data-testid="memory-history-tab">
+    <div class="history-toolbar">
+      <t-select
+        :value="memoryStore.historyAction"
+        :placeholder="$t('memory.history.filterAll')"
+        clearable
+        class="filter-select"
+        data-testid="memory-history-filter"
+        @change="handleFilterChange"
+      >
+        <t-option key="all" value="" :label="$t('memory.history.filterAll')" />
+        <t-option v-for="a in MEMORY_AUDIT_ACTIONS" :key="a" :value="a" :label="auditActionLabel(a)" />
+      </t-select>
+      <span class="event-count">
+        {{ $t('memory.time.eventsShown', { shown: entries.length, total: memoryStore.historyPagination.total }) }}
+      </span>
     </div>
 
-    <!-- Empty state (no events at all) -->
-    <div v-else-if="allEvents.length === 0" class="empty-state">
+    <div v-if="memoryStore.historyLoading && entries.length === 0" class="loading-container">
+      <t-loading :text="$t('memory.history.loading')" size="large" />
+    </div>
+
+    <div v-else-if="entries.length === 0" class="empty-state" data-testid="memory-history-empty">
       <t-icon name="time" size="48px" class="empty-icon" />
-      <span class="empty-title">{{ $t('memory.history.emptyTitle') || 'No Events' }}</span>
-      <span class="empty-desc">{{ $t('memory.history.emptyDesc') || 'Timeline events will appear here as memories are created, updated, or checked by the system workers.' }}</span>
+      <span class="empty-title">
+        {{ memoryStore.historyAction ? $t('memory.history.noMatchingEvents') : $t('memory.history.emptyTitle') }}
+      </span>
+      <span class="empty-desc">
+        {{ memoryStore.historyAction ? $t('memory.history.noMatchingDesc') : $t('memory.history.emptyDesc') }}
+      </span>
     </div>
 
-    <!-- Content -->
-    <template v-else>
-      <!-- Toolbar: filter dropdown -->
-      <div class="history-toolbar">
-        <t-select
-          :value="memoryStore.historyFilterType"
-          :placeholder="$t('memory.history.filterAll') || 'All events'"
-          clearable
-          class="filter-select"
-          @change="handleFilterChange"
-        >
-          <t-option key="all" value="" :label="$t('memory.history.filterAll') || 'All events'" />
-          <t-option key="created" value="created" :label="eventTypeLabel('created')" />
-          <t-option key="updated" value="updated" :label="eventTypeLabel('updated')" />
-          <t-option key="deleted" value="deleted" :label="eventTypeLabel('deleted')" />
-          <t-option key="verdict_changed" value="verdict_changed" :label="eventTypeLabel('verdict_changed')" />
-          <t-option key="dreamer_action" value="dreamer_action" :label="eventTypeLabel('dreamer_action')" />
-          <t-option key="consolidation" value="consolidation" :label="eventTypeLabel('consolidation')" />
-          <t-option key="pruner" value="pruner" :label="eventTypeLabel('pruner')" />
-          <t-option key="health_check" value="health_check" :label="eventTypeLabel('health_check')" />
-        </t-select>
+    <div v-else class="timeline-container">
+      <div v-for="group in groupedTimeline" :key="group.dateLabel" class="timeline-group">
+        <div class="timeline-group-header">
+          <span class="group-date-label">{{ group.dateLabel }}</span>
+          <span class="group-date-line" />
+        </div>
 
-        <span class="event-count">{{ $t('memory.history.eventCount', { count: pagedEvents.length }) || displayedCountLabel }}</span>
-      </div>
-
-      <!-- Filtered empty state -->
-      <div v-if="pagedEvents.length === 0 && allEvents.length > 0" class="empty-state">
-        <t-icon name="time" size="48px" class="empty-icon" />
-        <span class="empty-title">{{ $t('memory.history.noMatchingEvents') || 'No matching events' }}</span>
-        <span class="empty-desc">{{ $t('memory.history.noMatchingDesc') || 'Try selecting a different event type filter.' }}</span>
-      </div>
-
-      <!-- Timeline -->
-      <div v-else class="timeline-container">
         <div
-          v-for="group in groupedTimeline"
-          :key="group.dateLabel"
-          class="timeline-group"
+          v-for="entry in group.entries"
+          :key="entry.id"
+          class="timeline-item"
+          :data-testid="`memory-history-${entry.action}`"
         >
-          <!-- Date group header -->
-          <div class="timeline-group-header">
-            <span class="group-date-label">{{ group.dateLabel }}</span>
-            <span class="group-date-line" />
+          <div class="timeline-marker">
+            <div class="timeline-dot" :style="{ background: actionColor(entry.action) }" />
+            <div class="timeline-line" />
           </div>
-
-          <!-- Events in this group -->
-          <div
-            v-for="event in group.events"
-            :key="event.id"
-            class="timeline-item"
-          >
-            <!-- Timeline dot + line -->
-            <div class="timeline-marker">
-              <div
-                class="timeline-dot"
-                :class="`dot-${event.type}`"
-                :style="{ background: eventTypeColor(event.type) }"
+          <div class="timeline-card">
+            <div class="timeline-card-header">
+              <t-icon
+                :name="actionIcon(entry.action)"
+                size="16px"
+                class="event-type-icon"
+                :style="{ color: actionColor(entry.action) }"
               />
-              <div class="timeline-line" />
+              <span class="event-type-badge" :class="`badge-${entry.action}`">
+                {{ auditActionLabel(entry.action) }}
+              </span>
+              <span class="event-timestamp">{{ formatTime(entry.created_at) }}</span>
+              <span class="event-actor">{{ actorLabel(entry) }}</span>
             </div>
-
-            <!-- Event content card -->
-            <div class="timeline-card" @click="handleEventClick(event)">
-              <div class="timeline-card-header">
-                <t-icon
-                  :name="eventTypeIcon(event.type)"
-                  size="16px"
-                  class="event-type-icon"
-                  :style="{ color: eventTypeColor(event.type) }"
-                />
-                <span class="event-type-badge" :class="`badge-${event.type}`">
-                  {{ eventTypeLabel(event.type) }}
-                </span>
-                <span class="event-timestamp">
-                  {{ formatEventTime(event.timestamp) }}
-                </span>
-              </div>
-
-              <div class="timeline-card-body">
-                <span class="event-description">{{ event.description }}</span>
-                <span
-                  v-if="event.memory_id"
-                  class="event-memory-link"
-                  @click.stop="handleViewMemory(event)"
-                >
-                  <t-icon name="browse" size="12px" />
-                  {{ $t('memory.history.viewMemory') || 'View memory' }}
-                </span>
-              </div>
-
-              <div
-                v-if="event.memory_content_preview"
-                class="timeline-card-preview"
+            <div class="timeline-card-body">
+              <span class="event-description">{{ describeAuditChange(entry) }}</span>
+              <span
+                v-if="entry.action !== 'deleted' && entry.action !== 'merged_into'"
+                class="event-memory-link"
+                @click.stop="$emit('view-memory', entry.memory_id)"
               >
-                {{ event.memory_content_preview }}
-              </div>
+                <t-icon name="browse" size="12px" />
+                {{ $t('memory.history.viewMemory') }}
+              </span>
             </div>
           </div>
-        </div>
-
-        <!-- Load more button -->
-        <div v-if="hasMoreEvents" class="load-more-bar">
-          <t-button
-            variant="outline"
-            :loading="memoryStore.historyLoading"
-            @click="handleLoadMore"
-          >
-            {{ $t('memory.history.loadMore') || 'Load more' }}
-          </t-button>
         </div>
       </div>
-    </template>
+
+      <div v-if="memoryStore.hasMoreHistory" class="load-more-bar">
+        <t-button
+          variant="outline"
+          :loading="memoryStore.historyLoading"
+          data-testid="memory-history-more"
+          @click="memoryStore.loadHistory(kbId, true)"
+        >
+          {{ $t('memory.history.loadMore') }}
+        </t-button>
+      </div>
+    </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useMemoryStore } from '@/stores/memory'
-import type { TimelineEvent, TimelineEventType } from '@/api/memory/index'
+import { MEMORY_AUDIT_ACTIONS, type MemoryAuditEntry } from '@/api/memory/index'
+import { useMemoryLabels } from './useMemoryLabels'
 
-const props = defineProps<{
-  kbId: string
-}>()
+const props = defineProps<{ kbId: string }>()
 
-const emit = defineEmits<{
+defineEmits<{
   'view-memory': [memoryId: string]
 }>()
 
 const { t } = useI18n()
 const memoryStore = useMemoryStore()
+const { auditActionLabel, actorLabel, describeAuditChange } = useMemoryLabels()
 
-// -----------------------------------------------------------------------
-// Data fetching
-// -----------------------------------------------------------------------
 watch(
   () => props.kbId,
-  (newKbId) => {
-    if (newKbId) {
-      memoryStore.loadHistory(newKbId)
-    }
+  (id) => {
+    if (id) memoryStore.loadHistory(id)
   },
-  { immediate: true }
+  { immediate: true },
 )
 
-// -----------------------------------------------------------------------
-// Event type display config
-// -----------------------------------------------------------------------
-const eventTypeIcons: Record<TimelineEventType, string> = {
-  created: 'add-circle',
-  updated: 'edit-1',
-  deleted: 'delete',
-  verdict_changed: 'check-circle',
-  dreamer_action: 'auto',
-  consolidation: 'refresh',
-  pruner: 'clear',
-  health_check: 'info-circle',
+const entries = computed<MemoryAuditEntry[]>(() => memoryStore.historyEntries)
+
+function handleFilterChange(action: string) {
+  memoryStore.setHistoryAction(props.kbId, action || '')
 }
 
-const eventTypeColors: Record<TimelineEventType, string> = {
-  created: '#00a870',
-  updated: '#4094f7',
-  deleted: '#e34d59',
-  verdict_changed: '#722ed1',
-  dreamer_action: '#ed7b2f',
-  consolidation: '#8c8c8c',
-  pruner: '#fa8c16',
-  health_check: '#0052d9',
+const ACTION_STYLE: Record<string, { icon: string; color: string }> = {
+  created: { icon: 'add-circle', color: '#00a870' },
+  patched: { icon: 'edit-1', color: '#4094f7' },
+  merged: { icon: 'merge-cells', color: '#722ed1' },
+  merged_into: { icon: 'merge-cells', color: '#8c8c8c' },
+  deleted: { icon: 'delete', color: '#e34d59' },
+  unmerged: { icon: 'rollback', color: '#ed7b2f' },
+  dreamed: { icon: 'lightbulb', color: '#ed7b2f' },
+  reclaimed: { icon: 'clear', color: '#fa8c16' },
 }
 
-const eventTypeLabels: Record<TimelineEventType, string> = {
-  created: 'created',
-  updated: 'updated',
-  deleted: 'deleted',
-  verdict_changed: 'verdictChanged',
-  dreamer_action: 'dreamer',
-  consolidation: 'consolidation',
-  pruner: 'pruner',
-  health_check: 'healthCheck',
+function actionIcon(action: string): string {
+  return ACTION_STYLE[action]?.icon ?? 'time'
 }
 
-function eventTypeIcon(type: string): string {
-  return eventTypeIcons[type as TimelineEventType] || 'time'
+function actionColor(action: string): string {
+  return ACTION_STYLE[action]?.color ?? '#8c8c8c'
 }
 
-function eventTypeColor(type: string): string {
-  return eventTypeColors[type as TimelineEventType] || '#8c8c8c'
-}
-
-function eventTypeLabel(type: string): string {
-  const key = `memory.history.eventTypes.${eventTypeLabels[type as TimelineEventType] || type}`
-  return t(key)
-}
-
-// -----------------------------------------------------------------------
-// Filtered events
-// -----------------------------------------------------------------------
-const allEvents = computed<TimelineEvent[]>(() => memoryStore.historyEvents)
-
-const filteredEvents = computed<TimelineEvent[]>(() => {
-  const typeFilter = memoryStore.historyFilterType
-  if (!typeFilter) return allEvents.value
-  return allEvents.value.filter((e) => e.type === typeFilter)
-})
-
-const pagedEvents = computed<TimelineEvent[]>(() => {
-  const { page, pageSize } = memoryStore.historyPagination
-  return filteredEvents.value.slice(0, page * pageSize)
-})
-
-const hasMoreEvents = computed(() => {
-  return pagedEvents.value.length < filteredEvents.value.length
-})
-
-const displayedCountLabel = computed(() => {
-  const shown = pagedEvents.value.length
-  const total = filteredEvents.value.length
-  if (shown === total) return t('memory.time.eventsShown', { shown, total })
-  return t('memory.time.eventsShown', { shown, total })
-})
-
-// -----------------------------------------------------------------------
-// Date grouping
-// -----------------------------------------------------------------------
 interface TimelineGroup {
   dateLabel: string
-  events: TimelineEvent[]
+  entries: MemoryAuditEntry[]
 }
 
-function formatDateLabel(timestamp: string): string {
-  const eventDate = new Date(timestamp)
+function dateLabel(timestamp: string): string {
+  const d = new Date(timestamp)
   const now = new Date()
-  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate())
-  const yesterday = new Date(today.getTime() - 86400000)
-  const eventDay = new Date(eventDate.getFullYear(), eventDate.getMonth(), eventDate.getDate())
-
-  if (eventDay.getTime() === today.getTime()) {
-    return t('memory.history.today')
-  }
-  if (eventDay.getTime() === yesterday.getTime()) {
-    return t('memory.history.yesterday')
-  }
-
-  return eventDate.toLocaleDateString(undefined, {
-    year: 'numeric',
-    month: 'short',
-    day: 'numeric',
-  })
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime()
+  const day = new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime()
+  if (day === today) return t('memory.history.today')
+  if (day === today - 86400000) return t('memory.history.yesterday')
+  return d.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })
 }
 
 const groupedTimeline = computed<TimelineGroup[]>(() => {
   const groups: TimelineGroup[] = []
-  let currentLabel = ''
-  let currentGroup: TimelineEvent[] = []
-
-  for (const event of pagedEvents.value) {
-    const label = formatDateLabel(event.timestamp)
-    if (label !== currentLabel) {
-      if (currentGroup.length > 0) {
-        groups.push({ dateLabel: currentLabel, events: currentGroup })
-      }
-      currentLabel = label
-      currentGroup = []
-    }
-    currentGroup.push(event)
+  for (const entry of entries.value) {
+    const label = dateLabel(entry.created_at)
+    const last = groups[groups.length - 1]
+    if (last && last.dateLabel === label) last.entries.push(entry)
+    else groups.push({ dateLabel: label, entries: [entry] })
   }
-
-  if (currentGroup.length > 0) {
-    groups.push({ dateLabel: currentLabel, events: currentGroup })
-  }
-
   return groups
 })
 
-// -----------------------------------------------------------------------
-// Time formatting
-// -----------------------------------------------------------------------
-function formatEventTime(timestamp: string): string {
+function formatTime(timestamp: string): string {
   const d = new Date(timestamp)
   if (isNaN(d.getTime())) return ''
-  return d.toLocaleTimeString(undefined, {
-    hour: '2-digit',
-    minute: '2-digit',
-  })
-}
-
-// -----------------------------------------------------------------------
-// Handlers
-// -----------------------------------------------------------------------
-function handleFilterChange(val: string | undefined) {
-  memoryStore.setHistoryFilter((val ?? '') as '' | TimelineEventType)
-}
-
-function handleLoadMore() {
-  memoryStore.loadMoreHistory()
-}
-
-function handleViewMemory(event: TimelineEvent) {
-  if (event.memory_id) {
-    emit('view-memory', event.memory_id)
-  }
-}
-
-function handleEventClick(event: TimelineEvent) {
-  // Also emit view memory on card click if memory_id exists
-  if (event.memory_id) {
-    emit('view-memory', event.memory_id)
-  }
+  return d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })
 }
 </script>
 
@@ -358,13 +209,13 @@ function handleEventClick(event: TimelineEvent) {
 }
 
 .empty-title {
-  font-size: 16px;
+  font-size: var(--app-text-xl);
   font-weight: 500;
   color: var(--td-text-color-primary);
 }
 
 .empty-desc {
-  font-size: 13px;
+  font-size: var(--app-text-md);
   color: var(--td-text-color-placeholder);
   text-align: center;
   max-width: 420px;
@@ -387,7 +238,7 @@ function handleEventClick(event: TimelineEvent) {
 }
 
 .event-count {
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   color: var(--td-text-color-placeholder);
   white-space: nowrap;
 }
@@ -421,7 +272,7 @@ function handleEventClick(event: TimelineEvent) {
 }
 
 .group-date-label {
-  font-size: 13px;
+  font-size: var(--app-text-md);
   font-weight: 600;
   color: var(--td-text-color-primary);
   white-space: nowrap;
@@ -480,9 +331,9 @@ function handleEventClick(event: TimelineEvent) {
   margin-bottom: 8px;
   background: var(--td-bg-color-container);
   border: 1px solid var(--td-component-stroke);
-  border-radius: 8px;
+  border-radius: var(--app-radius-md);
   cursor: pointer;
-  transition: box-shadow 0.2s ease;
+  transition: box-shadow var(--app-motion-base) ease;
   min-width: 0;
 }
 
@@ -504,7 +355,7 @@ function handleEventClick(event: TimelineEvent) {
 .event-type-badge {
   display: inline-block;
   padding: 1px 6px;
-  font-size: 10px;
+  font-size: var(--app-text-2xs);
   font-weight: 500;
   border-radius: 3px;
   line-height: 1.6;
@@ -516,7 +367,7 @@ function handleEventClick(event: TimelineEvent) {
   background: rgba(0, 168, 112, 0.08);
 }
 
-.event-type-badge.badge-updated {
+.event-type-badge.badge-patched {
   color: #4094f7;
   background: rgba(64, 148, 247, 0.08);
 }
@@ -526,34 +377,34 @@ function handleEventClick(event: TimelineEvent) {
   background: rgba(227, 77, 89, 0.08);
 }
 
-.event-type-badge.badge-verdict_changed {
+.event-type-badge.badge-merged {
   color: #722ed1;
   background: rgba(114, 46, 209, 0.08);
 }
 
-.event-type-badge.badge-dreamer_action {
+.event-type-badge.badge-merged_into {
   color: #ed7b2f;
   background: rgba(237, 123, 47, 0.08);
 }
 
-.event-type-badge.badge-consolidation {
+.event-type-badge.badge-unmerged {
   color: #8c8c8c;
   background: rgba(140, 140, 140, 0.08);
 }
 
-.event-type-badge.badge-pruner {
+.event-type-badge.badge-reclaimed {
   color: #fa8c16;
   background: rgba(250, 140, 22, 0.08);
 }
 
-.event-type-badge.badge-health_check {
+.event-type-badge.badge-dreamed {
   color: #0052d9;
   background: rgba(0, 82, 217, 0.08);
 }
 
 .event-timestamp {
   margin-left: auto;
-  font-size: 11px;
+  font-size: var(--app-text-xs);
   color: var(--td-text-color-placeholder);
   white-space: nowrap;
   flex-shrink: 0;
@@ -563,7 +414,7 @@ function handleEventClick(event: TimelineEvent) {
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: 13px;
+  font-size: var(--app-text-md);
   color: var(--td-text-color-primary);
   line-height: 1.5;
 }
@@ -580,14 +431,14 @@ function handleEventClick(event: TimelineEvent) {
   display: inline-flex;
   align-items: center;
   gap: 3px;
-  font-size: 11px;
+  font-size: var(--app-text-xs);
   color: var(--td-brand-color);
   cursor: pointer;
   white-space: nowrap;
   flex-shrink: 0;
   padding: 2px 6px;
-  border-radius: 4px;
-  transition: background 0.15s ease;
+  border-radius: var(--app-radius-xs);
+  transition: background var(--app-motion-fast) ease;
 }
 
 .event-memory-link:hover {
@@ -598,10 +449,10 @@ function handleEventClick(event: TimelineEvent) {
 .timeline-card-preview {
   margin-top: 4px;
   padding: 4px 8px;
-  font-size: 11px;
+  font-size: var(--app-text-xs);
   color: var(--td-text-color-placeholder);
   background: var(--td-bg-color-secondarycontainer);
-  border-radius: 4px;
+  border-radius: var(--app-radius-xs);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -616,5 +467,11 @@ function handleEventClick(event: TimelineEvent) {
   justify-content: center;
   padding: 12px 0 4px;
   flex-shrink: 0;
+}
+
+.event-actor {
+  margin-left: auto;
+  font-size: var(--app-text-sm);
+  color: var(--td-text-color-placeholder);
 }
 </style>

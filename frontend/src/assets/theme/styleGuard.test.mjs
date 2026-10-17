@@ -34,27 +34,24 @@ const RULES = [
     name: 'td-token-fallback',
     why: 'theme.css 保证 --td-* 令牌存在，fallback 永远不会生效且容易写错颜色',
     pattern: /var\(\s*--td-(?!purple-5|cyan-6|font-family-code)[A-Za-z0-9-]+\s*,/g,
-    // TODO(merge main->develop): Memory V2 views (views/memory/*.vue) add 28
+    // TODO(merge main->develop): Memory V2 views (views/memory/*.vue) add 26
     // occurrences. Clean those up to design tokens in a follow-up and lower
     // this back to 0 — see docs/_supermeo/_summary/002-merge-plan/.
-    baseline: 28,
+    baseline: 26,
   },
   {
     name: 'radius-literal',
     why: '圆角请用 var(--app-radius-xs|sm|md|lg|xl|pill)（4/6/8/10/12/999px）',
     pattern: /border(?:-[a-z]+)*-radius\s*:\s*\d+(?:\.\d+)?px/g,
-    // TODO(merge main->develop): Memory V2 views add 16 occurrences on top of
-    // main's 162. Clean those up in a follow-up and lower this back to 162.
-    baseline: 178,
+    // Memory V2 views use the radius tokens; the 4 left (1-3px) have no token.
+    baseline: 166,
   },
   {
     name: 'font-size-literal',
     why: '字号请用 var(--app-text-2xs … 4xl)（10~24px）',
     pattern: /font-size\s*:\s*\d+(?:\.\d+)?px/g,
-    // TODO(merge main->develop): Memory V2 views add 58 occurrences (all 6
-    // views/memory/*.vue files) on top of main's 32. Clean those up in a
-    // follow-up and lower this back down.
-    baseline: 90,
+    // Memory V2 views use the text tokens; one 28px heading has no token.
+    baseline: 33,
   },
   {
     name: 'motion-literal',

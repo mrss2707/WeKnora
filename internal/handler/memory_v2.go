@@ -379,12 +379,17 @@ func (h *MemoryV2Handler) TriggerDream(c *gin.Context) {
 	// A dream pass consolidates a whole tenant, so a shared KB's pass needs
 	// admin rights on that KB. The KB may arrive in the query or JSON body.
 	kbID := strings.TrimSpace(c.Query("kb_id"))
-	if kbID == "" && c.Request.Body != nil {
+	dryRun := c.Query("dry_run") == "true"
+	if c.Request.Body != nil && c.Request.ContentLength != 0 {
 		var body struct {
-			KbID string `json:"kb_id"`
+			KbID   string `json:"kb_id"`
+			DryRun bool   `json:"dry_run"`
 		}
 		if err := c.ShouldBindJSON(&body); err == nil {
-			kbID = strings.TrimSpace(body.KbID)
+			if kbID == "" {
+				kbID = strings.TrimSpace(body.KbID)
+			}
+			dryRun = dryRun || body.DryRun
 		}
 	}
 	ctx, tenantID, ok := h.scopeForKB(c, kbID, types.OrgRoleAdmin)
@@ -394,7 +399,14 @@ func (h *MemoryV2Handler) TriggerDream(c *gin.Context) {
 
 	var result *types.DreamResult
 	var err error
-	if scoped, ok := h.memorySvc.(interfaces.MemoryV2ScopedDreamer); ok && kbID != "" {
+	previewer, canPreview := h.memorySvc.(interfaces.MemoryV2DreamPreviewer)
+	if dryRun && (!canPreview || kbID == "") {
+		c.Error(errors.NewBadRequestError("dry_run requires kb_id"))
+		return
+	}
+	if dryRun {
+		result, err = previewer.PreviewDreamScope(ctx, tenantID, kbID)
+	} else if scoped, ok := h.memorySvc.(interfaces.MemoryV2ScopedDreamer); ok && kbID != "" {
 		result, err = scoped.ConsolidateDreamScope(ctx, tenantID, kbID)
 	} else {
 		result, err = h.memorySvc.ConsolidateDream(ctx, tenantID)

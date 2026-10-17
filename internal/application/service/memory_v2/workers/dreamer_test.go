@@ -350,6 +350,21 @@ func TestDreamer_DryRunAndNoApplierOnlyPropose(t *testing.T) {
 	assert.Zero(t, res.ActionsApplied, "without an applier nothing is written")
 }
 
+func TestDreamer_PreviewAppliesAndRecordsNothing(t *testing.T) {
+	reply := `{"actions":[{"type":"update_verdict","index":1,"new_verdict":"wip",` + conf + `}]}`
+	app := &recordingApplier{}
+	store := newDreamStore(dmem("a", types.VerdictNone, 1))
+	res, err := newDreamer(store, &scriptedChat{reply: reply}, app).PreviewScopePass(context.Background(), "1", "kb")
+	require.NoError(t, err)
+	assert.Equal(t, 1, res.ActionsProposed)
+	assert.Zero(t, res.ActionsApplied)
+	require.Len(t, res.Actions, 1, "the proposal is returned for review")
+	assert.Empty(t, app.patches, "a preview never writes")
+	assert.Empty(t, store.marked, "a preview does not mark memories reviewed")
+	assert.Empty(t, store.released, "a preview is not counted as a run")
+	assert.Empty(t, store.lockedBy, "the lock is released")
+}
+
 func TestDreamer_RemoveOnlyWhenAllowed(t *testing.T) {
 	reply := `{"actions":[{"type":"remove","index":1,` + conf + `}]}`
 	app := &recordingApplier{}

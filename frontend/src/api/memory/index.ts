@@ -40,6 +40,10 @@ export interface AgentMemory {
   updated_at: string
 }
 
+/** Content length bounds enforced by the backend (characters). */
+export const MEMORY_CONTENT_MIN = 10
+export const MEMORY_CONTENT_MAX = 10000
+
 /** Importance range enforced by the backend (PUT returns 400 outside it). */
 export const MEMORY_IMPORTANCE_MIN = -5
 export const MEMORY_IMPORTANCE_MAX = 6
@@ -56,8 +60,13 @@ export interface CreateMemoryRequest {
   session_id?: string
 }
 
-/** Partial metadata update. Content is not editable through PUT. */
+/**
+ * Partial update. Send the memory's `updated_at` as `expected_updated_at` to
+ * get a 409 instead of overwriting someone else's change.
+ */
 export interface UpdateMemoryRequest {
+  content?: string
+  expected_updated_at?: string
   memory_type?: string
   importance?: number
   tier?: number
@@ -108,6 +117,8 @@ export interface MemoryListParams {
   verdict?: string
   tier?: number
   keyword?: string
+  /** "me" lists only the caller's memories. */
+  author?: string
 }
 
 // -------------------------------------------------------------------------
@@ -217,7 +228,93 @@ export interface DreamResult {
 
 export interface TriggerDreamRequest {
   kb_id: string
+  /** Preview: return proposals without applying or recording anything. */
   dry_run?: boolean
+}
+
+export interface DreamStatus {
+  enabled: boolean
+  /** Background passes run (dreamer and worker kill switch both on). */
+  scheduled: boolean
+  dry_run: boolean
+  interval: string
+  runs: number
+  last_run_at?: string
+  running: boolean
+  /** Merge probation is over: merges are applied, not only proposed. */
+  merge_live: boolean
+  merge_live_after_runs: number
+  last_stats?: Record<string, unknown>
+}
+
+// -------------------------------------------------------------------------
+// Audit history
+// -------------------------------------------------------------------------
+
+export type MemoryAuditAction =
+  | 'created'
+  | 'patched'
+  | 'merged'
+  | 'merged_into'
+  | 'deleted'
+  | 'unmerged'
+  | 'dreamed'
+  | 'reclaimed'
+
+export const MEMORY_AUDIT_ACTIONS: MemoryAuditAction[] = [
+  'created',
+  'patched',
+  'merged',
+  'merged_into',
+  'deleted',
+  'unmerged',
+  'reclaimed',
+]
+
+/** The audited state of a memory (no embedding). */
+export interface MemoryAuditImage {
+  id: string
+  kb_id: string
+  user_id?: string
+  content: string
+  memory_type: string
+  importance: number
+  tier: number
+  verdict: MemoryVerdict
+  tags: string[] | null
+}
+
+export interface MemoryAuditEntry {
+  id: number
+  tenant_id: string
+  kb_id: string
+  memory_id: string
+  /** "user", a worker ("dreamer", "pruner", ...) or a machine principal. */
+  actor: string
+  user_id?: string
+  action: MemoryAuditAction | string
+  before?: MemoryAuditImage
+  after?: MemoryAuditImage
+  details?: Record<string, unknown>
+  created_at: string
+}
+
+export interface MemoryHistoryParams {
+  kb_id?: string
+  memory_id?: string
+  action?: string
+  page?: number
+  page_size?: number
+}
+
+export interface PaginatedHistoryResponse {
+  success?: boolean
+  data: {
+    items: MemoryAuditEntry[]
+    total: number
+    page: number
+    page_size: number
+  }
 }
 
 // -------------------------------------------------------------------------
@@ -268,7 +365,6 @@ export interface MemoryV2Config {
   recency_boost: RecencyBoostConfig
   token_budget: TokenBudgetConfig
   dreamer: DreamerConfig
-  cache_warmer: CacheWarmerConfig
   lint_on_write: LintOnWriteConfig
   hnsw_m: number
   hnsw_ef_construction: number
@@ -290,41 +386,11 @@ export interface RecencyBoostConfig {
   long_term_half_life: number
 }
 
-export interface CacheWarmerConfig {
-  enabled: boolean
-  top_queries_n: number
-  refresh_interval: string
-}
-
 export interface LintOnWriteConfig {
   enabled: boolean
   stale_threshold_days: number
   contradiction_threshold: number
   near_duplicate_threshold: number
-}
-
-// -------------------------------------------------------------------------
-// Timeline / History Event Types
-// -------------------------------------------------------------------------
-
-export type TimelineEventType =
-  | 'created'
-  | 'updated'
-  | 'deleted'
-  | 'verdict_changed'
-  | 'dreamer_action'
-  | 'consolidation'
-  | 'pruner'
-  | 'health_check'
-
-export interface TimelineEvent {
-  id: string
-  type: TimelineEventType
-  timestamp: string
-  description: string
-  memory_id?: string
-  memory_content_preview?: string
-  metadata?: Record<string, unknown>
 }
 
 // -------------------------------------------------------------------------
@@ -355,6 +421,7 @@ export function listMemories(params?: MemoryListParams) {
   if (params?.verdict) query.set('verdict', params.verdict)
   if (params?.tier != null) query.set('tier', String(params.tier))
   if (params?.keyword) query.set('keyword', params.keyword)
+  if (params?.author) query.set('author', params.author)
   const qs = query.toString()
   return get<PaginatedMemoriesResponse>(`/api/v1/memories${qs ? '?' + qs : ''}`)
 }
@@ -429,6 +496,27 @@ export function getHealthReport(kbId?: string) {
 /** Trigger the dreamer worker. */
 export function triggerDream(data: TriggerDreamRequest) {
   return post<{ data: DreamResult }>('/api/v1/memories/dream', data)
+}
+
+/** Get a knowledge base's dreamer settings and last run. */
+export function getDreamStatus(kbId: string) {
+  return get<{ data: DreamStatus }>(`/api/v1/memories/dream?kb_id=${encodeURIComponent(kbId)}`)
+}
+
+/** List the audit trail of a knowledge base or of one memory. */
+export function getMemoryHistory(params: MemoryHistoryParams) {
+  const query = new URLSearchParams()
+  if (params.kb_id) query.set('kb_id', params.kb_id)
+  if (params.memory_id) query.set('memory_id', params.memory_id)
+  if (params.action) query.set('action', params.action)
+  if (params.page != null) query.set('page', String(params.page))
+  if (params.page_size != null) query.set('page_size', String(params.page_size))
+  return get<PaginatedHistoryResponse>(`/api/v1/memories/history?${query.toString()}`)
+}
+
+/** Reverse the latest merge into a memory (Admin). */
+export function undoMemoryMerge(id: string) {
+  return post<{ data: AgentMemory }>(`/api/v1/memories/${encodeURIComponent(id)}/undo-merge`, {})
 }
 
 /** Get the memory backend status for the current tenant. */
