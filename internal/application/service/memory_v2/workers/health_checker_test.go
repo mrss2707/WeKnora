@@ -372,7 +372,7 @@ func TestHealthChecker_Contradictions_Detected(t *testing.T) {
 	require.Len(t, report.Issues, 1)
 	assert.Equal(t, "contradiction", report.Issues[0].Type)
 	assert.Equal(t, "mem-a", report.Issues[0].MemoryID)
-	assert.Equal(t, "high", report.Issues[0].Severity)
+	assert.Equal(t, "medium", report.Issues[0].Severity)
 	assert.Contains(t, report.Issues[0].Description, "mem-a")
 	assert.Contains(t, report.Issues[0].Description, "mem-b")
 }
@@ -433,7 +433,7 @@ func TestHealthChecker_Contradictions_DifferentTenantsNotCompared(t *testing.T) 
 // Check 4: Duplications — content prefix collision (first 20 chars)
 // ---------------------------------------------------------------------------
 
-func TestHealthChecker_Duplications_Detected(t *testing.T) {
+func TestHealthChecker_Duplications_SharedPrefixIsNotDuplicate(t *testing.T) {
 	memA := freshMemory("mem-a", "tenant-1", "The quick brown fox jumps over the lazy dog", []string{"fox"}, 3, 0)
 	memB := freshMemory("mem-b", "tenant-1", "The quick brown fox jumps over the sleeping cat", []string{"fox"}, 3, 0)
 
@@ -446,12 +446,7 @@ func TestHealthChecker_Duplications_Detected(t *testing.T) {
 
 	report, err := hc.AssessHealth(context.Background(), "tenant-1", "", 0)
 	require.NoError(t, err)
-	require.Len(t, report.Issues, 1)
-	assert.Equal(t, "duplication", report.Issues[0].Type)
-	assert.Equal(t, "mem-b", report.Issues[0].MemoryID)
-	assert.Equal(t, "medium", report.Issues[0].Severity)
-	assert.Contains(t, report.Issues[0].Description, "mem-a")
-	assert.Contains(t, report.Issues[0].Suggestion, "merge")
+	assert.Empty(t, report.Issues, "different assertions sharing a prefix are not duplicates")
 }
 
 func TestHealthChecker_Duplications_DifferentPrefixNotDuplicate(t *testing.T) {
@@ -500,14 +495,7 @@ func TestHealthChecker_Duplications_ThreeWithSamePrefix(t *testing.T) {
 
 	report, err := hc.AssessHealth(context.Background(), "tenant-1", "", 0)
 	require.NoError(t, err)
-	// mem-a is the first, so mem-b and mem-c are flagged as duplicates of mem-a
-	require.Len(t, report.Issues, 2)
-	assert.Equal(t, "mem-b", report.Issues[0].MemoryID)
-	assert.Equal(t, "mem-c", report.Issues[1].MemoryID)
-	for _, issue := range report.Issues {
-		assert.Equal(t, "duplication", issue.Type)
-		assert.Contains(t, issue.Description, "mem-a")
-	}
+	assert.Empty(t, report.Issues, "the shared prefix does not override different complete assertions")
 }
 
 // ---------------------------------------------------------------------------
@@ -569,11 +557,11 @@ func TestHealthChecker_GraphFragmentation_Exactly30Percent(t *testing.T) {
 	// 3 isolated, 7 connected = 30% exactly. Code uses > 30, so no issue.
 	all := make([]*types.MemorySearchResult, 0, 10)
 	for i := 0; i < 3; i++ {
-		m := freshMemory(fmt.Sprintf("iso-%d", i), "tenant-1", "Isolated", []string{"tag1"}, 0, 0)
+		m := freshMemory(fmt.Sprintf("iso-%d", i), "tenant-1", fmt.Sprintf("Isolated %d", i), []string{"tag1"}, 0, 0)
 		all = append(all, hcSearchResult(m))
 	}
 	for i := 0; i < 7; i++ {
-		m := freshMemory(fmt.Sprintf("conn-%d", i), "tenant-1", "Connected", []string{"tag1"}, 3, 5)
+		m := freshMemory(fmt.Sprintf("conn-%d", i), "tenant-1", fmt.Sprintf("Connected %d", i), []string{"tag1"}, 3, 5)
 		all = append(all, hcSearchResult(m))
 	}
 
@@ -825,7 +813,7 @@ func TestHealthChecker_runAllChecks_EmptyMemories(t *testing.T) {
 // Error resilience — repo search error handled gracefully
 // ---------------------------------------------------------------------------
 
-func TestHealthChecker_AssessHealth_SearchErrorReturnsNil(t *testing.T) {
+func TestHealthChecker_AssessHealth_SearchErrorPropagates(t *testing.T) {
 	repo := &mockHealthCheckerRepo{
 		searchFunc: func(ctx context.Context, filter *types.MemoryFilter) ([]*types.MemorySearchResult, int64, error) {
 			return nil, 0, assert.AnError
@@ -834,9 +822,8 @@ func TestHealthChecker_AssessHealth_SearchErrorReturnsNil(t *testing.T) {
 	hc := newTestHealthChecker(repo)
 
 	report, err := hc.AssessHealth(context.Background(), "tenant-1", "", 0)
-	require.NoError(t, err, "search error should be handled gracefully")
-	assert.Equal(t, 0, report.TotalIssues, "no issues when search fails")
-	assert.Empty(t, report.Issues)
+	require.ErrorIs(t, err, assert.AnError)
+	assert.Nil(t, report, "a failed scan must not look like a healthy report")
 }
 
 func TestHealthChecker_runAllChecks_SearchErrorGraceful(t *testing.T) {
@@ -875,9 +862,8 @@ func TestHealthChecker_AssessHealth_CancelledContext(t *testing.T) {
 	cancel()
 
 	report, err := hc.AssessHealth(ctx, "tenant-1", "", 0)
-	// With cancelled context, search returns ctx.Err(). runAllChecks logs and returns nil.
-	require.NoError(t, err, "should handle cancelled context gracefully")
-	assert.Equal(t, 0, report.TotalIssues)
+	require.ErrorIs(t, err, context.Canceled)
+	assert.Nil(t, report)
 }
 
 func TestHealthChecker_Run_PreCancelledContext(t *testing.T) {
@@ -1036,7 +1022,7 @@ func TestHealthChecker_AssessHealth_AllChecksInOneCall(t *testing.T) {
 	)
 	dupA := freshMemory("dup-a", "tenant-1", "Duplicate content prefix test memory A",
 		[]string{"dup"}, 3, 0)
-	dupB := freshMemory("dup-b", "tenant-1", "Duplicate content prefix test memory B",
+	dupB := freshMemory("dup-b", "tenant-1", "Duplicate content prefix test memory A",
 		[]string{"dup"}, 3, 0)
 	normal := freshMemory("normal-1", "tenant-1", "Normal memory with zero issues",
 		[]string{"general"}, 3, 0)

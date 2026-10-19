@@ -46,6 +46,13 @@ func (s *MemoryServiceV2Impl) RelinkKnowledgeBase(ctx context.Context, tenantID,
 			return res, err
 		}
 		for _, m := range page {
+			// An explicit admin relink also retries terminal failures. Persist the
+			// intent before the best-effort foreground pass so a restart is safe.
+			if jobs, ok := s.repo.(interfaces.MemoryV2GraphJobs); ok {
+				if err := jobs.EnqueueGraphLink(ctx, m); err != nil {
+					return res, err
+				}
+			}
 			res.Relations += s.autoLinker.LinkMemory(ctx, m)
 			res.Memories++
 		}

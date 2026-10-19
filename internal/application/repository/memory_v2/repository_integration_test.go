@@ -26,10 +26,13 @@ func memoryV2PostgresDB(t *testing.T) *gorm.DB {
 
 	root, err := gorm.Open(postgres.Open(dsn), &gorm.Config{SkipDefaultTransaction: true})
 	require.NoError(t, err)
+	pool, err := root.DB()
+	require.NoError(t, err)
 
 	schema := "memory_v2_test_" + regexp.MustCompile(`[^a-zA-Z0-9_]`).ReplaceAllString(uuid.New().String(), "_")
 	require.NoError(t, root.Exec(`CREATE SCHEMA `+schema).Error)
 	t.Cleanup(func() {
+		defer pool.Close()
 		require.NoError(t, root.Exec(`DROP SCHEMA IF EXISTS `+schema+` CASCADE`).Error)
 	})
 
@@ -38,6 +41,12 @@ func memoryV2PostgresDB(t *testing.T) *gorm.DB {
 	}
 	require.NoError(t, root.Exec(`SET search_path TO `+schema+`, public`).Error)
 	require.NoError(t, root.Exec(postgresMemoryV2IntegrationDDL).Error)
+	queueSQL, err := os.ReadFile("../../../../migrations/modules/memory_v2/postgres/900083_memory_v2_graph_jobs.up.sql")
+	require.NoError(t, err)
+	require.NoError(t, root.Exec(string(queueSQL)).Error)
+	settingsSQL, err := os.ReadFile("../../../../migrations/modules/memory_v2/postgres/900084_memory_v2_scope_settings.up.sql")
+	require.NoError(t, err)
+	require.NoError(t, root.Exec(string(settingsSQL)).Error)
 	return root
 }
 

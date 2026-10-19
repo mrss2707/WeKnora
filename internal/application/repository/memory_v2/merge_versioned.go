@@ -16,8 +16,9 @@ import (
 var _ interfaces.MemoryV2VersionedMergeStore = (*MemoryRepository)(nil)
 
 type mergeRelationSnapshot struct {
-	Restore []string `json:"restore_relation_ids"`
-	Remove  []string `json:"remove_relation_ids"`
+	Restore []string  `json:"restore_relation_ids"`
+	Remove  []string  `json:"remove_relation_ids"`
+	Keep    *[]string `json:"survivor_relation_ids"`
 }
 
 func lockMergeRows(tx *gorm.DB, tenantID string, ids []string, unscoped bool) (map[string]*types.AgentMemory, error) {
@@ -88,7 +89,8 @@ func (r *MemoryRepository) MergeIntoVersioned(ctx context.Context, before, after
 		if err := tx.Where("tenant_id = ? AND deleted_at IS NULL AND (from_uuid IN ? OR to_uuid IN ?)", before.TenantID, ids, ids).Clauses(clause.Locking{Strength: "UPDATE"}).Find(&edges).Error; err != nil {
 			return err
 		}
-		snapshot := mergeRelationSnapshot{Restore: []string{}, Remove: []string{}}
+		keep := []string{}
+		snapshot := mergeRelationSnapshot{Restore: []string{}, Remove: []string{}, Keep: &keep}
 		prior := map[string]bool{}
 		losersSet := map[string]bool{}
 		for _, id := range loserIDs {
@@ -96,6 +98,9 @@ func (r *MemoryRepository) MergeIntoVersioned(ctx context.Context, before, after
 		}
 		for _, edge := range edges {
 			prior[edge.ID] = true
+			if edge.FromUUID == before.ID || edge.ToUUID == before.ID {
+				keep = append(keep, edge.ID)
+			}
 			if losersSet[edge.FromUUID] || losersSet[edge.ToUUID] {
 				snapshot.Restore = append(snapshot.Restore, edge.ID)
 			}
@@ -127,6 +132,7 @@ func (r *MemoryRepository) MergeIntoVersioned(ctx context.Context, before, after
 				details = map[string]interface{}{}
 			}
 			details["restore_relation_ids"], details["remove_relation_ids"] = snapshot.Restore, snapshot.Remove
+			details["survivor_relation_ids"] = *snapshot.Keep
 			entry.Details, err = json.Marshal(details)
 			if err != nil {
 				return err
@@ -183,7 +189,17 @@ func (r *MemoryRepository) RestoreMergeVersioned(ctx context.Context, current, b
 		if err := NewMemoryRepository(tx).RestoreMerge(ctx, before, losers, audit); err != nil {
 			return err
 		}
-		if len(snapshot.Remove) > 0 {
+		if snapshot.Keep != nil {
+			// Derived edges may have been added by the async linker after the
+			// merge. Remove those too; jobs recompute against restored content.
+			q := tx.Where("tenant_id = ? AND (from_uuid = ? OR to_uuid = ?)", current.TenantID, current.ID, current.ID)
+			if len(*snapshot.Keep) > 0 {
+				q = q.Where("id NOT IN ?", *snapshot.Keep)
+			}
+			if err := q.Delete(&types.MemoryRelation{}).Error; err != nil {
+				return err
+			}
+		} else if len(snapshot.Remove) > 0 {
 			if err := tx.Where("tenant_id = ? AND id IN ? AND (from_uuid = ? OR to_uuid = ?)", current.TenantID, snapshot.Remove, current.ID, current.ID).Delete(&types.MemoryRelation{}).Error; err != nil {
 				return err
 			}

@@ -214,12 +214,17 @@ func (c *Client) ShareKnowledgeBase(ctx context.Context, kbID, orgID, permission
 // ModelSpec describes an OpenAI-compatible model endpoint.
 type ModelSpec struct {
 	Name, Type, BaseURL, APIKey string
-	Dimension                   int
+	// Provider defaults to "generic" (OpenAI-compatible, or Anthropic when the URL says so).
+	Provider  string
+	Dimension int
 }
 
 // CreateModel registers a remote model and returns its id.
 func (c *Client) CreateModel(ctx context.Context, m ModelSpec) (string, error) {
 	params := map[string]any{"base_url": m.BaseURL, "api_key": m.APIKey, "provider": "generic"}
+	if m.Provider != "" {
+		params["provider"] = m.Provider
+	}
 	if m.Dimension > 0 {
 		params["embedding_parameters"] = map[string]any{"dimension": m.Dimension}
 	}
@@ -228,6 +233,14 @@ func (c *Client) CreateModel(ctx context.Context, m ModelSpec) (string, error) {
 		"name": m.Name, "display_name": m.Name, "type": m.Type, "source": "remote", "parameters": params,
 	}, &resp)
 	return resp.Data.ID, err
+}
+
+// SetMemoryModelSettings chooses a knowledge base's Dreamer and text models
+// ("" keeps the knowledge base's summary model).
+func (c *Client) SetMemoryModelSettings(ctx context.Context, kbID, dreamerModelID, textModelID string) error {
+	return c.Do(ctx, http.MethodPut, "/api/v1/memories/settings", map[string]any{
+		"kb_id": kbID, "dreamer_model_id": dreamerModelID, "text_model_id": textModelID,
+	}, nil)
 }
 
 // KnowledgeBase is the subset of a knowledge base the tests use.

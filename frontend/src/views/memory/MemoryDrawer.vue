@@ -74,15 +74,23 @@
       <div class="drawer-section">
         <label class="drawer-section-label">{{ $t('memory.drawer.importance') }}</label>
         <div class="drawer-importance" data-testid="memory-importance">
-          <t-icon
+          <button
             v-for="i in MEMORY_IMPORTANCE_MAX"
             :key="i"
-            :name="i <= localMemory.importance ? 'star-filled' : 'star'"
-            :class="['star-icon', 'importance-star', { filled: i <= localMemory.importance }]"
+            type="button"
+            class="importance-choice"
+            :disabled="!canEdit || saving"
+            :aria-label="`${$t('memory.drawer.importance')}: ${i}`"
+            :aria-pressed="i === localMemory.importance"
             :data-testid="`memory-importance-${i}`"
-            size="18px"
             @click="handleImportanceClick(i)"
-          />
+          >
+            <t-icon
+              :name="i <= localMemory.importance ? 'star-filled' : 'star'"
+              :class="['star-icon', 'importance-star', { filled: i <= localMemory.importance }]"
+              size="18px"
+            />
+          </button>
           <span class="importance-value">{{ localMemory.importance }}/{{ MEMORY_IMPORTANCE_MAX }}</span>
         </div>
       </div>
@@ -600,6 +608,21 @@ function handleClose() {
   display: flex;
   align-items: center;
   gap: 2px;
+}
+
+.importance-choice {
+  display: inline-flex;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+
+  &:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+    pointer-events: none;
+  }
 }
 
 .importance-star {

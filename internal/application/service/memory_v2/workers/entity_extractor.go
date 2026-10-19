@@ -3,6 +3,7 @@ package workers
 import (
 	"context"
 	"encoding/json"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -24,6 +25,15 @@ type EntityExtractor struct {
 	buffer    []*types.AgentMemory
 	ticker    *time.Ticker
 	batchSize int
+	// callTimeout bounds one model call (extractorModelTimeout when zero).
+	callTimeout time.Duration
+}
+
+func (e *EntityExtractor) modelTimeout() time.Duration {
+	if e.callTimeout > 0 {
+		return e.callTimeout
+	}
+	return extractorModelTimeout
 }
 
 // NewEntityExtractor creates a new EntityExtractor.
@@ -111,7 +121,7 @@ func (e *EntityExtractor) flush(ctx context.Context) {
 		groups[sc] = append(groups[sc], m)
 	}
 	for _, sc := range order {
-		ch, err := e.resolver.Chat(ctx, sc.TenantID, sc.KbID)
+		ch, err := chatForPurpose(ctx, e.resolver, sc, types.MemoryModelPurposeText)
 		if err != nil {
 			logger.Errorf(ctx, "entity extractor: resolve chat model for %s/%s: %v", sc.TenantID, sc.KbID, err)
 			continue
@@ -152,16 +162,18 @@ Output ONLY valid JSON array:
 Memories:
 ` + contentBlock
 
-	resp, err := chatModel.Chat(ctx, []chat.Message{
+	callCtx, cancelCall := context.WithTimeout(ctx, e.modelTimeout())
+	resp, err := chatModel.Chat(callCtx, []chat.Message{
 		{Role: "user", Content: prompt},
 	}, nil)
+	cancelCall()
 	if err != nil {
 		logger.Errorf(ctx, "entity extraction batch LLM call failed: %v", err)
 		return
 	}
 
 	var extracted []entityBatchResult
-	if err := json.Unmarshal([]byte(resp.Content), &extracted); err != nil {
+	if err := json.Unmarshal([]byte(entityJSON(resp.Content)), &extracted); err != nil {
 		logger.Errorf(ctx, "entity extraction parse failed: %v", err)
 		return
 	}
@@ -215,4 +227,15 @@ type extractedEntity struct {
 
 func formatBatchItem(index int, id, content string) string {
 	return "[" + id + "] " + content + "\n"
+}
+
+var jsonArray = regexp.MustCompile(`(?s)\[.*\]`)
+
+// entityJSON extracts the JSON array from a reply, tolerating code fences and
+// surrounding prose that hosted models often add.
+func entityJSON(reply string) string {
+	if raw := jsonArray.FindString(reply); raw != "" {
+		return raw
+	}
+	return reply
 }

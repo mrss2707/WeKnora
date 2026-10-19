@@ -265,7 +265,7 @@ func (c *Client) applySampling(body map[string]any, opts *api.Options) {
 		body["temperature"] = *s.FixedTemperature
 		return
 	}
-	if opts.Temperature > 0 {
+	if opts.HasTemperature() {
 		body["temperature"] = opts.Temperature
 	}
 	if opts.TopP > 0 {

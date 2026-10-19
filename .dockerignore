@@ -53,6 +53,11 @@ data/*.db-wal
 data/*.db-shm
 test/data/mswag.txt
 
+# Memory V2 E2E private runtime state must never enter build contexts or images.
+e2e/memory_v2/.run/
+e2e/memory_v2/seed-output.json
+backups/
+
 # 敏感文件
 .env
 .env.lite

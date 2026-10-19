@@ -21,6 +21,20 @@ type ModelResolver interface {
 	Chat(ctx context.Context, tenantID, kbID string) (chat.Chat, error)
 }
 
+// PurposeChatResolver is optionally implemented by a ModelResolver to honor a
+// knowledge base's per-task model choice.
+type PurposeChatResolver interface {
+	ChatFor(ctx context.Context, tenantID, kbID string, purpose types.MemoryModelPurpose) (chat.Chat, error)
+}
+
+// chatForPurpose prefers the purpose-aware resolver.
+func chatForPurpose(ctx context.Context, r ModelResolver, sc Scope, purpose types.MemoryModelPurpose) (chat.Chat, error) {
+	if pr, ok := r.(PurposeChatResolver); ok {
+		return pr.ChatFor(ctx, sc.TenantID, sc.KbID, purpose)
+	}
+	return r.Chat(ctx, sc.TenantID, sc.KbID)
+}
+
 // listScopes returns the live scopes, or nil when the repository cannot
 // enumerate them.
 func listScopes(ctx context.Context, repo interface{}) ([]Scope, error) {

@@ -91,6 +91,7 @@ test('dynamic Memory V2 labels exist in every locale', () => {
       'semantic',
       'stale',
       'verdict_consistency',
+      'dreamer_model_unavailable',
     ].map((i) => `memory.health.issueTypes.${i}`),
     ...['critical', 'high', 'medium', 'low'].map((s) => `memory.health.severities.${s}`),
     ...['0', '1', '2', '3'].map((n) => `memory.tierHints.${n}`),

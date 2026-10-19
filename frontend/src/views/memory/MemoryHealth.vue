@@ -5,6 +5,11 @@
       <t-loading :text="$t('memory.health.loading')" size="large" />
     </div>
 
+    <t-alert v-else-if="memoryStore.healthFailed" theme="error" data-testid="memory-health-error">
+      {{ $t('memory.health.assessmentFailed') }}
+      <t-button variant="text" @click="memoryStore.loadHealth(kbId)">{{ $t('memory.health.retryAssessment') }}</t-button>
+    </t-alert>
+
     <!-- Empty state (no data) -->
     <div v-else-if="!healthReport" class="empty-state">
       <t-icon name="info-circle" size="48px" class="empty-icon" />
@@ -14,6 +19,19 @@
 
     <!-- Content -->
     <template v-else>
+      <t-alert :theme="assessmentPartial ? 'warning' : 'info'" data-testid="memory-health-coverage">
+        <p>{{ coverageSummary }}</p>
+        <p>{{ $t('memory.health.heuristicNotice') }}</p>
+        <p v-if="assessmentPartial">{{ $t('memory.health.incompleteAssessment') }}</p>
+        <ul v-if="coverageReasons.length">
+          <li v-for="reason in coverageReasons" :key="reason">{{ $t(`memory.health.coverageReasons.${reason}`) }}</li>
+        </ul>
+        <ul v-if="incompleteChecks.length" data-testid="memory-health-incomplete-checks">
+          <li v-for="check in incompleteChecks" :key="check.name">
+            {{ issueTypeLabel(check.issueType) }}: {{ $t(`memory.health.checkReasons.${check.reason}`) }}
+          </li>
+        </ul>
+      </t-alert>
       <!-- Metric cards -->
       <div class="metric-cards">
         <div class="metric-card">
@@ -201,6 +219,7 @@ import { useI18n } from 'vue-i18n'
 import { useMemoryStore } from '@/stores/memory'
 import type { HealthReport, MemoryHealthIssue, MemoryStats } from '@/api/memory/index'
 import { useMemoryLabels } from './useMemoryLabels'
+import { healthCoverageState } from './memoryHealthCoverage'
 
 const props = defineProps<{
   kbId: string
@@ -232,6 +251,13 @@ watch(
 // Derived data
 // -----------------------------------------------------------------------
 const healthReport = computed<HealthReport | null>(() => memoryStore.healthReport)
+const coverageState = computed(() => healthCoverageState(healthReport.value))
+const assessmentPartial = computed(() => coverageState.value.partial)
+const incompleteChecks = computed(() => coverageState.value.checks)
+const coverageReasons = computed(() => coverageState.value.reasons)
+const coverageSummary = computed(() => healthReport.value?.coverage && healthReport.value.coverage.limit > 0
+  ? t('memory.health.coverageSummary', healthReport.value.coverage)
+  : t('memory.health.coverageUnknown'))
 const stats = computed<MemoryStats | null>(() => memoryStore.stats)
 
 // Metric card values
@@ -369,6 +395,7 @@ const ISSUE_TYPES = [
   'semantic',
   'stale',
   'verdict_consistency',
+  'dreamer_model_unavailable',
 ]
 
 function issueTypeLabel(type: string): string {

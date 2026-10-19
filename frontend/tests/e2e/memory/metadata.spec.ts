@@ -29,6 +29,7 @@ test('drawer updates tags, importance and verdict with optimistic versions', asy
   await page.goto(kbPath())
   const id = world.memories['acme-eng'].vi_minio
   const before = (await (await api(page, 'GET', `/memories/${id}`)).json()).data
+  const targetImportance = before.importance === 2 ? 3 : 2
   const input = page.getByTestId('memory-search').locator('input')
   await input.fill('bucket MinIO')
   await input.press('Enter')
@@ -45,14 +46,14 @@ test('drawer updates tags, importance and verdict with optimistic versions', asy
     expect(response.request().postDataJSON().expected_updated_at).toBeTruthy()
     expect((await response.json()).data.tags).toContain('ui-metadata-check')
     const changed = page.waitForResponse(r => r.url().endsWith(`/memories/${id}`) && r.request().method() === 'PUT')
-    await page.getByTestId('memory-importance-2').click()
+    await page.getByTestId(`memory-importance-${targetImportance}`).click()
     expect((await changed).ok()).toBeTruthy()
     await page.getByTestId('memory-verdict').click()
     const verdict = page.waitForResponse(r => r.url().endsWith(`/memories/${id}`) && r.request().method() === 'PUT')
     await page.getByText('Cạm bẫy', { exact: true }).last().click()
     expect((await verdict).ok()).toBeTruthy()
     const after = (await (await api(page, 'GET', `/memories/${id}`)).json()).data
-    expect(after.importance).toBe(2)
+    expect(after.importance).toBe(targetImportance)
     expect(after.verdict).toBe('gotcha')
     expect(after.content).toBe(before.content)
     expect(after.tags).toContain('ui-metadata-check')

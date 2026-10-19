@@ -28,25 +28,14 @@ func (h *HealthChecker) Run(ctx context.Context) {
 	h.runChecks(ctx)
 
 	for {
-		// Calculate time until next 4:00 AM
 		now := time.Now()
-		next := time.Date(now.Year(), now.Month(), now.Day(), 4, 0, 0, 0, now.Location())
-		if now.After(next) {
-			next = next.AddDate(0, 0, 1)
-		}
-		delay := next.Sub(now)
+		delay := nextHealthRun(now).Sub(now)
 
 		select {
 		case <-ctx.Done():
 			return
 		case <-time.After(delay):
 			h.runChecks(ctx)
-
-			select {
-			case <-ctx.Done():
-				return
-			case <-time.After(24 * time.Hour):
-			}
 		}
 	}
 }
@@ -54,21 +43,7 @@ func (h *HealthChecker) Run(ctx context.Context) {
 // AssessHealth runs all 7 health checks and returns the issues.
 // This is the public entry point called from the HTTP handler.
 func (h *HealthChecker) AssessHealth(ctx context.Context, tenantID, kbID string, embedderDim int) (*types.HealthReport, error) {
-	issues := h.runAllChecks(ctx, tenantID, kbID, embedderDim)
-
-	report := &types.HealthReport{
-		TenantID:    tenantID,
-		CheckedAt:   time.Now(),
-		TotalIssues: len(issues),
-		BySeverity:  make(map[string]int),
-		Issues:      issues,
-	}
-
-	for _, issue := range issues {
-		report.BySeverity[issue.Severity]++
-	}
-
-	return report, nil
+	return h.runAllChecks(ctx, tenantID, kbID, embedderDim)
 }
 
 // runChecks runs all health checks for every (tenant, knowledge base) scope
@@ -89,7 +64,12 @@ func (h *HealthChecker) runChecks(ctx context.Context) {
 		if sc.TenantID == "" {
 			continue
 		}
-		issues = append(issues, h.runAllChecks(ctx, sc.TenantID, sc.KbID, 0)...)
+		report, err := h.runAllChecks(ctx, sc.TenantID, sc.KbID, 0)
+		if err != nil {
+			logger.Errorf(ctx, "health-checker: assessment failed: %v", err)
+			continue
+		}
+		issues = append(issues, report.Issues...)
 	}
 
 	total := len(issues)
@@ -107,59 +87,6 @@ func (h *HealthChecker) runChecks(ctx context.Context) {
 	if criticalCount > 0 {
 		logger.Warnf(ctx, "health-checker: %d critical issues detected", criticalCount)
 	}
-}
-
-// runAllChecks executes all 7 health check rules.
-func (h *HealthChecker) runAllChecks(ctx context.Context, tenantID, kbID string, embedderDim int) []*types.MemoryHealthIssue {
-	var allIssues []*types.MemoryHealthIssue
-
-	// Fetch memories
-	filter := &types.MemoryFilter{
-		TenantID: tenantID,
-		KbID:     kbID,
-		Limit:    1000,
-	}
-	results, _, err := h.repo.Search(ctx, filter)
-	if err != nil {
-		logger.Errorf(ctx, "health-checker: search failed: %v", err)
-		return nil
-	}
-
-	memories := make([]*types.AgentMemory, 0, len(results))
-	for _, r := range results {
-		if r.Memory != nil {
-			memories = append(memories, r.Memory)
-		}
-	}
-
-	if len(memories) == 0 {
-		return nil
-	}
-
-	// Check 1: Orphans — memories with zero tags and zero relations
-	allIssues = append(allIssues, h.checkOrphans(memories)...)
-
-	// Check 2: Stale facts — >180d old, importance < 1, not accessed >90d
-	allIssues = append(allIssues, h.checkStaleFacts(memories)...)
-
-	// Check 3: Contradictions — high cosine similarity with opposite information
-	allIssues = append(allIssues, h.checkContradictions(memories)...)
-
-	// Check 4: Duplications — fingerprint collisions or very high similarity
-	allIssues = append(allIssues, h.checkDuplications(memories)...)
-
-	// Check 5: Graph fragmentation — ratio of isolated nodes
-	allIssues = append(allIssues, h.checkGraphFragmentation(memories)...)
-
-	// Check 6: Verdict consistency — WIP memories unchanged for >30 days
-	allIssues = append(allIssues, h.checkVerdictConsistency(memories)...)
-
-	// Check 7: Embedding dimension mismatch
-	if storedDim, err := h.repo.GetEmbeddingDimension(ctx, tenantID); err == nil && storedDim > 0 && embedderDim > 0 {
-		allIssues = append(allIssues, h.checkEmbeddingDimension(storedDim, embedderDim)...)
-	}
-
-	return allIssues
 }
 
 // checkOrphans detects memories with zero tags and zero relations.
@@ -186,7 +113,8 @@ func (h *HealthChecker) checkStaleFacts(memories []*types.AgentMemory) []*types.
 	var issues []*types.MemoryHealthIssue
 	for _, mem := range memories {
 		age := now.Sub(mem.CreatedAt)
-		if age.Hours() > 180*24 && mem.Importance < 1 {
+		recentlyAccessed := mem.LastAccessedAt != nil && now.Sub(*mem.LastAccessedAt) <= 90*24*time.Hour
+		if age.Hours() > 180*24 && mem.Importance < 1 && !recentlyAccessed {
 			issues = append(issues, &types.MemoryHealthIssue{
 				Type:        "stale",
 				MemoryID:    mem.ID,
@@ -199,56 +127,26 @@ func (h *HealthChecker) checkStaleFacts(memories []*types.AgentMemory) []*types.
 	return issues
 }
 
-// checkContradictions detects memory pairs with high similarity but different
-// stances (e.g., one says X, another says not X).
-func (h *HealthChecker) checkContradictions(memories []*types.AgentMemory) []*types.MemoryHealthIssue {
-	var issues []*types.MemoryHealthIssue
-	// Simplified check: look for similar content that might contradict
-	// In production, this would use embeddings and cosine similarity comparison
-	for i := 0; i < len(memories); i++ {
-		for j := i + 1; j < len(memories); j++ {
-			a, b := memories[i], memories[j]
-			if a.TenantID != b.TenantID {
-				continue
-			}
-			// Check for "not" or "never" in one but not the other
-			if containsNegation(a.Content) != containsNegation(b.Content) {
-				issues = append(issues, &types.MemoryHealthIssue{
-					Type:        "contradiction",
-					MemoryID:    a.ID,
-					Description: fmt.Sprintf("Potential contradiction between memories %s and %s", a.ID, b.ID),
-					Severity:    "high",
-					Suggestion:  "Review both memories for factual consistency",
-				})
-				break
-			}
-		}
-	}
-	return issues
-}
-
-// checkDuplications detects fingerprint collisions or very high similarity.
+// checkDuplications compares complete normalized content within one KB. A
+// shared prefix alone does not establish duplication.
 func (h *HealthChecker) checkDuplications(memories []*types.AgentMemory) []*types.MemoryHealthIssue {
 	var issues []*types.MemoryHealthIssue
-	seen := make(map[string]string) // content hash -> memory ID
-
+	type key struct{ tenant, kb, content string }
+	seen := make(map[key]string)
 	for _, mem := range memories {
-		runes := []rune(mem.Content)
-		if len(runes) < 20 {
+		content := strings.Join(strings.Fields(normalizedAssertionText(mem.Content)), " ")
+		if content == "" {
 			continue
 		}
-		// Simple content prefix hash
-		prefix := string(runes[:20])
-		if existingID, ok := seen[prefix]; ok {
+		k := key{mem.TenantID, mem.KbID, content}
+		if existingID, ok := seen[k]; ok && existingID != mem.ID {
 			issues = append(issues, &types.MemoryHealthIssue{
-				Type:        "duplication",
-				MemoryID:    mem.ID,
-				Description: fmt.Sprintf("Possible duplicate of memory %s (similar content prefix)", existingID),
-				Severity:    "medium",
-				Suggestion:  "Review and merge if truly duplicate",
+				Type: "duplication", MemoryID: mem.ID,
+				Description: fmt.Sprintf("Possible duplicate of memory %s (same normalized content)", existingID),
+				Severity:    "medium", Suggestion: "Review and merge if truly duplicate",
 			})
 		} else {
-			seen[prefix] = mem.ID
+			seen[k] = mem.ID
 		}
 	}
 	return issues
@@ -334,34 +232,4 @@ func (h *HealthChecker) checkEmbeddingDimension(storedDim, embedderDim int) []*t
 		}}
 	}
 	return nil
-}
-
-// containsNegation checks if content contains negation words.
-func containsNegation(content string) bool {
-	negations := []string{"not", "never", "no", "cannot", "can't", "don't", "doesn't"}
-	lower := strings.ToLower(content)
-	for _, n := range negations {
-		start := 0
-		for {
-			idx := strings.Index(lower[start:], n)
-			if idx == -1 {
-				break
-			}
-			absIdx := start + idx
-			endIdx := absIdx + len(n)
-			// Word must be at start or preceded by non-letter
-			prevOk := absIdx == 0 || !isLetter(rune(lower[absIdx-1]))
-			// Word must be at end or followed by non-letter
-			nextOk := endIdx >= len(lower) || !isLetter(rune(lower[endIdx]))
-			if prevOk && nextOk {
-				return true
-			}
-			start = endIdx
-		}
-	}
-	return false
-}
-
-func isLetter(r rune) bool {
-	return (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z')
 }

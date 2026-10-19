@@ -42,7 +42,16 @@ func (r *MemoryRepository) UpdateFieldsAndAudit(ctx context.Context, tenantID, i
 		if entry == nil {
 			return fmt.Errorf("memory_v2: audit entry required")
 		}
-		return recordAudit(tx, []*types.MemoryAuditEntry{entry})
+		if err := recordAudit(tx, []*types.MemoryAuditEntry{entry}); err != nil {
+			return err
+		}
+		_, contentChanged := fields["content"]
+		_, embeddingChanged := fields["embedding"]
+		_, verdictChanged := fields["verdict"]
+		if contentChanged || embeddingChanged || verdictChanged {
+			return enqueueGraphLink(tx, after)
+		}
+		return nil
 	})
 	if err != nil {
 		return nil, err

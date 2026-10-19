@@ -35,9 +35,9 @@ func pgServiceDB(t *testing.T) *gorm.DB {
 		_ = db.Exec(`CREATE EXTENSION IF NOT EXISTS ` + ext).Error
 	}
 	require.NoError(t, db.Exec(`CREATE SCHEMA `+schema).Error)
-	t.Cleanup(func() { db.Exec(`DROP SCHEMA ` + schema + ` CASCADE`) })
+	t.Cleanup(func() { defer sqlDB.Close(); db.Exec(`DROP SCHEMA ` + schema + ` CASCADE`) })
 	require.NoError(t, db.Exec(`SET search_path TO `+schema+`, public`).Error)
-	for _, f := range []string{"900074_memory_v2", "900075_memory_v2_verdict", "900076_memory_v2_hnsw", "900079_memory_v2_audit", "900080_memory_v2_access_trigger", "900081_memory_v2_dreamer_scope", "900082_memory_v2_dreamer_budget"} {
+	for _, f := range []string{"900074_memory_v2", "900075_memory_v2_verdict", "900076_memory_v2_hnsw", "900079_memory_v2_audit", "900080_memory_v2_access_trigger", "900081_memory_v2_dreamer_scope", "900082_memory_v2_dreamer_budget", "900083_memory_v2_graph_jobs", "900084_memory_v2_scope_settings"} {
 		sql, err := os.ReadFile("../../../../migrations/modules/memory_v2/postgres/" + f + ".up.sql")
 		require.NoError(t, err)
 		require.NoError(t, db.Exec(string(sql)).Error, f)
@@ -104,12 +104,20 @@ func TestGraph_EndToEndOnPostgres(t *testing.T) {
 	assert.NotEmpty(t, ov.Relations)
 	assert.Equal(t, ids["b"], ov.Nodes[0].ID, "the most connected memory leads the overview")
 
-	// Relink is idempotent on an already-linked KB and rebuilds wiped edges.
+	// Relink is idempotent, rebuilds wiped edges and requeues exhausted jobs.
+	require.NoError(t, db.Exec(`UPDATE extraction_queue SET status = 'failed', attempts = max_attempts WHERE memory_uuid = ? AND job_type = 'graph_link'`, ids["a"]).Error)
 	before := relCount
 	require.NoError(t, db.Exec(`UPDATE memory_relations SET deleted_at = now()`).Error)
 	res, err := svc.RelinkKnowledgeBase(ctx, "1", "kb")
 	require.NoError(t, err)
 	assert.Equal(t, 4, res.Memories)
+	var job struct {
+		Status   string
+		Attempts int
+	}
+	require.NoError(t, db.Raw(`SELECT status, attempts FROM extraction_queue WHERE memory_uuid = ? AND job_type = 'graph_link'`, ids["a"]).Scan(&job).Error)
+	assert.Equal(t, "pending", job.Status)
+	assert.Zero(t, job.Attempts)
 	require.NoError(t, db.Table("memory_relations").Where("deleted_at IS NULL").Count(&relCount).Error)
 	assert.Equal(t, before, relCount, "relink restores the same edges")
 	res, err = svc.RelinkKnowledgeBase(ctx, "1", "kb")

@@ -49,7 +49,9 @@ type cachedClient struct {
 type modelResolver struct {
 	modelService interfaces.ModelService
 	kbs          KBModelLookup
-	now          func() time.Time
+	// settings holds per-KB model choices (nil = KB summary model only).
+	settings interfaces.MemoryV2ScopeSettingsStore
+	now      func() time.Time
 
 	mu    sync.Mutex
 	cache map[string]cachedClient
@@ -155,27 +157,30 @@ func (r *modelResolver) Embedder(ctx context.Context, tenantID, kbID string) (em
 	return emb, modelID, nil
 }
 
-// Chat returns the chat model for a scope.
+// Chat returns the text-task chat model for a scope.
 func (r *modelResolver) Chat(ctx context.Context, tenantID, kbID string) (chat.Chat, error) {
+	return r.ChatFor(ctx, tenantID, kbID, types.MemoryModelPurposeText)
+}
+
+// ChatFor returns the chat model of a purpose; see chatModelFor for the order.
+func (r *modelResolver) ChatFor(ctx context.Context, tenantID, kbID string, purpose types.MemoryModelPurpose) (chat.Chat, error) {
 	if r == nil || r.modelService == nil {
 		return nil, fmt.Errorf("memory V2: model service not available")
 	}
-	scope, err := r.scopeModels(ctx, tenantID, kbID)
+	effective, tid, err := r.chatModelFor(ctx, tenantID, kbID, purpose)
 	if err != nil {
 		return nil, err
 	}
-	modelID := scope.chatModelID
-	if modelID == "" {
-		if modelID, err = r.firstModelOfType(ctx, scope.tenantID, types.ModelTypeKnowledgeQA); err != nil {
-			return nil, err
-		}
-	}
-	key := fmt.Sprintf("chat|%d|%s", scope.tenantID, modelID)
+	modelID := effective.ModelID
+	key := fmt.Sprintf("chat|%d|%s", tid, modelID)
 	if v, ok := r.cached(key); ok {
 		return v.(chat.Chat), nil
 	}
-	ch, err := r.modelService.GetChatModel(tenantCtx(ctx, scope.tenantID), modelID)
+	ch, err := r.modelService.GetChatModel(tenantCtx(ctx, tid), modelID)
 	if err != nil {
+		if effective.Source == types.MemoryModelSourceSetting {
+			return nil, fmt.Errorf("%w: %s", types.ErrMemoryModelUnavailable, modelID)
+		}
 		return nil, fmt.Errorf("memory V2: chat model %s: %w", modelID, err)
 	}
 	if ch == nil {

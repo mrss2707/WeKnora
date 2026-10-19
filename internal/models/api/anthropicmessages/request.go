@@ -198,7 +198,7 @@ func (c *Client) BuildRequestBody(messages []api.Message, opts *api.Options, str
 	body["max_tokens"] = maxTokens
 
 	if opts != nil {
-		if s.SupportsTemperature && opts.Temperature > 0 && (!plan.enabled || s.TemperatureWithThinking) {
+		if s.SupportsTemperature && opts.HasTemperature() && (!plan.enabled || s.TemperatureWithThinking) {
 			body["temperature"] = opts.Temperature
 		} else if s.SupportsTopP && opts.TopP > 0 && !plan.enabled {
 			// temperature and top_p are mutually exclusive on current models;

@@ -173,11 +173,16 @@ type scriptedChat struct {
 	prompt string
 	opts   *chat.ChatOptions
 	calls  int
+	// during runs while the model is "thinking", before the reply returns.
+	during func()
 }
 
 func (c *scriptedChat) Chat(_ context.Context, msgs []chat.Message, opts *chat.ChatOptions) (*types.ChatResponse, error) {
 	c.calls++
 	c.prompt, c.opts = msgs[len(msgs)-1].Content, opts
+	if c.during != nil {
+		c.during()
+	}
 	return &types.ChatResponse{Content: c.reply}, c.err
 }
 func (c *scriptedChat) ChatStream(context.Context, []chat.Message, *chat.ChatOptions) (<-chan types.StreamResponse, error) {
@@ -335,11 +340,10 @@ func TestDreamer_MergeIsProbationaryAndServerVerified(t *testing.T) {
 func TestDreamer_SkipsMemoriesChangedAfterReview(t *testing.T) {
 	store := newDreamStore(dmem("a", types.VerdictNone, 1))
 	llm := &scriptedChat{reply: `{"actions":[{"type":"update_verdict","index":1,"new_verdict":"wip",` + conf + `}]}`}
-	d := newDreamer(store, llm, &recordingApplier{})
-	// A user edits the memory while the model is thinking.
-	store.mems["a"].UpdatedAt = time.Now().Add(time.Hour)
 	app := &recordingApplier{}
-	d.WithApplier(app)
+	d := newDreamer(store, llm, app)
+	// A user edits the memory while the model is thinking.
+	llm.during = func() { store.mems["a"].UpdatedAt = time.Now().Add(time.Hour) }
 
 	res, err := d.RunScopePass(context.Background(), "1", "kb")
 

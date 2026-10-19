@@ -15,11 +15,6 @@ CREATE TABLE knowledge_bases (
     tenant_id INTEGER NOT NULL,
     deleted_at TIMESTAMPTZ
 );
-CREATE TABLE extraction_queue (
-    id VARCHAR(36) PRIMARY KEY DEFAULT gen_random_uuid()::text,
-    tenant_id VARCHAR(36) NOT NULL,
-    memory_uuid VARCHAR(36) NOT NULL
-);
 CREATE TABLE agent_memories_scope_repair_log (
     id BIGSERIAL PRIMARY KEY,
     memory_id VARCHAR(36) NOT NULL,
@@ -51,7 +46,7 @@ func TestKBScopeRepairMovesMismatchedRowsToOwnerTenant(t *testing.T) {
 	seedMemory(t, db, "m-own", "2", "kb-own", "fp-own")         // own KB, correct
 	seedMemory(t, db, "m-orphan", "3", "kb-missing", "fp-orph") // KB gone: not repairable
 	seedMemory(t, db, "m-clash", "1", "kb-shared", "fp-new")    // occupies the destination fingerprint
-	require.NoError(t, db.Exec(`INSERT INTO extraction_queue (tenant_id, memory_uuid) VALUES ('2', 'm-bad')`).Error)
+	require.NoError(t, db.Exec(`INSERT INTO extraction_queue (id, tenant_id, memory_uuid) VALUES ('scope-job', '2', 'm-bad')`).Error)
 	require.NoError(t, db.Exec(`INSERT INTO memory_relations (id, tenant_id, from_uuid, to_uuid, relation_type)
 		VALUES ('r1', '2', 'm-bad', 'm-bad2', 'related'), ('r2', '2', 'm-bad', 'm-own', 'related')`).Error)
 

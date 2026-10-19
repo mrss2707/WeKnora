@@ -57,6 +57,9 @@ func (r *MemoryRepository) ListAudit(ctx context.Context, f types.MemoryAuditFil
 	if len(f.Actions) > 0 {
 		q = q.Where("action IN ?", f.Actions)
 	}
+	if f.DreamRun != "" {
+		q = q.Where("details->>'dream_run' = ?", f.DreamRun)
+	}
 	var total int64
 	if err := q.Count(&total).Error; err != nil {
 		return nil, 0, err
@@ -107,6 +110,9 @@ func (r *MemoryRepository) MergeInto(
 				Delete(&types.AgentMemory{}).Error; err != nil {
 				return err
 			}
+		}
+		if err := enqueueGraphLink(tx, survivor); err != nil {
+			return err
 		}
 		return recordAudit(tx, audit)
 	})
@@ -193,6 +199,16 @@ func (r *MemoryRepository) RestoreMerge(
 				Update("deleted_at", nil).Error; err != nil {
 				return err
 			}
+			restored, err := NewMemoryRepository(tx).GetByID(ctx, survivorBefore.TenantID, l.ID)
+			if err != nil {
+				return err
+			}
+			if err := enqueueGraphLink(tx, restored); err != nil {
+				return err
+			}
+		}
+		if err := enqueueGraphLink(tx, survivorBefore); err != nil {
+			return err
 		}
 		return recordAudit(tx, audit)
 	})

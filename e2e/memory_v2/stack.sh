@@ -64,7 +64,7 @@ start_app() {
     export DOCREADER_ADDR=localhost:1 OLLAMA_BASE_URL="${MEMV2_E2E_OLLAMA:-http://localhost:11434}" OLLAMA_OPTIONAL=true
     export JWT_SECRET=memv2-e2e-jwt-secret-0123456789abcdef SYSTEM_AES_KEY=0123456789abcdef0123456789abcdef
     export SSRF_WHITELIST=localhost,127.0.0.1
-    export MEMORY_V2_ENABLED=true MEMORY_V2_WORKER_MUTATIONS=true MEMORY_V2_DREAMER_ENABLED=true
+    export MEMORY_V2_ENABLED=true MEMORY_V2_WORKER_MUTATIONS="${MEMORY_V2_WORKER_MUTATIONS:-true}" MEMORY_V2_DREAMER_ENABLED="${MEMORY_V2_DREAMER_ENABLED:-true}"
     export MEMORY_V2_WRITE_LIMIT_PER_MIN="${MEMORY_V2_WRITE_LIMIT_PER_MIN:-600}" MEMORY_V2_DREAM_COOLDOWN="${MEMORY_V2_DREAM_COOLDOWN:-5s}"
     nohup "$RUN/weknora-server" >"$RUN/app.log" 2>&1 &
     echo $! >"$RUN/app.pid"
@@ -110,6 +110,14 @@ stop_pid() {
     if [[ "$name" == app && "$command" == *"$RUN/weknora-server"* ]] ||
        [[ "$name" == web && "$command" == *vite* && "$command" == *"$WEB_PORT"* ]]; then
       kill_tree "$pid"
+      for _ in $(seq 1 100); do
+        kill -0 "$pid" 2>/dev/null || break
+        sleep 0.1
+      done
+      if kill -0 "$pid" 2>/dev/null; then
+        printf 'test process %s did not stop; leaving its PID file intact\n' "$pid" >&2
+        return 1
+      fi
     fi
     rm -f "$f"
   fi

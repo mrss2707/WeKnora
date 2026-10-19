@@ -69,7 +69,7 @@ func evalDB(t *testing.T) *gorm.DB {
 	require.NoError(t, db.Exec(`CREATE SCHEMA `+schema).Error)
 	t.Cleanup(func() { db.Exec(`DROP SCHEMA ` + schema + ` CASCADE`) })
 	require.NoError(t, db.Exec(`SET search_path TO `+schema+`, public`).Error)
-	for _, f := range []string{"900074_memory_v2", "900075_memory_v2_verdict", "900076_memory_v2_hnsw", "900079_memory_v2_audit", "900080_memory_v2_access_trigger", "900081_memory_v2_dreamer_scope", "900082_memory_v2_dreamer_budget"} {
+	for _, f := range []string{"900074_memory_v2", "900075_memory_v2_verdict", "900076_memory_v2_hnsw", "900079_memory_v2_audit", "900080_memory_v2_access_trigger", "900081_memory_v2_dreamer_scope", "900082_memory_v2_dreamer_budget", "900083_memory_v2_graph_jobs"} {
 		sql, err := os.ReadFile("../../../../migrations/modules/memory_v2/postgres/" + f + ".up.sql")
 		require.NoError(t, err)
 		require.NoError(t, db.Exec(string(sql)).Error, f)

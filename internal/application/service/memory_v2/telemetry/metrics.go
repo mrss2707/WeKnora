@@ -10,7 +10,7 @@ import (
 var Registry = prometheus.NewRegistry()
 var runs = prometheus.NewCounterVec(prometheus.CounterOpts{Name: "weknora_memory_worker_runs_total", Help: "Memory worker passes by outcome."}, []string{"worker", "outcome"})
 var actions = prometheus.NewCounterVec(prometheus.CounterOpts{Name: "weknora_memory_worker_actions_total", Help: "Memory worker actions by outcome."}, []string{"worker", "outcome"})
-var tokens = prometheus.NewCounter(prometheus.CounterOpts{Name: "weknora_memory_dreamer_estimated_tokens_total", Help: "Estimated prompt and output tokens used by dreamer calls."})
+var tokens = prometheus.NewCounter(prometheus.CounterOpts{Name: "weknora_memory_dreamer_estimated_tokens_total", Help: "Tokens charged for dreamer calls: provider-reported usage (reasoning included) when available, else an estimate. Name kept for dashboard compatibility."})
 var latency = prometheus.NewHistogramVec(prometheus.HistogramOpts{Name: "weknora_memory_operation_seconds", Help: "Memory operation latency split into database and model phases.", Buckets: prometheus.DefBuckets}, []string{"operation", "phase"})
 var lastRun = prometheus.NewGaugeVec(prometheus.GaugeOpts{Name: "weknora_memory_worker_last_run_timestamp_seconds", Help: "Last completed worker pass, Unix time."}, []string{"worker"})
 

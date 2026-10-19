@@ -23,6 +23,9 @@ func (r *MemoryRepository) CreateAndAudit(ctx context.Context, memory *types.Age
 		if entry == nil {
 			return fmt.Errorf("memory_v2: audit entry required")
 		}
-		return recordAudit(tx, []*types.MemoryAuditEntry{entry})
+		if err := recordAudit(tx, []*types.MemoryAuditEntry{entry}); err != nil {
+			return err
+		}
+		return enqueueGraphLink(tx, memory)
 	})
 }

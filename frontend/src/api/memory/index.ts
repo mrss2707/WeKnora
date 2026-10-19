@@ -203,6 +203,8 @@ export interface HealthReport {
   total_issues: number
   by_severity: Record<string, number>
   issues: MemoryHealthIssue[]
+  coverage?: { total: number; scanned: number; limit: number; complete: boolean; reasons: string[] }
+  checks?: Record<string, { status: 'completed' | 'partial' | 'unavailable'; reason?: string; examined: number }>
 }
 
 // -------------------------------------------------------------------------
@@ -224,6 +226,8 @@ export interface DreamResult {
   actions_applied: number
   actions: DreamAction[]
   token_used: number
+  /** Set when the pass applied changes; undo it with undoDreamRun. */
+  run_id?: string
 }
 
 export interface TriggerDreamRequest {
@@ -351,6 +355,7 @@ export interface TokenBudgetInfo {
 export interface DreamerConfig {
   enabled: boolean
   interval: string
+  /** Deprecated, ignored by the server: the Dreamer model is chosen per knowledge base. */
   model_id: string
   max_actions: number
   token_budget: number
@@ -499,14 +504,62 @@ export function getHealthReport(kbId?: string) {
   return get<{ data: HealthReport }>(`/api/v1/memories/health${qs}`)
 }
 
+/**
+ * A dream pass waits for one chat-model call, which the server bounds at five
+ * minutes; the 30s JSON default would report a failure for a pass that still
+ * completes (slow hosted or reasoning models on a full batch).
+ */
+export const DREAM_REQUEST_TIMEOUT_MS = 6 * 60 * 1000
+
 /** Trigger the dreamer worker. */
 export function triggerDream(data: TriggerDreamRequest) {
-  return post<{ data: DreamResult }>('/api/v1/memories/dream', data)
+  return post<{ data: DreamResult }>('/api/v1/memories/dream', data, { timeout: DREAM_REQUEST_TIMEOUT_MS })
+}
+
+export interface DreamUndoResult {
+  run_id: string
+  reverted: number
+  /** Changes left in place: changed_after_pass, already_undone, not_reversible or failed. */
+  skipped: { memory_id: string; action: string; reason: string }[]
+}
+
+/** Revert the changes of one Dreamer pass (Admin); memories edited since are left alone. */
+export function undoDreamRun(kbId: string, runId: string) {
+  return post<{ data: DreamUndoResult }>('/api/v1/memories/dream/undo', { kb_id: kbId, run_id: runId })
 }
 
 /** Get a knowledge base's dreamer settings and last run. */
 export function getDreamStatus(kbId: string) {
   return get<{ data: DreamStatus }>(`/api/v1/memories/dream?kb_id=${encodeURIComponent(kbId)}`)
+}
+
+/** Where a Memory V2 task's model comes from. */
+export type MemoryModelSource = 'setting' | 'kb_summary' | 'tenant_default' | 'unavailable'
+
+export interface MemoryEffectiveModel {
+  model_id: string
+  name: string
+  source: MemoryModelSource
+}
+
+/** Per-knowledge-base model choices for the Dreamer and Memory V2 text tasks. */
+export interface MemoryModelSettings {
+  kb_id: string
+  dreamer_model_id: string
+  text_model_id: string
+  updated_at?: string
+  dreamer: MemoryEffectiveModel
+  text: MemoryEffectiveModel
+}
+
+/** Get a knowledge base's Memory V2 model settings. */
+export function getMemoryModelSettings(kbId: string) {
+  return get<{ data: MemoryModelSettings }>(`/api/v1/memories/settings?kb_id=${encodeURIComponent(kbId)}`)
+}
+
+/** Replace a knowledge base's Memory V2 model choices (Admin); '' restores the summary model. */
+export function updateMemoryModelSettings(data: { kb_id: string; dreamer_model_id: string; text_model_id: string }) {
+  return put<{ data: MemoryModelSettings }>('/api/v1/memories/settings', data)
 }
 
 /** List the audit trail of a knowledge base or of one memory. */

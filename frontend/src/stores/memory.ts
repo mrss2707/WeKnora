@@ -8,8 +8,11 @@ import {
   getMemoryStats,
   getHealthReport,
   getDreamStatus,
+  getMemoryModelSettings,
+  updateMemoryModelSettings,
   getMemoryHistory,
   triggerDream,
+  undoDreamRun,
   undoMemoryMerge,
   relinkMemories,
   updateMemory,
@@ -25,6 +28,7 @@ import type {
   HealthReport,
   DreamResult,
   DreamStatus,
+  MemoryModelSettings,
   MemoryAuditEntry,
   UpdateMemoryRequest,
 } from '@/api/memory/index'
@@ -41,7 +45,7 @@ export type { MemoryFilterState, BulkOutcome } from './memoryState'
 
 export type MemorySubTab = 'browse' | 'graph' | 'health' | 'history' | 'dream' | 'mcpconfig'
 
-type MemoryRequestKind = 'list' | 'graph' | 'health' | 'stats' | 'dream' | 'dreamStatus' | 'history'
+type MemoryRequestKind = 'list' | 'graph' | 'health' | 'stats' | 'dream' | 'dreamStatus' | 'history' | 'modelSettings'
 
 function memoryCacheScope(kbId: string) {
   const auth = useAuthStore()
@@ -53,7 +57,7 @@ export const useMemoryStore = defineStore('memory', {
     /** Knowledge base the cached data belongs to. */
     kbId: '',
     cacheScope: '',
-    requests: { list: 0, graph: 0, health: 0, stats: 0, dream: 0, dreamStatus: 0, history: 0 },
+    requests: { list: 0, graph: 0, health: 0, stats: 0, dream: 0, dreamStatus: 0, history: 0, modelSettings: 0 },
 
     /** Current page of memories (filtered and paged by the server). */
     memories: [] as AgentMemory[],
@@ -80,6 +84,7 @@ export const useMemoryStore = defineStore('memory', {
     stats: null as MemoryStats | null,
 
     dreamStatus: null as DreamStatus | null,
+    modelSettings: null as MemoryModelSettings | null,
     lastDreamResult: null as DreamResult | null,
     /** Whether lastDreamResult was a preview (nothing applied). */
     lastDreamPreview: false,
@@ -87,6 +92,7 @@ export const useMemoryStore = defineStore('memory', {
     loading: false,
     graphLoading: false,
     healthLoading: false,
+    healthFailed: false,
     statsLoading: false,
     dreamerLoading: false,
 
@@ -128,8 +134,10 @@ export const useMemoryStore = defineStore('memory', {
       this.selectedIds = []
       this.graphData = null
       this.healthReport = null
+      this.healthFailed = false
       this.stats = null
       this.dreamStatus = null
+      this.modelSettings = null
       this.lastDreamResult = null
       this.historyEntries = []
       this.filter = nextFilter(this.filter, { type: '', verdict: '', tier: undefined, keyword: '', mineOnly: false })
@@ -283,9 +291,15 @@ export const useMemoryStore = defineStore('memory', {
       this.useKnowledgeBase(kbId)
       const request = ++this.requests.health
       this.healthLoading = true
+      this.healthFailed = false
       try {
         const resp = await getHealthReport(kbId)
         if (this.isCurrentRequest('health', request, kbId)) this.healthReport = resp.data ?? null
+      } catch {
+        if (this.isCurrentRequest('health', request, kbId)) {
+          this.healthReport = null
+          this.healthFailed = true
+        }
       } finally {
         if (this.isCurrentRequest('health', request, kbId)) this.healthLoading = false
       }
@@ -314,6 +328,21 @@ export const useMemoryStore = defineStore('memory', {
       if (this.isCurrentRequest('dreamStatus', request, kbId)) this.dreamStatus = resp.data ?? null
     },
 
+    async loadModelSettings(kbId: string) {
+      this.useKnowledgeBase(kbId)
+      const request = ++this.requests.modelSettings
+      const resp = await getMemoryModelSettings(kbId)
+      if (this.isCurrentRequest('modelSettings', request, kbId)) this.modelSettings = resp.data ?? null
+    },
+
+    /** Saves both model choices; '' restores the knowledge base's summary model. */
+    async saveModelSettings(kbId: string, dreamerModelId: string, textModelId: string) {
+      this.useKnowledgeBase(kbId)
+      const request = ++this.requests.modelSettings
+      const resp = await updateMemoryModelSettings({ kb_id: kbId, dreamer_model_id: dreamerModelId, text_model_id: textModelId })
+      if (this.isCurrentRequest('modelSettings', request, kbId)) this.modelSettings = resp.data ?? null
+    },
+
     /** Runs a dream pass; `preview` returns proposals without applying anything. */
     async runDreamer(kbId: string, preview = false) {
       this.useKnowledgeBase(kbId)
@@ -330,6 +359,14 @@ export const useMemoryStore = defineStore('memory', {
       } finally {
         if (this.isCurrentRequest('dream', request, kbId)) this.dreamerLoading = false
       }
+    },
+
+    /** Reverts one Dreamer pass, then reloads the status and the list. */
+    async undoDream(kbId: string, runId: string) {
+      this.useKnowledgeBase(kbId)
+      const resp = await undoDreamRun(kbId, runId)
+      await Promise.allSettled([this.loadDreamStatus(kbId), this.loadMemories(kbId)])
+      return resp.data
     },
 
     async undoMerge(memoryId: string) {

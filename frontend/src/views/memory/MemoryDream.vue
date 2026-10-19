@@ -40,6 +40,8 @@
       <p class="section-note">{{ $t('memory.dream.safety') }}</p>
     </section>
 
+    <MemoryModelSettings :kb-id="kbId" :can-manage="canManage" />
+
     <!-- Actions (Admin) -->
     <section v-if="canManage" class="dream-section">
       <h3 class="section-title">{{ $t('memory.dream.actionsTitle') }}</h3>
@@ -67,6 +69,18 @@
         <t-button variant="outline" :loading="relinking" data-testid="memory-relink" @click="relink">
           <template #icon><t-icon name="link" /></template>
           {{ $t('memory.dream.relink') }}
+        </t-button>
+        <t-button
+          v-if="undoRunId"
+          variant="outline"
+          theme="warning"
+          :loading="undoing"
+          :disabled="memoryStore.dreamerLoading"
+          data-testid="memory-dream-undo"
+          @click="confirmUndo"
+        >
+          <template #icon><t-icon name="rollback" /></template>
+          {{ $t('memory.dream.undo') }}
         </t-button>
       </div>
     </section>
@@ -111,6 +125,7 @@ import { useMemoryStore } from '@/stores/memory'
 import type { DreamAction } from '@/api/memory/index'
 import { errorStatus } from '@/stores/memoryState'
 import { useMemoryLabels } from './useMemoryLabels'
+import MemoryModelSettings from './MemoryModelSettings.vue'
 
 const props = withDefaults(defineProps<{ kbId: string; canManage?: boolean }>(), { canManage: false })
 defineEmits<{ 'view-memory': [memoryId: string] }>()
@@ -123,6 +138,13 @@ const relinking = ref(false)
 
 const status = computed(() => memoryStore.dreamStatus)
 const result = computed(() => memoryStore.lastDreamResult)
+const undoing = ref(false)
+/** The latest pass that changed something: the one just run, else the stored one. */
+const undoRunId = computed(() => {
+  if (!memoryStore.lastDreamPreview && result.value?.run_id) return result.value.run_id
+  const stored = status.value?.last_stats?.last_change_run
+  return typeof stored === 'string' ? stored : ''
+})
 
 watch(
   () => props.kbId,
@@ -160,6 +182,38 @@ function confirmRun() {
     },
     onClose: () => dialog.hide(),
   })
+}
+
+function confirmUndo() {
+  const runId = undoRunId.value
+  const dialog = DialogPlugin.confirm({
+    header: t('memory.dream.undo'),
+    body: t('memory.dream.confirmUndo'),
+    confirmBtn: t('common.confirm'),
+    cancelBtn: t('common.cancel'),
+    onConfirm: () => {
+      dialog.hide()
+      undo(runId)
+    },
+    onClose: () => dialog.hide(),
+  })
+}
+
+async function undo(runId: string) {
+  undoing.value = true
+  try {
+    const res = await memoryStore.undoDream(props.kbId, runId)
+    const kept = res?.skipped?.length ?? 0
+    const reverted = res?.reverted ?? 0
+    if (kept > 0) MessagePlugin.warning(t('memory.dream.undoPartial', { reverted, kept }))
+    else MessagePlugin.success(t('memory.dream.undoDone', { reverted }))
+    if (memoryStore.lastDreamResult?.run_id === runId) memoryStore.lastDreamResult = null
+  } catch (err) {
+    const e = err as { message?: string }
+    MessagePlugin.error(e?.message || t('memory.dream.undoFailed'))
+  } finally {
+    undoing.value = false
+  }
 }
 
 async function relink() {

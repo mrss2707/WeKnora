@@ -1,10 +1,10 @@
 package handler
 
 import (
+	stderrors "errors"
 	"net/http"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/gin-gonic/gin"
 
@@ -347,32 +347,7 @@ func (h *MemoryV2Handler) GetHealthReport(c *gin.Context) {
 		return
 	}
 
-	issues, err := h.memorySvc.AssessHealth(ctx, tenantID, kbID)
-	if err != nil {
-		logger.ErrorWithFields(ctx, err, map[string]interface{}{
-			"tenant_id": tenantID,
-		})
-		c.Error(errors.NewInternalServerError("Failed to assess health: " + err.Error()))
-		return
-	}
-
-	bySeverity := make(map[string]int)
-	for _, issue := range issues {
-		bySeverity[issue.Severity]++
-	}
-
-	report := &types.HealthReport{
-		TenantID:    tenantID,
-		CheckedAt:   time.Now(),
-		TotalIssues: len(issues),
-		BySeverity:  bySeverity,
-		Issues:      issues,
-	}
-
-	c.JSON(http.StatusOK, gin.H{
-		"success": true,
-		"data":    report,
-	})
+	h.writeHealthReport(c, ctx, tenantID, kbID)
 }
 
 // ---------------------------------------------------------------------------
@@ -421,6 +396,10 @@ func (h *MemoryV2Handler) TriggerDream(c *gin.Context) {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{
 			"tenant_id": tenantID,
 		})
+		if stderrors.Is(err, types.ErrMemoryModelUnavailable) {
+			c.Error(errors.NewServiceUnavailableError("The Dreamer model configured for this knowledge base is unavailable"))
+			return
+		}
 		c.Error(errors.NewInternalServerError("Failed to trigger dream: " + err.Error()))
 		return
 	}

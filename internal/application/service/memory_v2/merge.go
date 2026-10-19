@@ -143,7 +143,16 @@ func (s *MemoryServiceV2Impl) mergeMemories(
 	} else if err := store.MergeInto(ctx, &merged, loserIDs, audit); err != nil {
 		return nil, fmt.Errorf("merge failed: %w", err)
 	}
-	*survivor = merged
+	// PostgreSQL's update trigger owns the persisted version. Return that
+	// version, not the Go timestamp prepared before entering the transaction.
+	persisted, err := s.repo.GetByID(ctx, merged.TenantID, merged.ID)
+	if err != nil {
+		return nil, err
+	}
+	if persisted == nil {
+		return nil, fmt.Errorf("merged memory could not be reloaded")
+	}
+	*survivor = *persisted
 	return survivor, nil
 }
 

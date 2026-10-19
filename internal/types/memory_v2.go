@@ -228,11 +228,13 @@ type MemoryHealthIssue struct {
 
 // HealthReport is the overall health assessment.
 type HealthReport struct {
-	TenantID    string               `json:"tenant_id"`
-	CheckedAt   time.Time            `json:"checked_at"`
-	TotalIssues int                  `json:"total_issues"`
-	BySeverity  map[string]int       `json:"by_severity"`
-	Issues      []*MemoryHealthIssue `json:"issues"`
+	TenantID    string                       `json:"tenant_id"`
+	CheckedAt   time.Time                    `json:"checked_at"`
+	TotalIssues int                          `json:"total_issues"`
+	BySeverity  map[string]int               `json:"by_severity"`
+	Issues      []*MemoryHealthIssue         `json:"issues"`
+	Coverage    *MemoryHealthCoverage        `json:"coverage,omitempty"`
+	Checks      map[string]MemoryHealthCheck `json:"checks,omitempty"`
 }
 
 // ---------------------------------------------------------------------------
@@ -260,11 +262,14 @@ type TokenBudgetInfo struct {
 
 // DreamerConfig configures the dreamer worker.
 type DreamerConfig struct {
-	Enabled     bool   `json:"enabled" yaml:"enabled"`
-	Interval    string `json:"interval" yaml:"interval"` // default: "6h"
+	Enabled  bool   `json:"enabled" yaml:"enabled"`
+	Interval string `json:"interval" yaml:"interval"` // default: "6h"
+	// Deprecated: ignored. The Dreamer model is chosen per knowledge base
+	// (memory_v2_scope_settings, Memory → Dreamer → Models), else the KB
+	// summary model.
 	ModelID     string `json:"model_id" yaml:"model_id"`
 	MaxActions  int    `json:"max_actions" yaml:"max_actions"`   // default: 5
-	TokenBudget int    `json:"token_budget" yaml:"token_budget"` // max completion tokens per pass, default: 2000
+	TokenBudget int    `json:"token_budget" yaml:"token_budget"` // max completion tokens per pass (reasoning included), default: 16000
 	DryRun      bool   `json:"dry_run" yaml:"dry_run"`
 	// BatchSize is how many memories one pass reviews (default 30).
 	BatchSize int `json:"batch_size" yaml:"batch_size"`
@@ -277,7 +282,8 @@ type DreamerConfig struct {
 	MergeMinCosine float64 `json:"merge_min_cosine" yaml:"merge_min_cosine"`
 	// AllowRemove lets the dreamer soft-delete memories (default false).
 	AllowRemove bool `json:"allow_remove" yaml:"allow_remove"`
-	// DailyTokenBudget caps estimated tokens per tenant per day (0 = none).
+	// DailyTokenBudget caps Dreamer tokens per tenant per UTC day (0 = none):
+	// provider-reported usage when available, else an estimate.
 	DailyTokenBudget int `json:"daily_token_budget" yaml:"daily_token_budget"`
 	// MaxChangeRatio aborts a pass proposing changes to more than this share
 	// of its batch (circuit breaker, default 0.34).
@@ -301,6 +307,8 @@ type DreamResult struct {
 	ActionsApplied  int           `json:"actions_applied"`
 	Actions         []DreamAction `json:"actions"`
 	TokenUsed       int           `json:"token_used"`
+	// RunID identifies an applying pass; POST /memories/dream/undo reverts it.
+	RunID string `json:"run_id,omitempty"`
 }
 
 // DreamStatus describes the dreamer of one knowledge base for the UI.
@@ -436,7 +444,7 @@ func DefaultMemoryV2Config() MemoryV2Config {
 			Enabled:            true,
 			Interval:           "6h",
 			MaxActions:         5,
-			TokenBudget:        2000,
+			TokenBudget:        16000,
 			BatchSize:          30,
 			MinConfidence:      0.8,
 			MergeLiveAfterRuns: 3,
@@ -607,6 +615,8 @@ type MemoryAuditFilter struct {
 	KbID     string
 	MemoryID string
 	Actions  []string
+	// DreamRun keeps the entries written by one Dreamer pass.
+	DreamRun string
 	Limit    int
 	Offset   int
 }

@@ -11,7 +11,9 @@
     "900079_memory_v2_audit.up.sql",
     "900080_memory_v2_access_trigger.up.sql",
     "900081_memory_v2_dreamer_scope.up.sql",
-    "900082_memory_v2_dreamer_budget.up.sql"
+    "900082_memory_v2_dreamer_budget.up.sql",
+    "900083_memory_v2_graph_jobs.up.sql",
+    "900084_memory_v2_scope_settings.up.sql"
   ],
   "prerequisites": [
     "PostgreSQL (uuid-ossp legacy note: gen_random_uuid requires PG 13+)",

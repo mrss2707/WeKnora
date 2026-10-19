@@ -185,6 +185,10 @@ func (r *serviceLifecycleRepoFake) SetCacheInvalidator(invalidator interfaces.Ca
 	r.cacheInvalidator = invalidator
 }
 
+func (r *serviceLifecycleRepoFake) GetHealthEmbeddingDimension(ctx context.Context, tenantID, kbID string) (int, error) {
+	return r.GetEmbeddingDimension(ctx, tenantID)
+}
+
 func (r *serviceLifecycleRepoFake) GetEmbeddingDimension(ctx context.Context, tenantID string) (int, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -409,6 +413,7 @@ func TestAssessHealth_DelegatesWithEmbedderDimension(t *testing.T) {
 		searchResults: []*types.MemorySearchResult{{Memory: &types.AgentMemory{
 			ID:         "mem-1",
 			TenantID:   "tenant-1",
+			KbID:       "kb-1",
 			Content:    "healthy tagged memory content",
 			Tags:       []string{"tag"},
 			Importance: 3,

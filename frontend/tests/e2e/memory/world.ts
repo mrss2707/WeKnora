@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
+import { resolve } from 'node:path'
 import type { Page } from '@playwright/test'
 
 interface World {
@@ -15,7 +16,9 @@ interface World {
 export const world: World = JSON.parse(readFileSync(
   process.env.MEMV2_E2E_SEED || fileURLToPath(new URL('../../../../e2e/memory_v2/seed-output.json', import.meta.url)), 'utf8'))
 export const frontendURL = process.env.MEMV2_E2E_FRONTEND_URL || 'http://localhost:15173'
-export const statePath = (name: string) => fileURLToPath(new URL(`./storageState/${name}.json`, import.meta.url))
+export const statePath = (name: string) => process.env.MEMV2_E2E_STATE_DIR
+  ? resolve(process.env.MEMV2_E2E_STATE_DIR, `${name}.json`)
+  : fileURLToPath(new URL(`./storageState/${name}.json`, import.meta.url))
 export const kbPath = (name = 'acme-eng') => `/platform/knowledge-bases/${world.knowledge_bases[name].id}?tab=memory`
 
 export async function api(page: Page, method: string, path: string, data?: unknown) {

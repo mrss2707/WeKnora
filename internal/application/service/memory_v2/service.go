@@ -2,7 +2,6 @@ package memory_v2
 
 import (
 	"context"
-	"fmt"
 	"strings"
 	"sync"
 
@@ -46,6 +45,7 @@ type MemoryServiceV2Impl struct {
 	// Workers (from workers sub-package)
 	entityExtractor *workers.EntityExtractor
 	autoLinker      *workers.AutoLinker
+	graphJobs       *workers.GraphJobs
 	consolidator    *workers.Consolidator
 	dreamer         *workers.DreamerWorker
 	pruner          *workers.Pruner
@@ -68,6 +68,7 @@ func NewMemoryServiceV2(
 		config:       config,
 		tokenBudget:  NewTokenBudgetManager().WithChat(nil),
 	}
+	svc.attachSettings()
 
 	// Initialize workers that don't need embedder/chat (nil-safe).
 	// embedder/chat-dependent workers are created lazily on first use.
@@ -121,6 +122,7 @@ func (s *MemoryServiceV2Impl) notReadyReason() string {
 // own models. Call once during wiring, before serving requests.
 func (s *MemoryServiceV2Impl) SetKBLookup(kbs KBModelLookup) {
 	s.resolver = newModelResolver(s.modelService, kbs)
+	s.attachSettings()
 }
 
 // modelSource adapts the service's fixed-model override or its resolver to
@@ -133,6 +135,14 @@ func (m modelSource) Embedder(ctx context.Context, tenantID, kbID string) (embed
 
 func (m modelSource) Chat(ctx context.Context, tenantID, kbID string) (chat.Chat, error) {
 	return m.s.chatFor(ctx, tenantID, kbID)
+}
+
+// ChatFor resolves a purpose's model (per-KB setting first).
+func (m modelSource) ChatFor(ctx context.Context, tenantID, kbID string, purpose types.MemoryModelPurpose) (chat.Chat, error) {
+	if m.s.chat != nil {
+		return m.s.chat, nil
+	}
+	return m.s.resolver.ChatFor(ctx, tenantID, kbID, purpose)
 }
 
 // embedderFor returns the embedder of a scope and its model id ("" for a
@@ -163,6 +173,7 @@ func (s *MemoryServiceV2Impl) initWorkers() {
 		src := modelSource{s}
 		s.entityExtractor = workers.NewEntityExtractor(s.repo, nil).WithResolver(src).WithPatcher(s)
 		s.autoLinker = workers.NewAutoLinker(s.repo, s.embedder).WithResolver(src)
+		s.graphJobs = workers.NewGraphJobs(s.repo, s.autoLinker)
 		s.consolidator = workers.NewConsolidator(s.repo, nil).WithPatcher(s)
 		s.dreamer = workers.NewDreamerWorker(s.repo, s.chat, s.dreamerConfig(), nil).WithResolver(src).WithApplier(s)
 		if s.pruner == nil {
@@ -194,6 +205,9 @@ func (s *MemoryServiceV2Impl) StartWorkers(ctx context.Context) {
 		}
 		s.wg.Add(1)
 		go runWorker(ctx, &s.wg, s.healthChecker.Run)
+		if s.graphJobs != nil {
+			start("graph", true, s.graphJobs.Run)
+		}
 		start("dreamer", s.config.Dreamer.Enabled, s.dreamer.Run)
 		start("pruner", s.config.PrunerEnabled, s.pruner.Run)
 		start("consolidator", s.config.ConsolidatorEnabled, s.consolidator.Run)
@@ -336,17 +350,7 @@ func (s *MemoryServiceV2Impl) ConsolidateDreamScope(ctx context.Context, tenantI
 // AssessHealth runs all 7 health checks and returns issues. Health checks
 // scope per tenant, so an empty tenant or an unready module is an error.
 func (s *MemoryServiceV2Impl) AssessHealth(ctx context.Context, tenantID, kbID string) ([]*types.MemoryHealthIssue, error) {
-	if reason := s.notReadyReason(); reason != "" {
-		return nil, fmt.Errorf("memory V2: %s", reason)
-	}
-	if strings.TrimSpace(tenantID) == "" {
-		return nil, fmt.Errorf("memory V2: tenant ID is required for health assessment")
-	}
-	var embedderDim int
-	if emb, _, err := s.embedderFor(ctx, tenantID, kbID); err == nil && emb != nil {
-		embedderDim = emb.GetDimensions()
-	}
-	report, err := s.healthChecker.AssessHealth(ctx, tenantID, kbID, embedderDim)
+	report, err := s.AssessHealthReport(ctx, tenantID, kbID)
 	if err != nil {
 		return nil, err
 	}

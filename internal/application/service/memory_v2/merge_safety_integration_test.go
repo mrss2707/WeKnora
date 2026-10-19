@@ -36,6 +36,8 @@ func TestMergeAndUndo_RestoreOriginalRelationsAndVectorAtomically(t *testing.T) 
 	relations, err := repo.GetRelations(c, a.ID, "1")
 	require.NoError(t, err)
 	require.Len(t, relations, 2)
+	later := createPGServiceMemory(t, db, "1", "kb", "a derived edge added after merge", []float32{0, 1})
+	require.NoError(t, repo.CreateRelation(c, &types.MemoryRelation{TenantID: "1", FromUUID: a.ID, ToUUID: later.ID, RelationType: "related_to", Weight: 1}))
 	// A failed model call must leave both the merge and its graph intact.
 	svc.embedder = &mockEmbedder{embedFunc: func(context.Context, string) ([]float32, error) { return nil, errors.New("model down") }}
 	_, err = svc.UndoMerge(c, "1", "kb", a.ID)

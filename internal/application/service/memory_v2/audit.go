@@ -67,7 +67,38 @@ func auditActor(ctx context.Context) (actor, userID string) {
 	return "user", userID
 }
 
-// newAudit builds an audit entry for a memory change.
+// Audit detail keys tagging the changes of one Dreamer pass and the entries
+// that undo it.
+const (
+	auditDreamRunKey  = "dream_run"
+	auditDreamUndoKey = "undo_dream_run"
+)
+
+// withDreamRun adds the Dreamer pass (or the pass being undone) of ctx to
+// audit details without mutating the caller's map.
+func withDreamRun(ctx context.Context, details map[string]interface{}) map[string]interface{} {
+	tags := map[string]string{}
+	if run := types.DreamRunFromContext(ctx); run != "" {
+		tags[auditDreamRunKey] = run
+	}
+	if undo, _ := ctx.Value(types.DreamUndoKey{}).(string); undo != "" {
+		tags[auditDreamUndoKey] = undo
+	}
+	if len(tags) == 0 {
+		return details
+	}
+	out := make(map[string]interface{}, len(details)+len(tags))
+	for k, v := range details {
+		out[k] = v
+	}
+	for k, v := range tags {
+		out[k] = v
+	}
+	return out
+}
+
+// newAudit builds an audit entry for a memory change. Changes made by a
+// Dreamer pass carry its run id, so the pass can be undone as a whole.
 func newAudit(ctx context.Context, action string, before, after *types.AgentMemory, details map[string]interface{}) *types.MemoryAuditEntry {
 	ref := after
 	if ref == nil {
@@ -82,6 +113,7 @@ func newAudit(ctx context.Context, action string, before, after *types.AgentMemo
 		Actor: actor, UserID: userID, Action: action,
 		Before: imageOf(before), After: imageOf(after),
 	}
+	details = withDreamRun(ctx, details)
 	if len(details) > 0 {
 		if b, err := json.Marshal(details); err == nil {
 			e.Details = b

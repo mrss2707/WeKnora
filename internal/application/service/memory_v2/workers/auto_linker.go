@@ -3,6 +3,7 @@ package workers
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"math"
 	"time"
 
@@ -58,83 +59,90 @@ func (a *AutoLinker) WithThreshold(t float64) *AutoLinker {
 // LinkMemory links a saved memory to its neighbours. It returns the number of
 // relations created. Errors are logged; linking never fails a save.
 func (a *AutoLinker) LinkMemory(ctx context.Context, memory *types.AgentMemory) int {
-	if memory == nil || memory.ID == "" || memory.TenantID == "" {
+	if memory == nil {
 		return 0
 	}
-	vector := memory.Embedding.Slice()
-	if isZeroVector(vector) {
-		vector = a.embed(ctx, memory)
-		if vector == nil {
-			return 0
-		}
-	}
-
-	filter := &types.MemoryFilter{
-		TenantID:         memory.TenantID,
-		KbID:             memory.KbID,
-		EmbeddingModelID: metadataEmbeddingModel(memory.Metadata),
-	}
-	neighbours, err := a.repo.CosineSearch(ctx, filter, vector, linkCandidates+1)
+	created, err := a.LinkMemoryWithError(ctx, memory)
 	if err != nil {
-		logger.Errorf(ctx, "auto-linker: neighbour search failed for %s: %v", memory.ID, err)
-		return 0
-	}
-
-	created := 0
-	touched := []string{memory.ID}
-	defer func() {
-		if created == 0 {
-			return
-		}
-		if hr, ok := a.repo.(interfaces.MemoryV2HubRefresher); ok {
-			if err := hr.RefreshHubScores(ctx, memory.TenantID, touched); err != nil {
-				logger.Warnf(ctx, "auto-linker: hub score refresh failed: %v", err)
-			}
-		}
-	}()
-	for _, n := range neighbours {
-		c := n.Memory
-		if c == nil || c.ID == memory.ID || n.Score < a.threshold {
-			continue
-		}
-		// Defence in depth: the search is scoped, but never link across
-		// tenants or knowledge bases.
-		if c.TenantID != memory.TenantID || c.KbID != memory.KbID {
-			continue
-		}
-		if a.relate(ctx, memory.TenantID, memory.ID, c.ID, "related_to", n.Score) {
-			created++
-			touched = append(touched, c.ID)
-		}
-		switch {
-		case c.Verdict == types.VerdictDecision && memory.Verdict != types.VerdictDecision:
-			if a.relate(ctx, memory.TenantID, c.ID, memory.ID, "justifies", n.Score) {
-				created++
-			}
-		case memory.Verdict == types.VerdictDecision && c.Verdict != types.VerdictDecision:
-			if a.relate(ctx, memory.TenantID, memory.ID, c.ID, "justifies", n.Score) {
-				created++
-			}
-		}
+		logger.Warnf(ctx, "auto-linker: memory %s: %v", memory.ID, err)
 	}
 	return created
 }
 
-func (a *AutoLinker) relate(ctx context.Context, tenantID, from, to, kind string, weight float64) bool {
-	// related_to is symmetric: store it once, in canonical order, so A~B and
-	// B~A never become two edges (which would also double hub scores).
-	if kind == "related_to" && to < from {
+// LinkMemoryWithError lets the durable queue retry partial failures. Inserting
+// an already-existing edge is success, not a new relation or an error.
+func (a *AutoLinker) LinkMemoryWithError(ctx context.Context, memory *types.AgentMemory) (created int, resultErr error) {
+	if memory == nil || memory.ID == "" || memory.TenantID == "" {
+		return 0, fmt.Errorf("invalid graph memory scope")
+	}
+	vector := memory.Embedding.Slice()
+	if isZeroVector(vector) {
+		vector = a.embed(ctx, memory)
+		if isZeroVector(vector) {
+			return 0, fmt.Errorf("graph memory has no usable embedding")
+		}
+	}
+	filter := &types.MemoryFilter{TenantID: memory.TenantID, KbID: memory.KbID, EmbeddingModelID: metadataEmbeddingModel(memory.Metadata)}
+	neighbours, err := a.repo.CosineSearch(ctx, filter, vector, linkCandidates+1)
+	if err != nil {
+		return 0, fmt.Errorf("neighbour search failed: %w", err)
+	}
+	touched := []string{memory.ID}
+	defer func() {
+		if len(touched) < 2 {
+			return
+		}
+		if hr, ok := a.repo.(interfaces.MemoryV2HubRefresher); ok {
+			if err := hr.RefreshHubScores(ctx, memory.TenantID, touched); err != nil && resultErr == nil {
+				resultErr = err
+			}
+		}
+	}()
+	link := func(from, to *types.AgentMemory, kind string, weight float64) error {
+		added, err := a.relateVersioned(ctx, from, to, kind, weight)
+		if added {
+			created++
+		}
+		return err
+	}
+	for _, n := range neighbours {
+		candidate := n.Memory
+		if candidate == nil || candidate.ID == memory.ID || n.Score < a.threshold {
+			continue
+		}
+		if candidate.TenantID != memory.TenantID || candidate.KbID != memory.KbID {
+			continue
+		}
+		touched = append(touched, candidate.ID)
+		if err := link(memory, candidate, "related_to", n.Score); err != nil {
+			return created, err
+		}
+		switch {
+		case candidate.Verdict == types.VerdictDecision && memory.Verdict != types.VerdictDecision:
+			if err := link(candidate, memory, "justifies", n.Score); err != nil {
+				return created, err
+			}
+		case memory.Verdict == types.VerdictDecision && candidate.Verdict != types.VerdictDecision:
+			if err := link(memory, candidate, "justifies", n.Score); err != nil {
+				return created, err
+			}
+		}
+	}
+	return created, nil
+}
+
+func (a *AutoLinker) relateVersioned(ctx context.Context, from, to *types.AgentMemory, kind string, weight float64) (bool, error) {
+	if kind == "related_to" && to.ID < from.ID {
 		from, to = to, from
 	}
-	err := a.repo.CreateRelation(ctx, &types.MemoryRelation{
-		TenantID: tenantID, FromUUID: from, ToUUID: to,
-		RelationType: kind, Weight: weight, CreatedAt: time.Now(),
-	})
-	if err != nil {
-		logger.Errorf(ctx, "auto-linker: create %s relation %s->%s: %v", kind, from, to, err)
-		return false
+	relation := &types.MemoryRelation{TenantID: from.TenantID, FromUUID: from.ID, ToUUID: to.ID, RelationType: kind, Weight: weight, CreatedAt: time.Now()}
+	if writer, ok := a.repo.(interfaces.MemoryV2VersionedRelationWriter); ok {
+		return writer.CreateRelationForVersions(ctx, relation, from.UpdatedAt, to.UpdatedAt)
 	}
-	return true
+	if err := a.repo.CreateRelation(ctx, relation); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 // embed computes a vector for a memory that has none stored.

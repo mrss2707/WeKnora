@@ -1,14 +1,14 @@
 name: memv2-e2e-compose
 
-# An alternative to stack.sh, never run both on the same ports. Only the
-# compose project's own volumes are removed by `down --volumes`.
+# An alternative to stack.sh; set MEMV2_COMPOSE_*_PORT to run alongside it.
+# Only this compose project's own volumes are removed by `down --volumes`.
 services:
   postgres:
     image: paradedb/paradedb:v0.22.6-pg17
     environment:
       POSTGRES_PASSWORD: e2e
       POSTGRES_DB: weknora_e2e
-    ports: ["127.0.0.1:55441:5432"]
+    ports: ["127.0.0.1:${MEMV2_COMPOSE_PG_PORT:-55441}:5432"]
     volumes: ["postgres:/var/lib/postgresql/data"]
     healthcheck:
       test: ["CMD-SHELL", "PGPASSWORD=e2e psql -h 127.0.0.1 -U postgres -d weknora_e2e -c 'select 1'"]
@@ -16,7 +16,7 @@ services:
       retries: 40
   redis:
     image: redis:7-alpine
-    ports: ["127.0.0.1:56380:6379"]
+    ports: ["127.0.0.1:${MEMV2_COMPOSE_REDIS_PORT:-56380}:6379"]
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 3s
@@ -31,7 +31,7 @@ services:
     build:
       context: ../..
       dockerfile: docker/Dockerfile.app
-    ports: ["127.0.0.1:18080:8080"]
+    ports: ["127.0.0.1:${MEMV2_COMPOSE_APP_PORT:-18080}:8080"]
     depends_on:
       postgres: { condition: service_healthy }
       redis: { condition: service_healthy }
@@ -67,7 +67,7 @@ services:
     image: node:22-bookworm-slim
     working_dir: /workspace/frontend
     command: ["sh", "-c", "npm ci && npm run dev -- --host 0.0.0.0 --port 15173 --strictPort"]
-    ports: ["127.0.0.1:15173:15173"]
+    ports: ["127.0.0.1:${MEMV2_COMPOSE_WEB_PORT:-15173}:15173"]
     environment:
       VITE_DEV_PROXY_TARGET: http://app:8080
     volumes:

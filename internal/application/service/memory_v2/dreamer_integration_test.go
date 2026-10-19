@@ -136,12 +136,12 @@ func TestDreamer_EndToEndOnPostgres(t *testing.T) {
 	model := &mockChat{chatFunc: func(_ context.Context, msgs []chat.Message, _ *chat.ChatOptions) (*types.ChatResponse, error) {
 		calls++
 		prompt := msgs[len(msgs)-1].Content
-		// The prompt lists "[N] type=..." then the content on the next line.
+		// The prompt lists "[N] type=..." then content="<JSON string>" on the next line.
 		idx := func(prefix string) int {
 			lines := strings.Split(prompt, "\n")
 			for i := 0; i+1 < len(lines); i++ {
 				var n int
-				if _, err := fmt.Sscanf(lines[i], "[%d]", &n); err == nil && strings.HasPrefix(strings.TrimSpace(lines[i+1]), prefix) {
+				if _, err := fmt.Sscanf(lines[i], "[%d]", &n); err == nil && strings.HasPrefix(strings.TrimPrefix(strings.TrimSpace(lines[i+1]), `content="`), prefix) {
 					return n
 				}
 			}

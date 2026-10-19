@@ -15,11 +15,23 @@ Native Go + PostgreSQL/pgvector memory module (per-KB, multi-tenant). Schema:
 | 900080 | `memory_v2_access_trigger` | Reads (access_count) no longer bump updated_at |
 | 900081 | `memory_v2_dreamer_scope` | Dreamer lock/state per (tenant, knowledge base) with heartbeat |
 | 900082 | `memory_v2_dreamer_budget` | Durable UTC daily token reservations per tenant across KBs and app replicas |
+| 900083 | `memory_v2_graph_jobs` | Persistent graph jobs in extraction_queue with leases, retry/backoff and generation fencing |
+| 900084 | `memory_v2_scope_settings` | Per-KB model choice for the Dreamer and Memory V2 text tasks (NULL = KB summary model) |
 
-Dreamer reserves its maximum estimated prompt/output budget before calling the model.
-Successful calls settle once to their estimated usage. Failed/uncertain calls and
-crashes leave the reservation charged for that UTC day; restarting an app does not
-reset the cap. This is an **estimated-token** budget, not a provider billing guarantee.
+Graph work is queued in the same transaction as create/content/embedding/verdict,
+merge and undo writes. The queue uses stored vectors only, with per-memory job
+coalescing and ten bounded attempts. The worker is gated by `worker_mutations`;
+expired leases recover after a crash. Foreground linking remains a low-latency
+best-effort path; the durable worker repairs failures. Linking checks both endpoint
+versions under row locks, so a retry cannot recreate edges to a deleted or changed
+memory. Admin relink remains a synchronous repair/backfill operation.
+
+Dreamer reserves its maximum prompt/output budget (estimated prompt plus
+`token_budget`) before calling the model. A successful call settles once to the
+provider-reported usage, reasoning included (an estimate when the provider reports
+none), and the unused reservation is returned. Failed/uncertain calls and crashes
+leave the reservation charged for that UTC day; restarting an app does not reset
+the cap. Provider invoices remain the billing source of truth.
 
 Module migrations live in the reserved range **900000–909999** so they can never
 collide with core migrations in `migrations/versioned/` (which upstream `main`
@@ -83,6 +95,46 @@ safe. Fresh databases need no action.
 - Behavior is rolled back with feature flags (`memory_v2.enabled`,
   `memory_v2.worker_mutations`), not down-migrations: every module migration
   is additive. `./scripts/migrate.sh force` operates on the core stream only.
+
+### Production rollout runbook
+
+1. **Before deploy:** `pg_dump -Fc` the production database and keep it until
+   the release is accepted. The isolated rehearsal (`e2e/memory_v2/restore_smoke.sh`)
+   restores the dump and checks that rows, vectors, audit, budget, settings and
+   migration state match, and that REST reads return the same results.
+2. **Deploy**, then verify `docker logs WeKnora-app | grep -i migrat` and
+   `select * from schema_migrations, schema_migrations_modules` (module 900084).
+3. **Models:** for each knowledge base, choose the Dreamer model in
+   Memory → Dreamer → Models. Use a model that passed `TestDreamerQuality`
+   (development and hold-out) and `TestDreamerBatchQuality`. The last pinned
+   pass is `ds/deepseek-v4-pro` with KB text on `ds/deepseek-flash`. A hosted
+   Dreamer receives memory content (up to 300 characters each, as untrusted
+   data) from that knowledge base: approve the provider for that data first.
+4. **Watch:** `GET /api/v1/memories/metrics` (SystemAdmin): dreamer runs, blocked
+   actions (`blocked_model_unavailable`, `blocked_truncated`, `blocked_circuit_breaker`,
+   ...), model latency and tokens. Memory → Health of each knowledge base reports
+   `dreamer_model_unavailable` (high) when its Dreamer cannot resolve a usable
+   model: such passes are skipped and record no run. The daily per-tenant cap is
+   `dreamer.daily_token_budget` (200k by default); one pass reserves up to about
+   `token_budget` + prompt (~20k), so a tenant reviews at most ~10 batches a day
+   in the worst case. Raise the cap for tenants with many knowledge bases.
+5. **Stop quickly:** `MEMORY_V2_DREAMER_ENABLED=false` stops the Dreamer alone;
+   `MEMORY_V2_WORKER_MUTATIONS=false` stops every mutating worker (a manual
+   Dreamer run then only previews). Clearing a KB's Dreamer model returns it to
+   the KB summary model; a chosen model that disappears stops that KB's Dreamer
+   (fail-closed) instead of switching models. `memory_v2.dreamer.model_id` is
+   ignored (deprecated): choose models per knowledge base.
+6. **Undo changes:** every Dreamer change is in `agent_memories_audit` (shown in
+   Memory → History), tagged with its pass (`details.dream_run`). A whole pass is
+   reverted with Memory → Dreamer → Undo last pass, or
+   `POST /api/v1/memories/dream/undo {kb_id, run_id}` (KB Admin; `run_id` is in the
+   dream result and in the status `last_stats.last_change_run`): verdicts and
+   importance go back to their before values and merges are undone. A memory
+   edited after the pass is left as it is and reported as skipped; a second undo
+   reverts nothing more. Reverting entries are tagged `details.undo_dream_run`.
+   One merge alone: `POST /memories/:id/undo-merge`. Full restore from the step 1
+   dump is the last resort.
+
 ## Knowledge-base tenant scope (shared KBs)
 
 Memories belong to the **knowledge base owner's tenant**, not to the tenant of
@@ -111,6 +163,25 @@ returns proposals. Per worker:
   pass. Changes go through the service, so each one lands in
   `agent_memories_audit` and merges can be undone (`POST /memories/:id/undo-merge`).
   Reviewing a memory sets `metadata.dreamed_at` without bumping `updated_at`.
+- **Batch and token limits:** a pass reviews `dreamer.batch_size` memories
+  (default 30) with at most `dreamer.token_budget` completion tokens (default
+  16000, reasoning included). Reasoning length varies widely with content, not
+  only size: `ds/deepseek-v4-pro` used 0.6k completion tokens for 3 corpus
+  memories and 4-14k for 10-30 (injected or protected records lengthen it).
+  A reply cut off by the budget fails the pass (manual runs report it) and
+  leaves the batch eligible instead of marking it reviewed; provider-reported
+  usage, reasoning included, is charged to the daily budget and unused
+  reservation is returned. Do not shrink `batch_size` without revisiting
+  `max_change_ratio`: the circuit breaker allows max(3, ratio × batch) changes.
+- **Model choice per knowledge base** (900084, `GET/PUT /api/v1/memories/settings`,
+  Viewer reads, KB Admin writes; UI: Memory → Dreamer → Models). The Dreamer and
+  the text tasks (entity extraction) each use the selected chat model, else the
+  knowledge base summary model, else the workspace's first chat model. Only
+  active chat models of the KB owner's workspace (or built-ins) are accepted. A
+  selected Dreamer model that later becomes unavailable fails closed (the pass
+  is skipped, manual runs return 503); the text task falls back to the summary
+  model. Settings are read on every pass, so changes apply without a restart.
+  Health reports `dreamer_model_unavailable` while the Dreamer has no usable model.
 - **Consolidator** (default on): hub scores, and importance −1 for memories
   unread and unchanged for a year (floor 0, protected excluded).
 - **Pruner** (default on): soft-deletes memories past `expires_at`, and tier-3

@@ -162,16 +162,16 @@ tenant:
 #                                           # Every change is validated, audited and undoable.
 #     enabled: true                         # On by default (env MEMORY_V2_DREAMER_ENABLED)
 #     interval: "6h"                        # Scheduled pass interval (unchanged KBs are skipped)
-#     model_id: ""                          # Unused: the KB's summary model is used
+#     model_id: ""                          # Deprecated, ignored: choose per KB in Memory → Dreamer → Models
 #     max_actions: 5                        # Max actions applied per pass
-#     token_budget: 2000                    # Max completion tokens per pass
+#     token_budget: 16000                   # Max completion tokens per pass (reasoning included)
 #     dry_run: false                        # Propose only, apply nothing
 #     batch_size: 30                        # Memories reviewed per pass (least recently reviewed first)
 #     min_confidence: 0.8                   # Drop proposals below this model confidence
 #     merge_live_after_runs: 3              # Merges stay proposals for the first N passes per KB
 #     merge_min_cosine: 0.93                # Server-side similarity required to merge
 #     allow_remove: false                   # Let the dreamer soft-delete (off)
-#     daily_token_budget: 200000            # Per-tenant daily token cap
+#     daily_token_budget: 200000            # Per-tenant daily cap (provider usage, reasoning included; ~10 worst-case passes)
 #     max_change_ratio: 0.34                # Circuit breaker: abort a pass proposing more changes
 #                                           # than this share of the batch (min 3)
 #   # The dreamer never changes protected verdicts (decision, fixed), never sets them,
