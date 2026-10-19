@@ -138,10 +138,14 @@ function openModelSettings() {
   gap: 16px;
 }
 
+// Subgrid keeps label, selector and effective model on shared row tracks, so a
+// hint that wraps in one column does not push only that column's selector down.
 .model-row {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
+  display: grid;
+  grid-template-rows: subgrid;
+  grid-row: span 4;
+  row-gap: 8px;
+  align-content: start;
   min-width: 0;
 }
 
